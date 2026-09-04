@@ -1,0 +1,24 @@
+[Unit]
+Description=drp-billing Background Worker
+After=network.target postgresql.service drp-api.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=drp
+Group=drp
+WorkingDirectory=/opt/drp-billing/current
+EnvironmentFile=/etc/drp-billing/drp-billing.env
+ExecStart=/opt/drp-billing/current/drp-worker
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/drp-billing /var/log/drp-billing
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

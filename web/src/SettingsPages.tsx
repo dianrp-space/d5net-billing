@@ -1,0 +1,827 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, apiUpload } from "./api";
+import { IconPencil, IconTrash } from "./icons";
+import { useAppDialog } from "./confirm";
+import { toastError, toastSuccess } from "./swal";
+import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
+
+type Branding = {
+  app_name: string;
+  logo_url?: string | null;
+  favicon_url?: string | null;
+};
+
+type TenantBrandingView = {
+  overrides: Branding;
+  effective: Branding;
+  from_owner: { app_name: boolean; logo_url: boolean; favicon_url: boolean };
+};
+
+type Role = {
+  id: string;
+  name: string;
+  slug: string;
+  permissions: string[];
+  is_system: boolean;
+};
+
+type TenantUser = {
+  user_id: string;
+  email: string;
+  full_name: string;
+  phone?: string | null;
+  is_active: boolean;
+  role_id: string;
+  role_slug: string;
+  role_name: string;
+};
+
+type PortalUser = {
+  id: string;
+  customer_code: string;
+  full_name: string;
+  phone: string;
+  portal_enabled: boolean;
+  has_password: boolean;
+  is_active: boolean;
+};
+
+const PERM_PRESETS = [
+  "*",
+  "dashboard",
+  "customers",
+  "billing",
+  "network",
+  "ops",
+  "tickets",
+  "leads",
+  "settings",
+];
+
+export function BrandingSettingsPage() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["settings-branding"],
+    queryFn: () => api<TenantBrandingView>("/api/settings/branding"),
+  });
+  const [appName, setAppName] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (q.data) setAppName(q.data.overrides.app_name || "");
+  }, [q.data]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api<TenantBrandingView>("/api/settings/branding", {
+        method: "PUT",
+        body: JSON.stringify({ app_name: appName.trim() }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["settings-branding"] });
+      void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
+      void toastSuccess("Branding disimpan");
+      setErr("");
+    },
+    onError: (e: Error) => {
+      setErr(e.message);
+      void toastError(e.message);
+    },
+  });
+
+  const clearField = useMutation({
+    mutationFn: (field: "logo" | "favicon") =>
+      api<TenantBrandingView>("/api/settings/branding", {
+        method: "PUT",
+        body: JSON.stringify({
+          app_name: appName.trim(),
+          clear_logo: field === "logo",
+          clear_favicon: field === "favicon",
+        }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["settings-branding"] });
+      void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
+      void toastSuccess("Mengikuti branding owner");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  async function onUpload(kind: "logo" | "favicon", file: File | undefined) {
+    if (!file) return;
+    try {
+      await apiUpload<{ url: string }>(`/api/settings/branding/${kind}`, file);
+      void qc.invalidateQueries({ queryKey: ["settings-branding"] });
+      void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
+      void toastSuccess(kind === "logo" ? "Logo diunggah" : "Favicon diunggah");
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Upload gagal");
+    }
+  }
+
+  const view = q.data;
+  const eff = view?.effective;
+  const from = view?.from_owner;
+
+  return (
+    <Section title="Branding">
+      {q.isLoading ? (
+        <p className="text-[var(--muted)]">Memuat...</p>
+      ) : (
+        <div className="grid max-w-xl gap-4">
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium">Nama aplikasi</span>
+            <input
+              className="input"
+              value={appName}
+              onChange={(e) => setAppName(e.target.value)}
+              placeholder={eff?.app_name || "drp-billing"}
+            />
+            {from?.app_name ? (
+              <span className="text-xs text-[var(--muted)]">Kosong = mengikuti owner ({eff?.app_name})</span>
+            ) : (
+              <span className="text-xs text-[var(--muted)]">Override tenant aktif</span>
+            )}
+          </label>
+
+          <AssetRow
+            label="Logo"
+            url={eff?.logo_url}
+            fromOwner={Boolean(from?.logo_url)}
+            onFile={(f) => void onUpload("logo", f)}
+            onClear={() => clearField.mutate("logo")}
+          />
+          <AssetRow
+            label="Favicon"
+            url={eff?.favicon_url}
+            fromOwner={Boolean(from?.favicon_url)}
+            onFile={(f) => void onUpload("favicon", f)}
+            onClear={() => clearField.mutate("favicon")}
+          />
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Menyimpan..." : "Simpan"}
+            </button>
+          </div>
+          {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function AssetRow({
+  label,
+  url,
+  fromOwner,
+  onFile,
+  onClear,
+}: {
+  label: string;
+  url?: string | null;
+  fromOwner: boolean;
+  onFile: (f: File | undefined) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-[var(--border)] p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">{label}</span>
+        {fromOwner ? (
+          <span className="text-[10px] text-[var(--muted)]">mengikuti owner</span>
+        ) : url ? (
+          <button type="button" className="btn-ghost text-xs" onClick={onClear}>
+            Hapus override
+          </button>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        {url ? (
+          <img src={url} alt="" className="h-12 w-12 rounded-lg border border-[var(--border)] object-contain" />
+        ) : (
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--muted)]">
+            —
+          </div>
+        )}
+        <input
+          type="file"
+          accept="image/*,.ico,.svg"
+          className="text-sm"
+          onChange={(e) => {
+            onFile(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function RolesSettingsPage() {
+  const qc = useQueryClient();
+  const { confirm } = useAppDialog();
+  const roles = useQuery({
+    queryKey: ["settings-roles"],
+    queryFn: () => api<Role[]>("/api/settings/roles"),
+  });
+  const [open, setOpen] = useState(false);
+  const [edit, setEdit] = useState<Role | null>(null);
+  const [form, setForm] = useState({ name: "", slug: "", permissions: ["dashboard"] as string[] });
+  const [err, setErr] = useState("");
+
+  const refresh = () => void qc.invalidateQueries({ queryKey: ["settings-roles"] });
+
+  const create = useMutation({
+    mutationFn: () =>
+      api("/api/settings/roles", {
+        method: "POST",
+        body: JSON.stringify({
+          name: form.name.trim(),
+          slug: form.slug.trim().toLowerCase(),
+          permissions: form.permissions,
+        }),
+      }),
+    onSuccess: () => {
+      setOpen(false);
+      setErr("");
+      refresh();
+      void toastSuccess("Role dibuat");
+    },
+    onError: (e: Error) => {
+      setErr(e.message);
+      void toastError(e.message);
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: (r: Role) =>
+      api(`/api/settings/roles/${r.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: r.name.trim(),
+          slug: r.slug.trim().toLowerCase(),
+          permissions: r.permissions,
+        }),
+      }),
+    onSuccess: () => {
+      setEdit(null);
+      refresh();
+      void toastSuccess("Role diperbarui");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/api/settings/roles/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      refresh();
+      void toastSuccess("Role dihapus");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const list = Array.isArray(roles.data) ? roles.data : [];
+  const rows = list.map((r) => [
+    r.name,
+    r.slug,
+    r.permissions.join(", ") || "—",
+    r.is_system ? "sistem" : "custom",
+    <span key={r.id} className="flex gap-1">
+      <IconButton
+        label="Edit role"
+        onClick={() => {
+          setEdit({ ...r, permissions: [...(r.permissions || [])] });
+        }}
+      >
+        <IconPencil />
+      </IconButton>
+      {!r.is_system && (
+        <IconButton
+          label="Hapus role"
+          danger
+          onClick={async () => {
+            const ok = await confirm({
+              title: "Hapus role",
+              description: `Hapus role "${r.name}"?`,
+              confirmLabel: "Hapus",
+            });
+            if (ok) remove.mutate(r.id);
+          }}
+        >
+          <IconTrash />
+        </IconButton>
+      )}
+    </span>,
+  ]);
+
+  return (
+    <>
+      <Section
+        title="Roles"
+        actions={
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setForm({ name: "", slug: "", permissions: ["dashboard"] });
+              setErr("");
+              setOpen(true);
+            }}
+          >
+            + Role
+          </button>
+        }
+      >
+        {roles.isLoading ? (
+          <p className="text-[var(--muted)]">Memuat...</p>
+        ) : (
+          <Table columns={["Nama", "Slug", "Permissions", "Tipe", "Aksi"]} rows={rows} />
+        )}
+      </Section>
+
+      <FormDialog open={open} title="Buat role" onClose={() => setOpen(false)} wide>
+        <RoleForm
+          form={form}
+          setForm={setForm}
+          err={err}
+          busy={create.isPending}
+          onSubmit={() => create.mutate()}
+          onCancel={() => setOpen(false)}
+        />
+      </FormDialog>
+
+      <FormDialog open={Boolean(edit)} title="Edit role" onClose={() => setEdit(null)} wide>
+        {edit && (
+          <RoleForm
+            form={{ name: edit.name, slug: edit.slug, permissions: edit.permissions || [] }}
+            setForm={(next) =>
+              setEdit({
+                ...edit,
+                name: next.name,
+                slug: next.slug,
+                permissions: next.permissions,
+              })
+            }
+            err=""
+            busy={update.isPending}
+            slugLocked={edit.is_system}
+            onSubmit={() => update.mutate(edit)}
+            onCancel={() => setEdit(null)}
+          />
+        )}
+      </FormDialog>
+    </>
+  );
+}
+
+function RoleForm({
+  form,
+  setForm,
+  err,
+  busy,
+  slugLocked,
+  onSubmit,
+  onCancel,
+}: {
+  form: { name: string; slug: string; permissions: string[] };
+  setForm: (f: { name: string; slug: string; permissions: string[] }) => void;
+  err: string;
+  busy: boolean;
+  slugLocked?: boolean;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  function toggle(p: string) {
+    const set = new Set(form.permissions);
+    if (set.has(p)) set.delete(p);
+    else set.add(p);
+    setForm({ ...form, permissions: [...set] });
+  }
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit();
+      }}
+    >
+      <input
+        className="input"
+        placeholder="Nama role"
+        value={form.name}
+        onChange={(e) => setForm({ ...form, name: e.target.value })}
+        required
+      />
+      <input
+        className="input"
+        placeholder="slug (huruf kecil)"
+        value={form.slug}
+        onChange={(e) => setForm({ ...form, slug: e.target.value })}
+        required
+        disabled={slugLocked}
+        pattern="[a-z][a-z0-9_-]{1,62}"
+      />
+      <div className="grid gap-2 sm:grid-cols-2">
+        {PERM_PRESETS.map((p) => (
+          <label key={p} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.permissions.includes(p)} onChange={() => toggle(p)} />
+            <code className="text-xs">{p}</code>
+          </label>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <button className="btn" disabled={busy}>
+          {busy ? "Menyimpan..." : "Simpan"}
+        </button>
+        <button type="button" className="btn-ghost" onClick={onCancel}>
+          Batal
+        </button>
+      </div>
+      {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
+    </form>
+  );
+}
+
+export function UsersSettingsPage() {
+  const qc = useQueryClient();
+  const { confirm } = useAppDialog();
+  const roles = useQuery({
+    queryKey: ["settings-roles"],
+    queryFn: () => api<Role[]>("/api/settings/roles"),
+  });
+  const users = useQuery({
+    queryKey: ["settings-users"],
+    queryFn: () => api<TenantUser[]>("/api/settings/users"),
+  });
+  const portal = useQuery({
+    queryKey: ["settings-portal-users"],
+    queryFn: () => api<PortalUser[]>("/api/settings/portal-users"),
+  });
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editUser, setEditUser] = useState<TenantUser | null>(null);
+  const [editPortal, setEditPortal] = useState<PortalUser | null>(null);
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+    full_name: "",
+    phone: "",
+    role_id: "",
+  });
+  const [editForm, setEditForm] = useState({
+    full_name: "",
+    phone: "",
+    role_id: "",
+    is_active: true,
+    password: "",
+  });
+  const [portalForm, setPortalForm] = useState({ portal_enabled: false, password: "" });
+  const [err, setErr] = useState("");
+
+  const roleList = Array.isArray(roles.data) ? roles.data : [];
+  const userList = Array.isArray(users.data) ? users.data : [];
+  const portalList = Array.isArray(portal.data) ? portal.data : [];
+
+  const refreshUsers = () => {
+    void qc.invalidateQueries({ queryKey: ["settings-users"] });
+    void qc.invalidateQueries({ queryKey: ["settings-portal-users"] });
+  };
+
+  const createUser = useMutation({
+    mutationFn: () =>
+      api("/api/settings/users", {
+        method: "POST",
+        body: JSON.stringify({
+          email: form.email.trim(),
+          password: form.password,
+          full_name: form.full_name.trim(),
+          phone: form.phone.trim() || null,
+          role_id: form.role_id,
+        }),
+      }),
+    onSuccess: () => {
+      setCreateOpen(false);
+      setErr("");
+      refreshUsers();
+      void toastSuccess("User staf ditambahkan");
+    },
+    onError: (e: Error) => {
+      setErr(e.message);
+      void toastError(e.message);
+    },
+  });
+
+  const updateUser = useMutation({
+    mutationFn: () =>
+      api(`/api/settings/users/${editUser!.user_id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          full_name: editForm.full_name.trim(),
+          phone: editForm.phone.trim() || null,
+          role_id: editForm.role_id,
+          is_active: editForm.is_active,
+          password: editForm.password || undefined,
+        }),
+      }),
+    onSuccess: () => {
+      setEditUser(null);
+      refreshUsers();
+      void toastSuccess("User diperbarui");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const removeUser = useMutation({
+    mutationFn: (id: string) => api(`/api/settings/users/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      refreshUsers();
+      void toastSuccess("User dihapus dari tenant");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const updatePortal = useMutation({
+    mutationFn: () =>
+      api(`/api/settings/portal-users/${editPortal!.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          portal_enabled: portalForm.portal_enabled,
+          password: portalForm.password || undefined,
+        }),
+      }),
+    onSuccess: () => {
+      setEditPortal(null);
+      refreshUsers();
+      void toastSuccess("Portal pelanggan diperbarui");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const staffRows = userList.map((u) => [
+    u.full_name,
+    u.email,
+    u.role_name,
+    u.is_active ? "aktif" : "nonaktif",
+    <span key={u.user_id} className="flex gap-1">
+      <IconButton
+        label="Edit user"
+        onClick={() => {
+          setEditUser(u);
+          setEditForm({
+            full_name: u.full_name,
+            phone: u.phone || "",
+            role_id: u.role_id,
+            is_active: u.is_active,
+            password: "",
+          });
+        }}
+      >
+        <IconPencil />
+      </IconButton>
+      <IconButton
+        label="Hapus dari tenant"
+        danger
+        onClick={async () => {
+          const ok = await confirm({
+            title: "Hapus user",
+            description: `Hapus ${u.email} dari tenant ini?`,
+            confirmLabel: "Hapus",
+          });
+          if (ok) removeUser.mutate(u.user_id);
+        }}
+      >
+        <IconTrash />
+      </IconButton>
+    </span>,
+  ]);
+
+  const portalRows = portalList.map((p) => [
+    p.customer_code,
+    p.full_name,
+    p.phone,
+    p.portal_enabled ? "ya" : "tidak",
+    p.has_password ? "ya" : "belum",
+    <IconButton
+      key={p.id}
+      label="Edit portal"
+      onClick={() => {
+        setEditPortal(p);
+        setPortalForm({ portal_enabled: p.portal_enabled, password: "" });
+      }}
+    >
+      <IconPencil />
+    </IconButton>,
+  ]);
+
+  return (
+    <div className="space-y-6">
+      <Section
+        title="User staf"
+        actions={
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setForm({
+                email: "",
+                password: "",
+                full_name: "",
+                phone: "",
+                role_id: roleList[0]?.id || "",
+              });
+              setErr("");
+              setCreateOpen(true);
+            }}
+          >
+            + User
+          </button>
+        }
+      >
+        {users.isLoading ? (
+          <p className="text-[var(--muted)]">Memuat...</p>
+        ) : (
+          <Table columns={["Nama", "Email", "Role", "Status", "Aksi"]} rows={staffRows} />
+        )}
+      </Section>
+
+      <Section title="Portal pelanggan">
+        {portal.isLoading ? (
+          <p className="text-[var(--muted)]">Memuat...</p>
+        ) : (
+          <Table
+            columns={["Kode", "Nama", "Telepon", "Portal", "Password", "Aksi"]}
+            rows={portalRows}
+          />
+        )}
+      </Section>
+
+      <FormDialog open={createOpen} title="Tambah user staf" onClose={() => setCreateOpen(false)} wide>
+        <form
+          className="grid gap-3 sm:grid-cols-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            createUser.mutate();
+          }}
+        >
+          <input
+            className="input"
+            placeholder="Nama lengkap"
+            value={form.full_name}
+            onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+            required
+          />
+          <input
+            className="input"
+            type="email"
+            placeholder="Email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            required
+          />
+          <SecretInput
+            placeholder="Password (min 8)"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            required
+            minLength={8}
+            autoComplete="new-password"
+          />
+          <input
+            className="input"
+            placeholder="Telepon"
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          />
+          <select
+            className="input sm:col-span-2"
+            value={form.role_id}
+            onChange={(e) => setForm({ ...form, role_id: e.target.value })}
+            required
+          >
+            <option value="">Pilih role</option>
+            {roleList.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2 sm:col-span-2">
+            <button className="btn" disabled={createUser.isPending}>
+              {createUser.isPending ? "Menyimpan..." : "Buat"}
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => setCreateOpen(false)}>
+              Batal
+            </button>
+          </div>
+          {err && <p className="text-sm text-[var(--danger)] sm:col-span-2">{err}</p>}
+        </form>
+      </FormDialog>
+
+      <FormDialog open={Boolean(editUser)} title="Edit user staf" onClose={() => setEditUser(null)} wide>
+        {editUser && (
+          <form
+            className="grid gap-3 sm:grid-cols-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              updateUser.mutate();
+            }}
+          >
+            <input className="input bg-[var(--panel-muted)] text-[var(--muted)]" value={editUser.email} disabled />
+            <input
+              className="input"
+              placeholder="Nama"
+              value={editForm.full_name}
+              onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })}
+              required
+            />
+            <input
+              className="input"
+              placeholder="Telepon"
+              value={editForm.phone}
+              onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+            />
+            <select
+              className="input"
+              value={editForm.role_id}
+              onChange={(e) => setEditForm({ ...editForm, role_id: e.target.value })}
+              required
+            >
+              {roleList.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+            <SecretInput
+              className="sm:col-span-2"
+              placeholder="Password baru (opsional)"
+              value={editForm.password}
+              onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+              autoComplete="new-password"
+            />
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={editForm.is_active}
+                onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })}
+              />
+              Aktif
+            </label>
+            <div className="flex gap-2 sm:col-span-2">
+              <button className="btn" disabled={updateUser.isPending}>
+                Simpan
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => setEditUser(null)}>
+                Batal
+              </button>
+            </div>
+          </form>
+        )}
+      </FormDialog>
+
+      <FormDialog
+        open={Boolean(editPortal)}
+        title={editPortal ? `Portal · ${editPortal.full_name}` : "Portal"}
+        onClose={() => setEditPortal(null)}
+      >
+        {editPortal && (
+          <form
+            className="grid gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              updatePortal.mutate();
+            }}
+          >
+            <p className="text-sm text-[var(--muted)]">
+              {editPortal.customer_code} · {editPortal.phone}
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={portalForm.portal_enabled}
+                onChange={(e) => setPortalForm({ ...portalForm, portal_enabled: e.target.checked })}
+              />
+              Aktifkan login portal
+            </label>
+            <SecretInput
+              placeholder="Password baru (opsional)"
+              value={portalForm.password}
+              onChange={(e) => setPortalForm({ ...portalForm, password: e.target.value })}
+              autoComplete="new-password"
+            />
+            <div className="flex gap-2">
+              <button className="btn" disabled={updatePortal.isPending}>
+                Simpan
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => setEditPortal(null)}>
+                Batal
+              </button>
+            </div>
+          </form>
+        )}
+      </FormDialog>
+    </div>
+  );
+}

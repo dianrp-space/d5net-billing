@@ -1,0 +1,22 @@
+---
+description: UI action buttons use icons; sensitive inputs use SecretInput vision toggle
+alwaysApply: true
+---
+
+# Icon actions in UI
+
+For table row actions and compact toolbar actions in the web UI:
+
+- Prefer **icon-only** buttons (edit, delete, view, open external, toggle, etc.).
+- Do **not** use full text labels like "Edit", "Hapus", "Nonaktifkan" on action cells.
+- Always set `title` and `aria-label` (Indonesian) so the action stays accessible.
+- Use shared helpers in `web/src/icons.tsx` / `IconButton` from `web/src/ui.tsx`.
+- Destructive actions: icon in danger color + confirm dialog still OK.
+- Primary form submit buttons (Buat, Simpan) may keep text labels.
+- External links in action rows (admin/client portal) also use icons, not words.
+
+# Sensitive inputs
+
+- Every password / secret field must use `SecretInput` from `web/src/ui.tsx` (built-in show/hide eye toggle).
+- Do **not** use raw `<input type="password">` in new UI.
+- Keep `autoComplete` appropriate (`current-password` / `new-password`).

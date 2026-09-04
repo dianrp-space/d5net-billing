@@ -1,0 +1,12 @@
+bin/
+web/node_modules/
+web/dist/
+dist/
+.env
+*.log
+.idea/
+.vscode/
+coverage/
+data/uploads/
+data/router-backups/
+

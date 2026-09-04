@@ -1,0 +1,23 @@
+.input {
+  background: #0f1419;
+  border: 1px solid #2a3544;
+  color: #e8eef5;
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.7rem;
+}
+.btn {
+  background: #3d9cf0;
+  color: white;
+  border: 0;
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+.btn-ghost {
+  background: transparent;
+  color: #8b9bb0;
+  border: 1px solid #2a3544;
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}

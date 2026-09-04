@@ -1,0 +1,12 @@
+---
+description: Admin UI follows NeedMCP wireframe dashboard-sidebar-overview + natural-tone
+alwaysApply: true
+---
+
+# Dashboard layout & theme
+
+- Admin shell uses wireframe **`dashboard-sidebar-overview`**: left sidebar (brand + grouped nav + user foot), sticky top header (breadcrumb + search + icon actions), content area (welcome, 4 stat cards, chart grid, recent table).
+- Visual theme follows locked NeedMCP style **`natural-tone`**: olive-sage primary `#5A5A40`, terracotta secondary `#8C7355`, canvas `#F7F6F2`, white surfaces, Plus Jakarta Sans. Tokens live in `web/src/index.css` (`--bg`, `--panel`, `--accent`, …).
+- Support **light/dark** via `html[data-theme]` + `ThemeToggle` (`web/src/ThemeToggle.tsx`); persist in `localStorage` key `drp_theme`. Prefer CSS variables so both modes stay consistent.
+- Prefer CSS variables / shared classes (`.app-shell`, `.stat-card`, `.panel-card`) over hardcoded dark blues.
+- Keep icon-only row actions and `SecretInput` for passwords (see `ui-icon-actions.mdc`).
