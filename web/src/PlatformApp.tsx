@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiUpload, clearPlatformToken } from "./api";
 import { applyBrandingMeta } from "./branding";
-import { IconImage, IconPencil, IconShield, IconTrash, IconUser, IconUsers } from "./icons";
+import { BackupRestorePage } from "./BackupRestorePage";
+import { IconDownload, IconImage, IconPencil, IconShield, IconTrash, IconUser, IconUsers } from "./icons";
 import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
 import { FormDialog, IconButton, IconLink, Section, SecretInput, Table } from "./ui";
@@ -32,7 +33,7 @@ const emptyCreate = {
   fullName: "Admin",
 };
 
-type PlatformPage = "tenants" | "branding";
+type PlatformPage = "tenants" | "branding" | "backup";
 
 export function PlatformApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<PlatformPage>("tenants");
@@ -46,11 +47,12 @@ export function PlatformApp({ onLogout }: { onLogout: () => void }) {
     applyBrandingMeta({
       appName: b?.app_name || "drp-billing",
       faviconUrl: b?.favicon_url,
-      titleSuffix: page === "branding" ? "Branding" : "Platform",
+      titleSuffix: page === "branding" ? "Branding" : page === "backup" ? "Backup" : "Platform",
     });
   }, [branding.data, page]);
 
   const appName = branding.data?.app_name || "drp-billing";
+  const pageTitle = page === "branding" ? "Branding" : page === "backup" ? "Backup / Restore" : "Tenant";
 
   return (
     <div className="mx-auto max-w-5xl p-6">
@@ -61,7 +63,7 @@ export function PlatformApp({ onLogout }: { onLogout: () => void }) {
           ) : null}
           <div>
             <div className="text-sm text-[var(--muted)]">{appName}</div>
-            <h1 className="text-2xl font-semibold">Platform · {page === "branding" ? "Branding" : "Tenant"}</h1>
+            <h1 className="text-2xl font-semibold">Platform · {pageTitle}</h1>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -98,9 +100,20 @@ export function PlatformApp({ onLogout }: { onLogout: () => void }) {
             <IconImage size={14} /> Branding
           </span>
         </button>
+        <button
+          type="button"
+          className={page === "backup" ? "btn" : "btn-ghost"}
+          onClick={() => setPage("backup")}
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <IconDownload size={14} /> Backup / Restore
+          </span>
+        </button>
       </div>
 
-      {page === "tenants" ? <PlatformTenants /> : <PlatformBranding />}
+      {page === "tenants" ? <PlatformTenants /> : null}
+      {page === "branding" ? <PlatformBranding /> : null}
+      {page === "backup" ? <BackupRestorePage platform /> : null}
     </div>
   );
 }

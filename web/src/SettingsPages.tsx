@@ -647,6 +647,9 @@ export function UsersSettingsPage() {
       </Section>
 
       <Section title="Portal pelanggan">
+        <p className="mb-3 text-sm text-[var(--muted)]">
+          Password default portal = nomor HP pelanggan. Kosongkan field password saat edit untuk mempertahankan password yang ada (atau mengisi otomatis dari HP bila belum punya password).
+        </p>
         {portal.isLoading ? (
           <p className="text-[var(--muted)]">Memuat...</p>
         ) : (
@@ -806,7 +809,7 @@ export function UsersSettingsPage() {
               Aktifkan login portal
             </label>
             <SecretInput
-              placeholder="Password baru (opsional)"
+              placeholder="Password baru (opsional; default = nomor HP)"
               value={portalForm.password}
               onChange={(e) => setPortalForm({ ...portalForm, password: e.target.value })}
               autoComplete="new-password"

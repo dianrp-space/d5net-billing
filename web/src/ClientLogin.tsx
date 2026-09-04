@@ -82,7 +82,7 @@ export function ClientLogin({
         brand={tenant?.app_name || tenant?.name || slug}
         logoUrl={tenant?.logo_url}
         title="Portal pelanggan"
-        subtitle={`Cek paket & tagihan · /client/${slug}`}
+        subtitle={`Cek paket & tagihan · password default = nomor HP`}
       >
         <form className="flex flex-col gap-3" onSubmit={onSubmit}>
           <input className="input" placeholder="Nomor telepon" value={phone} onChange={(e) => setPhone(e.target.value)} required />

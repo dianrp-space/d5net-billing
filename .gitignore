@@ -9,4 +9,6 @@ dist/
 coverage/
 data/uploads/
 data/router-backups/
+data/whatsapp/
+data/db-backups/
 

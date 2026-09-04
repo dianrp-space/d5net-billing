@@ -34,6 +34,8 @@ import { MapODP } from "./FtthMap";
 import { HeaderSearch } from "./HeaderSearch";
 import { getLastOdpCluster, setLastOdpCluster } from "./navPersist";
 import { BrandingSettingsPage, RolesSettingsPage, UsersSettingsPage } from "./SettingsPages";
+import { MessagingGWPage, PaymentGWPage, WebhooksIntegrationPage } from "./IntegrationPages";
+import { BackupRestorePage } from "./BackupRestorePage";
 import { applyBrandingMeta } from "./branding";
 
 type Page =
@@ -54,7 +56,11 @@ type Page =
   | "tech"
   | "branding"
   | "roles"
-  | "users";
+  | "users"
+  | "webhooks"
+  | "payment-gw"
+  | "messaging-gw"
+  | "backup";
 
 export type AdminPage = Page;
 
@@ -77,6 +83,10 @@ const ADMIN_PAGES: Page[] = [
   "branding",
   "roles",
   "users",
+  "webhooks",
+  "payment-gw",
+  "messaging-gw",
+  "backup",
 ];
 
 export function isAdminPage(value: string): value is Page {
@@ -122,11 +132,20 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
+    label: "Integrasi",
+    items: [
+      { id: "webhooks", label: "Webhook", icon: <IconPlug /> },
+      { id: "payment-gw", label: "Payment Gateway", icon: <IconReceipt /> },
+      { id: "messaging-gw", label: "Messaging Gateway", icon: <IconBell /> },
+    ],
+  },
+  {
     label: "Settings",
     items: [
       { id: "branding", label: "Branding", icon: <IconImage /> },
       { id: "roles", label: "Roles", icon: <IconShield /> },
       { id: "users", label: "Users", icon: <IconSettings /> },
+      { id: "backup", label: "Backup / Restore", icon: <IconDownload /> },
     ],
   },
 ];
@@ -150,6 +169,10 @@ const pageTitles: Record<Page, string> = {
   branding: "Branding",
   roles: "Roles",
   users: "Users",
+  webhooks: "Webhook",
+  "payment-gw": "Payment Gateway",
+  "messaging-gw": "Messaging Gateway",
+  backup: "Backup / Restore",
 };
 
 export function AdminApp({
@@ -283,6 +306,10 @@ export function AdminApp({
           {page === "branding" && <BrandingSettingsPage />}
           {page === "roles" && <RolesSettingsPage />}
           {page === "users" && <UsersSettingsPage />}
+          {page === "webhooks" && <WebhooksIntegrationPage />}
+          {page === "payment-gw" && <PaymentGWPage />}
+          {page === "messaging-gw" && <MessagingGWPage />}
+          {page === "backup" && <BackupRestorePage />}
         </main>
       </div>
     </div>
@@ -674,6 +701,7 @@ function Customers() {
                 <input type="checkbox" checked={form.portal_enabled} onChange={(e) => setForm({ ...form, portal_enabled: e.target.checked })} />
                 Portal aktif
               </label>
+              <p className="text-xs text-[var(--muted)] sm:col-span-2">Password portal default = nomor HP (ikut berubah jika HP diubah).</p>
             </>
           )}
           <div className="flex flex-wrap gap-2 sm:col-span-2">

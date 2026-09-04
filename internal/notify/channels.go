@@ -24,6 +24,10 @@ func (n *WhatsAppNotifier) Send(ctx context.Context, msg Message) error {
 	if apiURL == "" {
 		apiURL = os.Getenv("WHATSAPP_API_URL")
 	}
+	apiKey := n.APIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("WHATSAPP_API_KEY")
+	}
 	if apiURL == "" {
 		slog.Warn("whatsapp not configured, logging message", "to", msg.Recipient, "body", msg.Body)
 		return nil
@@ -34,7 +38,9 @@ func (n *WhatsAppNotifier) Send(ctx context.Context, msg Message) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("WHATSAPP_API_KEY"))
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return err

@@ -17,9 +17,11 @@ type Config struct {
 	JWTRefreshTTL   time.Duration `env:"JWT_REFRESH_TTL" envDefault:"720h"`
 	EncryptionKey   string        `env:"ENCRYPTION_KEY,required"`
 	CORSOrigins     []string      `env:"CORS_ORIGINS" envSeparator:"," envDefault:"http://localhost:5173"`
-	UploadDir         string        `env:"UPLOAD_DIR" envDefault:"/var/lib/drp-billing/uploads"`
-	RouterBackupDir   string        `env:"ROUTER_BACKUP_DIR" envDefault:"/var/lib/drp-billing/router-backups"`
-	WorkerEnabled     bool          `env:"WORKER_ENABLED" envDefault:"true"`
+	UploadDir          string        `env:"UPLOAD_DIR" envDefault:"/var/lib/drp-billing/uploads"`
+	RouterBackupDir    string        `env:"ROUTER_BACKUP_DIR" envDefault:"/var/lib/drp-billing/router-backups"`
+	DBBackupDir        string        `env:"DB_BACKUP_DIR" envDefault:"./data/db-backups"`
+	WhatsAppSessionDir string        `env:"WHATSAPP_SESSION_DIR" envDefault:"./data/whatsapp"`
+	WorkerEnabled      bool          `env:"WORKER_ENABLED" envDefault:"true"`
 	MidtransServerKey string        `env:"MIDTRANS_SERVER_KEY"`
 	XenditSecretKey   string        `env:"XENDIT_SECRET_KEY"`
 	TripayPrivateKey  string        `env:"TRIPAY_PRIVATE_KEY"`

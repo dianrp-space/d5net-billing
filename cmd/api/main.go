@@ -15,6 +15,7 @@ import (
 	"github.com/dianrp/drp-billing/internal/billing"
 	"github.com/dianrp/drp-billing/internal/config"
 	"github.com/dianrp/drp-billing/internal/db"
+	"github.com/dianrp/drp-billing/internal/dbbackup"
 	"github.com/dianrp/drp-billing/internal/handlers"
 	"github.com/dianrp/drp-billing/internal/httpx"
 	"github.com/dianrp/drp-billing/internal/monitor"
@@ -23,6 +24,7 @@ import (
 	"github.com/dianrp/drp-billing/internal/provisioner"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/tenant"
+	"github.com/dianrp/drp-billing/internal/wa"
 )
 
 func main() {
@@ -52,8 +54,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	waMgr, err := wa.NewManager(cfg.WhatsAppSessionDir)
+	if err != nil {
+		slog.Error("whatsapp manager", "err", err)
+		os.Exit(1)
+	}
+	go waMgr.RestoreConnectedTenants(ctx)
+
+	dbBackup, err := dbbackup.New(database.Pool, cfg.DatabaseURL, cfg.DBBackupDir)
+	if err != nil {
+		slog.Error("db backup", "err", err)
+		os.Exit(1)
+	}
+
 	billingEngine := billing.New(st)
-	notifySvc := notify.NewService(st)
+	notifySvc := notify.NewService(st).WithDecryptor(encryptor.DecryptString).WithWhatsApp(waMgr)
 	payments := payment.NewRegistryFromEnv(cfg.MidtransServerKey, cfg.XenditSecretKey, cfg.TripayPrivateKey)
 	provReg := provisioner.NewRegistry(st, encryptor)
 
@@ -62,7 +77,7 @@ func main() {
 	deps := &handlers.Deps{
 		Store: st, Tokens: tokens, Encryptor: encryptor,
 		Billing: billingEngine, Notify: notifySvc, Payments: payments,
-		Provisioner: provReg, Config: cfg,
+		Provisioner: provReg, Config: cfg, WA: waMgr, DBBackup: dbBackup,
 	}
 	handlers.RegisterAll(srv.API, deps)
 	handlers.MountStaticAndUploads(srv.Router, deps)
@@ -83,7 +98,7 @@ func main() {
 		Addr:         cfg.HTTPAddr,
 		Handler:      srv.Router,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		WriteTimeout: 30 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}
 

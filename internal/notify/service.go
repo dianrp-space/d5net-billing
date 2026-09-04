@@ -26,6 +26,8 @@ type Notifier interface {
 type Service struct {
 	store     *store.Store
 	notifiers map[string]Notifier
+	decrypt   func(encoded string) (string, error)
+	wa        WhatsAppSender
 }
 
 func NewService(st *store.Store) *Service {
@@ -34,6 +36,21 @@ func NewService(st *store.Store) *Service {
 	s.Register(&TelegramNotifier{})
 	s.Register(&EmailNotifier{})
 	return s
+}
+
+func (s *Service) WithDecryptor(fn func(encoded string) (string, error)) *Service {
+	s.decrypt = fn
+	return s
+}
+
+func (s *Service) WithWhatsApp(sender WhatsAppSender) *Service {
+	s.wa = sender
+	return s
+}
+
+type WhatsAppSender interface {
+	IsReady(tenantID xid.ID) bool
+	SendText(ctx context.Context, tenantID xid.ID, phone, body string) error
 }
 
 func (s *Service) Register(n Notifier) {
@@ -79,15 +96,93 @@ func (s *Service) ProcessPending(ctx context.Context, limit int) (int, error) {
 		if subject != nil {
 			msg.Subject = *subject
 		}
-		if err := n.Send(ctx, msg); err != nil {
-			_, _ = s.store.Pool.Exec(ctx, `UPDATE notification_queue SET status='failed', error=$2, attempts=attempts+1 WHERE id=$1`, id, err.Error())
-			slog.Error("notification failed", "id", id, "err", err)
+		var sendErr error
+		if channel == "whatsapp" && s.wa != nil && s.wa.IsReady(tenantID) {
+			sendErr = s.wa.SendText(ctx, tenantID, recipient, body)
+		} else {
+			sender := n
+			if channel == "whatsapp" || channel == "telegram" {
+				if overlay := s.tenantMessagingNotifier(ctx, tenantID, channel); overlay != nil {
+					sender = overlay
+				}
+			}
+			if channel == "telegram" {
+				if chatID := s.tenantTelegramChatID(ctx, tenantID); chatID != "" {
+					msg.Recipient = chatID
+				}
+			}
+			sendErr = sender.Send(ctx, msg)
+		}
+		if sendErr != nil {
+			_, _ = s.store.Pool.Exec(ctx, `UPDATE notification_queue SET status='failed', error=$2, attempts=attempts+1 WHERE id=$1`, id, sendErr.Error())
+			slog.Error("notification failed", "id", id, "err", sendErr)
 			continue
 		}
 		_, _ = s.store.Pool.Exec(ctx, `UPDATE notification_queue SET status='sent', sent_at=NOW() WHERE id=$1`, id)
 		sent++
 	}
 	return sent, nil
+}
+
+type tenantMessagingCfg struct {
+	TelegramBotToken string `json:"telegram_bot_token"`
+	TelegramChatID   string `json:"telegram_chat_id"`
+	TelegramEnabled  bool   `json:"telegram_enabled"`
+}
+
+func (s *Service) loadTenantMessaging(ctx context.Context, tenantID xid.ID) (tenantMessagingCfg, bool) {
+	var cfg tenantMessagingCfg
+	if err := s.store.GetSettingJSON(ctx, tenantID, "integration.messaging", &cfg); err != nil {
+		return cfg, false
+	}
+	return cfg, true
+}
+
+func (s *Service) tenantTelegramChatID(ctx context.Context, tenantID xid.ID) string {
+	cfg, ok := s.loadTenantMessaging(ctx, tenantID)
+	if !ok || !cfg.TelegramEnabled {
+		return ""
+	}
+	return strings.TrimSpace(cfg.TelegramChatID)
+}
+
+func (s *Service) tenantMessagingNotifier(ctx context.Context, tenantID xid.ID, channel string) Notifier {
+	cfg, ok := s.loadTenantMessaging(ctx, tenantID)
+	if !ok {
+		return nil
+	}
+	dec := func(v string) string {
+		if v == "" || s.decrypt == nil {
+			return v
+		}
+		plain, err := s.decrypt(v)
+		if err != nil {
+			return ""
+		}
+		return plain
+	}
+	switch channel {
+	case "telegram":
+		if !cfg.TelegramEnabled {
+			return nil
+		}
+		token := dec(cfg.TelegramBotToken)
+		if token == "" || strings.TrimSpace(cfg.TelegramChatID) == "" {
+			return nil
+		}
+		return &TelegramNotifier{BotToken: token}
+	default:
+		return nil
+	}
+}
+
+// QueueTenantTelegram sends an ops alert to the tenant's configured Telegram chat.
+func (s *Service) QueueTenantTelegram(ctx context.Context, tenantID xid.ID, body string) error {
+	chatID := s.tenantTelegramChatID(ctx, tenantID)
+	if chatID == "" {
+		return fmt.Errorf("telegram tenant chat_id belum dikonfigurasi")
+	}
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "telegram", Recipient: chatID, Body: body})
 }
 
 // RenderTemplate loads a tenant template by channel+name (event column), or falls back to hardcoded defaults.

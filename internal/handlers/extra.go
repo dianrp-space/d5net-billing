@@ -449,7 +449,7 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if providerName == "" {
 			providerName = "manual"
 		}
-		prov, err := d.Payments.Get(providerName)
+		prov, err := resolvePaymentProvider(ctx, d, tid, providerName)
 		if err != nil {
 			return nil, httpx.BadRequest(err.Error())
 		}

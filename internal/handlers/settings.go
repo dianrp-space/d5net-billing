@@ -17,6 +17,7 @@ import (
 	"github.com/dianrp/drp-billing/internal/httpx"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/tenant"
+	"github.com/dianrp/drp-billing/internal/upload"
 	"github.com/dianrp/drp-billing/internal/xid"
 	"github.com/go-chi/chi/v5"
 )
@@ -180,6 +181,7 @@ func MountStaticAndUploads(r chi.Router, d *Deps) {
 	r.Post("/api/settings/branding/favicon", uploadHandler(d, false, "favicon"))
 	r.Post("/api/platform/branding/logo", uploadHandler(d, true, "logo"))
 	r.Post("/api/platform/branding/favicon", uploadHandler(d, true, "favicon"))
+	MountDBBackupRoutes(r, d)
 }
 
 func uploadHandler(d *Deps, platform bool, kind string) http.HandlerFunc {
@@ -244,31 +246,13 @@ func uploadHandler(d *Deps, platform bool, kind string) http.HandlerFunc {
 }
 
 func saveUpload(d *Deps, tenantID xid.ID, platform bool, kind string, src io.Reader, filename string, size int64) (string, error) {
-	ext := strings.ToLower(filepath.Ext(filename))
-	switch ext {
-	case ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".svg":
-	default:
-		return "", fmt.Errorf("tipe file tidak didukung")
-	}
-	if size > 2<<20 {
-		return "", fmt.Errorf("file terlalu besar (max 2MB)")
-	}
 	subdir := "platform"
 	if !platform {
 		subdir = tenantID.String()
 	}
 	dir := filepath.Join(d.Config.UploadDir, subdir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("gagal buat folder upload")
-	}
-	name := kind + ext
-	dst := filepath.Join(dir, name)
-	out, err := os.Create(dst)
+	name, err := upload.SaveImageAsWebP(dir, kind, src, filename, size)
 	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, src); err != nil {
 		return "", err
 	}
 	return "/uploads/" + subdir + "/" + name, nil
@@ -527,6 +511,13 @@ func registerRolesUsers(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
+		cust, err := d.Store.GetCustomer(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("pelanggan tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
 		var hashPtr *string
 		if pw := strings.TrimSpace(input.Body.Password); pw != "" {
 			if len(pw) < 6 {
@@ -537,6 +528,15 @@ func registerRolesUsers(api huma.API, d *Deps) {
 				return nil, httpx.Internal(err)
 			}
 			hashPtr = &hash
+		} else {
+			existing, _ := d.Store.GetCustomerPasswordHash(ctx, tid, input.ID)
+			if existing == "" {
+				hash, err := auth.HashPassword(cust.Phone)
+				if err != nil {
+					return nil, httpx.Internal(err)
+				}
+				hashPtr = &hash
+			}
 		}
 		if err := d.Store.UpdatePortalUser(ctx, tid, input.ID, input.Body.PortalEnabled, hashPtr); err != nil {
 			if errors.Is(err, store.ErrNotFound) {

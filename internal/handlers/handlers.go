@@ -19,6 +19,7 @@ import (
 	"github.com/dianrp/drp-billing/internal/auth"
 	"github.com/dianrp/drp-billing/internal/billing"
 	"github.com/dianrp/drp-billing/internal/config"
+	"github.com/dianrp/drp-billing/internal/dbbackup"
 	"github.com/dianrp/drp-billing/internal/httpx"
 	"github.com/dianrp/drp-billing/internal/notify"
 	"github.com/dianrp/drp-billing/internal/payment"
@@ -26,6 +27,7 @@ import (
 	"github.com/dianrp/drp-billing/internal/provisioner"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/tenant"
+	"github.com/dianrp/drp-billing/internal/wa"
 	"github.com/dianrp/drp-billing/internal/xid"
 )
 
@@ -38,6 +40,8 @@ type Deps struct {
 	Payments    *payment.Registry
 	Provisioner *provisioner.Registry
 	Config      *config.Config
+	WA          *wa.Manager
+	DBBackup    *dbbackup.Service
 }
 
 func RegisterAll(api huma.API, d *Deps) {
@@ -47,6 +51,8 @@ func RegisterAll(api huma.API, d *Deps) {
 	registerPlatform(api, d)
 	registerPlatformBranding(api, d)
 	registerSettings(api, d)
+	registerIntegrations(api, d)
+	registerDBBackup(api, d)
 	registerCustomers(api, d)
 	registerClusters(api, d)
 	registerPlans(api, d)
@@ -451,6 +457,11 @@ func registerCustomers(api huma.API, d *Deps) {
 			Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
 			IsActive: active, PortalEnabled: portal,
 		}
+		hash, err := auth.HashPassword(phone)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		c.PasswordHash = hash
 		if err := d.Store.CreateCustomer(ctx, c); err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -527,12 +538,20 @@ func registerCustomers(api huma.API, d *Deps) {
 		existing.CustomerCode = code
 		existing.FullName = name
 		existing.Email = input.Body.Email
+		phoneChanged := existing.Phone != phone
 		existing.Phone = phone
 		existing.Address = input.Body.Address
 		existing.Latitude = input.Body.Latitude
 		existing.Longitude = input.Body.Longitude
 		existing.IsActive = input.Body.IsActive
 		existing.PortalEnabled = input.Body.PortalEnabled
+		if phoneChanged {
+			hash, err := auth.HashPassword(phone)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			existing.PasswordHash = hash
+		}
 		if err := d.Store.UpdateCustomer(ctx, existing); err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -2728,47 +2747,26 @@ func registerPortal(api huma.API, d *Deps) {
 			TenantName    string               `json:"tenant_name"`
 		}
 	}, error) {
-		tid := input.Body.TenantID
-		slug := strings.ToLower(strings.TrimSpace(input.Body.TenantSlug))
-		var ten *store.Tenant
-		var err error
-		if slug != "" {
-			ten, err = d.Store.GetTenantBySlug(ctx, slug)
-			if err != nil {
-				return nil, httpx.Unauthorized("invalid credentials")
-			}
-			tid = ten.ID
-		} else if !xid.IsNil(tid) {
-			ten, err = d.Store.GetTenant(ctx, tid)
-			if err != nil {
-				return nil, httpx.Unauthorized("invalid credentials")
-			}
-		} else {
-			return nil, httpx.BadRequest("tenant_slug is required")
-		}
-		if !ten.IsActive {
-			return nil, httpx.Unauthorized("tenant inactive")
-		}
-		cust, err := d.Store.GetCustomerByPhone(ctx, tid, input.Body.Phone)
+		ten, cust, err := authenticatePortalCustomer(ctx, d, input.Body.TenantSlug, input.Body.TenantID, input.Body.Phone, input.Body.Password)
 		if err != nil {
-			return nil, httpx.Unauthorized("invalid credentials")
+			return nil, err
 		}
-		invoices, _, _ := d.Store.ListInvoices(ctx, tid, "", 20, 0)
+		invoices, _, _ := d.Store.ListInvoices(ctx, ten.ID, "", 20, 0)
 		var custInvoices []store.Invoice
 		for _, inv := range invoices {
 			if inv.CustomerID == cust.ID {
 				custInvoices = append(custInvoices, inv)
 			}
 		}
-		subs, _, _ := d.Store.ListSubscriptions(ctx, tid, "", 100, 0)
+		subs, _, _ := d.Store.ListSubscriptions(ctx, ten.ID, "", 100, 0)
 		var custSubs []store.Subscription
 		for _, s := range subs {
 			if s.CustomerID == cust.ID {
 				custSubs = append(custSubs, s)
 			}
 		}
-		payments, _ := d.Store.ListCustomerPayments(ctx, tid, cust.ID, 20)
-		balance, _ := d.Store.GetWallet(ctx, tid, cust.ID)
+		payments, _ := d.Store.ListCustomerPayments(ctx, ten.ID, cust.ID, 20)
+		balance, _ := d.Store.GetWallet(ctx, ten.ID, cust.ID)
 		out := &struct {
 			Body struct {
 				Customer      store.Customer       `json:"customer"`
@@ -2789,6 +2787,92 @@ func registerPortal(api huma.API, d *Deps) {
 		out.Body.TenantName = ten.Name
 		return out, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-change-password", Method: http.MethodPost, Path: "/api/portal/change-password",
+		Summary: "Change portal password", Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			TenantSlug      string `json:"tenant_slug"`
+			Phone           string `json:"phone"`
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+		}
+	}) (*struct{ Body map[string]string }, error) {
+		newPW := strings.TrimSpace(input.Body.NewPassword)
+		if len(newPW) < 6 {
+			return nil, httpx.BadRequest("password baru minimal 6 karakter")
+		}
+		ten, cust, err := authenticatePortalCustomer(ctx, d, input.Body.TenantSlug, xid.Nil(), input.Body.Phone, input.Body.CurrentPassword)
+		if err != nil {
+			return nil, err
+		}
+		if newPW == strings.TrimSpace(input.Body.CurrentPassword) {
+			return nil, httpx.BadRequest("password baru harus berbeda dari password lama")
+		}
+		hash, err := auth.HashPassword(newPW)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := d.Store.UpdatePortalUser(ctx, ten.ID, cust.ID, true, &hash); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "ok"}}, nil
+	})
+}
+
+// authenticatePortalCustomer resolves tenant + customer and verifies portal password.
+func authenticatePortalCustomer(ctx context.Context, d *Deps, tenantSlug string, tenantID xid.ID, phone, password string) (*store.Tenant, *store.Customer, error) {
+	slug := strings.ToLower(strings.TrimSpace(tenantSlug))
+	var ten *store.Tenant
+	var err error
+	tid := tenantID
+	if slug != "" {
+		ten, err = d.Store.GetTenantBySlug(ctx, slug)
+		if err != nil {
+			return nil, nil, httpx.Unauthorized("invalid credentials")
+		}
+		tid = ten.ID
+	} else if !xid.IsNil(tid) {
+		ten, err = d.Store.GetTenant(ctx, tid)
+		if err != nil {
+			return nil, nil, httpx.Unauthorized("invalid credentials")
+		}
+	} else {
+		return nil, nil, httpx.BadRequest("tenant_slug is required")
+	}
+	if !ten.IsActive {
+		return nil, nil, httpx.Unauthorized("tenant inactive")
+	}
+	cust, err := d.Store.GetCustomerByPhone(ctx, tid, strings.TrimSpace(phone))
+	if err != nil {
+		return nil, nil, httpx.Unauthorized("invalid credentials")
+	}
+	if !cust.IsActive || !cust.PortalEnabled {
+		return nil, nil, httpx.Unauthorized("invalid credentials")
+	}
+	pw := strings.TrimSpace(password)
+	if pw == "" {
+		return nil, nil, httpx.Unauthorized("invalid credentials")
+	}
+	hash, err := d.Store.GetCustomerPasswordHash(ctx, tid, cust.ID)
+	if err != nil {
+		return nil, nil, httpx.Unauthorized("invalid credentials")
+	}
+	if hash == "" {
+		if pw != cust.Phone {
+			return nil, nil, httpx.Unauthorized("invalid credentials")
+		}
+		if h, herr := auth.HashPassword(cust.Phone); herr == nil {
+			_ = d.Store.UpdatePortalUser(ctx, tid, cust.ID, true, &h)
+		}
+	} else {
+		ok, verr := auth.VerifyPassword(pw, hash)
+		if verr != nil || !ok {
+			return nil, nil, httpx.Unauthorized("invalid credentials")
+		}
+	}
+	return ten, cust, nil
 }
 
 func registerWebhooks(api huma.API, d *Deps) {

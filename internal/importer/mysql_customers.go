@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/dianrp/drp-billing/internal/auth"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/xid"
 	_ "github.com/go-sql-driver/mysql"
@@ -41,6 +42,11 @@ func ImportMySQLCustomers(ctx context.Context, mysqlDSN string, st *store.Store,
 		}
 		c := &store.Customer{
 			TenantID: tenantID, CustomerCode: username, FullName: name, Phone: phone, Email: &email, IsActive: true, PortalEnabled: true,
+		}
+		if phone != "" {
+			if h, err := auth.HashPassword(phone); err == nil {
+				c.PasswordHash = h
+			}
 		}
 		if err := st.CreateCustomer(ctx, c); err != nil {
 			slog.Warn("import customer skipped", "username", username, "err", err)

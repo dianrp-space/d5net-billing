@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dianrp/drp-billing/internal/xid"
@@ -23,6 +24,7 @@ type Customer struct {
 	Longitude     *float64  `json:"longitude,omitempty"`
 	IsActive      bool      `json:"is_active"`
 	PortalEnabled bool      `json:"portal_enabled"`
+	PasswordHash  string    `json:"-"`
 	CreatedAt     time.Time `json:"created_at"`
 	ClusterName   string    `json:"cluster_name,omitempty"`
 	ClusterCode   string    `json:"cluster_code,omitempty"`
@@ -120,25 +122,43 @@ func (s *Store) CreateCustomer(ctx context.Context, c *Customer) error {
 	if err := s.SetTenantContext(ctx, c.TenantID); err != nil {
 		return err
 	}
+	var hash any
+	if strings.TrimSpace(c.PasswordHash) != "" {
+		hash = c.PasswordHash
+	}
 	return s.Pool.QueryRow(ctx, `
 		INSERT INTO customers (tenant_id, cluster_id, customer_code, full_name, email, phone, address,
-		                       latitude, longitude, is_active, portal_enabled)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, created_at
+		                       latitude, longitude, is_active, portal_enabled, password_hash)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, created_at
 	`, c.TenantID, c.ClusterID, c.CustomerCode, c.FullName, c.Email, c.Phone, c.Address,
-		c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled).Scan(&c.ID, &c.CreatedAt)
+		c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled, hash).Scan(&c.ID, &c.CreatedAt)
 }
 
 func (s *Store) UpdateCustomer(ctx context.Context, c *Customer) error {
 	if err := s.SetTenantContext(ctx, c.TenantID); err != nil {
 		return err
 	}
-	tag, err := s.Pool.Exec(ctx, `
-		UPDATE customers SET cluster_id=$3, full_name=$4, email=$5, phone=$6, address=$7,
-		                      customer_code=$8, latitude=$9, longitude=$10,
-		                      is_active=$11, portal_enabled=$12, updated_at=NOW()
-		WHERE tenant_id=$1 AND id=$2
-	`, c.TenantID, c.ID, c.ClusterID, c.FullName, c.Email, c.Phone, c.Address, c.CustomerCode,
-		c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled)
+	var (
+		tag interface{ RowsAffected() int64 }
+		err error
+	)
+	if strings.TrimSpace(c.PasswordHash) != "" {
+		tag, err = s.Pool.Exec(ctx, `
+			UPDATE customers SET cluster_id=$3, full_name=$4, email=$5, phone=$6, address=$7,
+			                      customer_code=$8, latitude=$9, longitude=$10,
+			                      is_active=$11, portal_enabled=$12, password_hash=$13, updated_at=NOW()
+			WHERE tenant_id=$1 AND id=$2
+		`, c.TenantID, c.ID, c.ClusterID, c.FullName, c.Email, c.Phone, c.Address, c.CustomerCode,
+			c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled, c.PasswordHash)
+	} else {
+		tag, err = s.Pool.Exec(ctx, `
+			UPDATE customers SET cluster_id=$3, full_name=$4, email=$5, phone=$6, address=$7,
+			                      customer_code=$8, latitude=$9, longitude=$10,
+			                      is_active=$11, portal_enabled=$12, updated_at=NOW()
+			WHERE tenant_id=$1 AND id=$2
+		`, c.TenantID, c.ID, c.ClusterID, c.FullName, c.Email, c.Phone, c.Address, c.CustomerCode,
+			c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled)
+	}
 	if err != nil {
 		return err
 	}
