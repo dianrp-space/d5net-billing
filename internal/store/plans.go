@@ -220,6 +220,51 @@ func (s *Store) GetSubscription(ctx context.Context, tenantID xid.ID, id xid.ID)
 	return &sub, nil
 }
 
+// FindProvisionableSubscriptionByCustomer returns the best subscription to sync for a customer
+// (active preferred, then suspended/overdue), optionally filtered by router.
+func (s *Store) FindProvisionableSubscriptionByCustomer(ctx context.Context, tenantID, customerID xid.ID, routerID *xid.ID) (*Subscription, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	args := []any{tenantID, customerID}
+	routerFilter := ""
+	if routerID != nil {
+		routerFilter = " AND s.router_id = $3"
+		args = append(args, *routerID)
+	}
+	row := s.Pool.QueryRow(ctx, `
+		SELECT s.id, s.tenant_id, s.customer_id, s.plan_id, s.router_id, s.username, s.password, s.service_type, s.status,
+		       s.started_at, s.expires_at, s.next_bill_at, s.suspended_at, c.full_name, c.customer_code, p.name,
+		       op.odp_id, COALESCE(o.code, ''), COALESCE(o.name, ''), op.port_number
+		FROM subscriptions s
+		JOIN customers c ON c.id = s.customer_id
+		JOIN plans p ON p.id = s.plan_id
+		LEFT JOIN odp_ports op ON op.subscription_id = s.id
+		LEFT JOIN odps o ON o.id = op.odp_id
+		WHERE s.tenant_id = $1 AND s.customer_id = $2
+		  AND s.router_id IS NOT NULL
+		  AND s.status IN ('active','suspended','overdue')
+		`+routerFilter+`
+		ORDER BY CASE s.status WHEN 'active' THEN 0 WHEN 'overdue' THEN 1 ELSE 2 END, s.id DESC
+		LIMIT 1
+	`, args...)
+	var sub Subscription
+	var odpID *xid.ID
+	var portNum *int
+	err := row.Scan(&sub.ID, &sub.TenantID, &sub.CustomerID, &sub.PlanID, &sub.RouterID, &sub.Username, &sub.Password,
+		&sub.ServiceType, &sub.Status, &sub.StartedAt, &sub.ExpiresAt, &sub.NextBillAt, &sub.SuspendedAt,
+		&sub.CustomerName, &sub.CustomerCode, &sub.PlanName, &odpID, &sub.ODPCode, &sub.ODPName, &portNum)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	sub.ODPID = odpID
+	sub.PortNumber = portNum
+	return &sub, nil
+}
+
 func (s *Store) CreateSubscription(ctx context.Context, sub *Subscription) error {
 	if err := s.SetTenantContext(ctx, sub.TenantID); err != nil {
 		return err
@@ -229,6 +274,41 @@ func (s *Store) CreateSubscription(ctx context.Context, sub *Subscription) error
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id
 	`, sub.TenantID, sub.CustomerID, sub.PlanID, sub.RouterID, sub.Username, sub.Password, sub.ServiceType, sub.Status,
 		sub.StartedAt, sub.ExpiresAt, sub.NextBillAt).Scan(&sub.ID)
+}
+
+func (s *Store) UpdateSubscription(ctx context.Context, tenantID xid.ID, sub *Subscription, updatePassword bool) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	if updatePassword {
+		_, err := s.Pool.Exec(ctx, `
+			UPDATE subscriptions SET
+				plan_id=$3, router_id=$4, username=$5, password=$6, service_type=$7, updated_at=NOW()
+			WHERE tenant_id=$1 AND id=$2
+		`, tenantID, sub.ID, sub.PlanID, sub.RouterID, sub.Username, sub.Password, sub.ServiceType)
+		return err
+	}
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE subscriptions SET
+			plan_id=$3, router_id=$4, username=$5, service_type=$6, updated_at=NOW()
+		WHERE tenant_id=$1 AND id=$2
+	`, tenantID, sub.ID, sub.PlanID, sub.RouterID, sub.Username, sub.ServiceType)
+	return err
+}
+
+func (s *Store) DeleteSubscription(ctx context.Context, tenantID xid.ID, id xid.ID) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	_ = s.ReleaseODPPortBySubscription(ctx, tenantID, id)
+	tag, err := s.Pool.Exec(ctx, `DELETE FROM subscriptions WHERE tenant_id=$1 AND id=$2`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpdateSubscriptionStatus(ctx context.Context, tenantID xid.ID, id xid.ID, status string) error {

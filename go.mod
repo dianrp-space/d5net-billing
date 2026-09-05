@@ -2,6 +2,8 @@ module github.com/dianrp/drp-billing
 
 go 1.26.0
 
+toolchain go1.27.1
+
 require (
 	github.com/HugoSmits86/nativewebp v1.3.0
 	github.com/caarlos0/env/v11 v11.3.1

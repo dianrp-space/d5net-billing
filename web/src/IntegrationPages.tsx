@@ -1,9 +1,11 @@
+import { MessageCircle, Send } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { useAppDialog } from "./confirm";
 import { IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
 
 type OutboundWebhook = {
@@ -320,20 +322,25 @@ function ProviderBlock({
 }
 
 export function MessagingGWPage() {
-  const [tab, setTab] = useState<"whatsapp" | "telegram">("whatsapp");
-
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className={tab === "whatsapp" ? "btn" : "btn-ghost"} onClick={() => setTab("whatsapp")}>
+    <Tabs defaultValue="whatsapp" className="space-y-0">
+      <TabsList aria-label="Messaging Gateway">
+        <TabsTrigger value="whatsapp">
+          <MessageCircle />
           WhatsApp
-        </button>
-        <button type="button" className={tab === "telegram" ? "btn" : "btn-ghost"} onClick={() => setTab("telegram")}>
+        </TabsTrigger>
+        <TabsTrigger value="telegram">
+          <Send />
           Telegram
-        </button>
-      </div>
-      {tab === "whatsapp" ? <WhatsAppTab /> : <TelegramTab />}
-    </div>
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="whatsapp">
+        <WhatsAppTab />
+      </TabsContent>
+      <TabsContent value="telegram">
+        <TelegramTab />
+      </TabsContent>
+    </Tabs>
   );
 }
 

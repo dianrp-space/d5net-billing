@@ -47,6 +47,18 @@ func TestCommentTag(t *testing.T) {
 	}
 }
 
+func TestProfileComment(t *testing.T) {
+	if got := ProfileComment("Acme ISP", 150000); got != "Acme-ISP Rp150.000" {
+		t.Fatalf("got %q", got)
+	}
+	if got := FormatRpDots(1500000); got != "1.500.000" {
+		t.Fatalf("got %q", got)
+	}
+	if got := ProfileComment("Acme", 0); got != "Acme" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestFakeProvisionerApply(t *testing.T) {
 	f := &fakeProv{}
 	if err := f.Apply(context.Background(), &ServiceSpec{Username: "a"}); err != nil {

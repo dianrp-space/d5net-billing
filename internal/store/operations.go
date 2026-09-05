@@ -3,38 +3,65 @@ package store
 import (
 	"context"
 	"errors"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"fmt"
+	"strings"
 	"time"
 
+	"github.com/dianrp/drp-billing/internal/xid"
 	"github.com/jackc/pgx/v5"
 )
 
 type Ticket struct {
-	ID          xid.ID     `json:"id"`
-	TenantID    xid.ID     `json:"tenant_id"`
-	CustomerID  *xid.ID    `json:"customer_id,omitempty"`
-	Subject     string     `json:"subject"`
-	Description *string    `json:"description,omitempty"`
-	Category    string     `json:"category"`
-	Priority    string     `json:"priority"`
-	Status      string     `json:"status"`
-	AssignedTo  *xid.ID    `json:"assigned_to,omitempty"`
-	SLADueAt    *time.Time `json:"sla_due_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID           xid.ID     `json:"id"`
+	TenantID     xid.ID     `json:"tenant_id"`
+	CustomerID   *xid.ID    `json:"customer_id,omitempty"`
+	CustomerName string     `json:"customer_name,omitempty"`
+	Subject      string     `json:"subject"`
+	Description  *string    `json:"description,omitempty"`
+	Category     string     `json:"category"`
+	Priority     string     `json:"priority"`
+	Status       string     `json:"status"`
+	AssignedTo   *xid.ID    `json:"assigned_to,omitempty"`
+	AssigneeName string     `json:"assignee_name,omitempty"`
+	SLADueAt     *time.Time `json:"sla_due_at,omitempty"`
+	ResolvedAt   *time.Time `json:"resolved_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+type TicketMessage struct {
+	ID         xid.ID    `json:"id"`
+	TicketID   xid.ID    `json:"ticket_id"`
+	SenderType string    `json:"sender_type"`
+	SenderID   *xid.ID   `json:"sender_id,omitempty"`
+	SenderName string    `json:"sender_name,omitempty"`
+	Message    string    `json:"message"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+var ticketStatuses = map[string]bool{
+	"open": true, "in_progress": true, "resolved": true, "closed": true,
+}
+
+func NormalizeTicketStatus(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if ticketStatuses[s] {
+		return s
+	}
+	return ""
 }
 
 func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status string, limit, offset int) ([]Ticket, int64, error) {
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, 0, err
 	}
-	where := "WHERE tenant_id = $1"
+	where := "WHERE t.tenant_id = $1"
 	args := []any{tenantID}
-	if status != "" {
-		where += " AND status = $2"
-		args = append(args, status)
+	if st := NormalizeTicketStatus(status); st != "" {
+		where += " AND t.status = $2"
+		args = append(args, st)
 	}
 	var total int64
-	if err := s.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM tickets "+where, args...).Scan(&total); err != nil {
+	if err := s.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM tickets t "+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	if limit <= 0 {
@@ -42,8 +69,13 @@ func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status string,
 	}
 	args = append(args, limit, offset)
 	rows, err := s.Pool.Query(ctx, `
-		SELECT id, tenant_id, customer_id, subject, description, category, priority, status, assigned_to, sla_due_at, created_at
-		FROM tickets `+where+` ORDER BY id DESC LIMIT $`+itoa(len(args)-1)+` OFFSET $`+itoa(len(args)), args...)
+		SELECT t.id, t.tenant_id, t.customer_id, COALESCE(c.full_name,''), t.subject, t.description,
+		       t.category, t.priority, t.status, t.assigned_to, COALESCE(u.full_name,''),
+		       t.sla_due_at, t.resolved_at, t.created_at
+		FROM tickets t
+		LEFT JOIN customers c ON c.id = t.customer_id
+		LEFT JOIN users u ON u.id = t.assigned_to
+		`+where+` ORDER BY t.created_at DESC LIMIT $`+itoa(len(args)-1)+` OFFSET $`+itoa(len(args)), args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -51,7 +83,11 @@ func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status string,
 	var list []Ticket
 	for rows.Next() {
 		var t Ticket
-		if err := rows.Scan(&t.ID, &t.TenantID, &t.CustomerID, &t.Subject, &t.Description, &t.Category, &t.Priority, &t.Status, &t.AssignedTo, &t.SLADueAt, &t.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&t.ID, &t.TenantID, &t.CustomerID, &t.CustomerName, &t.Subject, &t.Description,
+			&t.Category, &t.Priority, &t.Status, &t.AssignedTo, &t.AssigneeName,
+			&t.SLADueAt, &t.ResolvedAt, &t.CreatedAt,
+		); err != nil {
 			return nil, 0, err
 		}
 		list = append(list, t)
@@ -59,14 +95,48 @@ func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status string,
 	return list, total, rows.Err()
 }
 
+func (s *Store) GetTicket(ctx context.Context, tenantID, id xid.ID) (*Ticket, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	var t Ticket
+	err := s.Pool.QueryRow(ctx, `
+		SELECT t.id, t.tenant_id, t.customer_id, COALESCE(c.full_name,''), t.subject, t.description,
+		       t.category, t.priority, t.status, t.assigned_to, COALESCE(u.full_name,''),
+		       t.sla_due_at, t.resolved_at, t.created_at
+		FROM tickets t
+		LEFT JOIN customers c ON c.id = t.customer_id
+		LEFT JOIN users u ON u.id = t.assigned_to
+		WHERE t.tenant_id=$1 AND t.id=$2
+	`, tenantID, id).Scan(
+		&t.ID, &t.TenantID, &t.CustomerID, &t.CustomerName, &t.Subject, &t.Description,
+		&t.Category, &t.Priority, &t.Status, &t.AssignedTo, &t.AssigneeName,
+		&t.SLADueAt, &t.ResolvedAt, &t.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 func (s *Store) CreateTicket(ctx context.Context, t *Ticket) error {
 	if err := s.SetTenantContext(ctx, t.TenantID); err != nil {
 		return err
 	}
+	if strings.TrimSpace(t.Subject) == "" {
+		return fmt.Errorf("subjek wajib")
+	}
+	if t.Status == "" {
+		t.Status = "open"
+	}
 	sla := time.Now().Add(24 * time.Hour)
-	if t.Priority == "high" {
+	if t.Priority == "high" || t.Priority == "urgent" {
 		sla = time.Now().Add(4 * time.Hour)
 	}
+	t.SLADueAt = &sla
 	return s.Pool.QueryRow(ctx, `
 		INSERT INTO tickets (tenant_id, customer_id, subject, description, category, priority, status, sla_due_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at
@@ -74,14 +144,95 @@ func (s *Store) CreateTicket(ctx context.Context, t *Ticket) error {
 }
 
 func (s *Store) UpdateTicketStatus(ctx context.Context, tenantID xid.ID, id xid.ID, status string) error {
+	status = NormalizeTicketStatus(status)
+	if status == "" {
+		return fmt.Errorf("status tiket tidak valid")
+	}
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return err
 	}
-	_, err := s.Pool.Exec(ctx, `
-		UPDATE tickets SET status=$3, resolved_at=CASE WHEN $3='resolved' THEN NOW() ELSE resolved_at END, updated_at=NOW()
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE tickets SET status=$3,
+		                 resolved_at=CASE WHEN $3 IN ('resolved','closed') THEN COALESCE(resolved_at, NOW()) ELSE NULL END,
+		                 updated_at=NOW()
 		WHERE tenant_id=$1 AND id=$2
 	`, tenantID, id, status)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) AssignTicket(ctx context.Context, tenantID, id xid.ID, assignedTo *xid.ID) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE tickets SET assigned_to=$3, updated_at=NOW()
+		WHERE tenant_id=$1 AND id=$2
+	`, tenantID, id, assignedTo)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ListTicketMessages(ctx context.Context, tenantID, ticketID xid.ID) ([]TicketMessage, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT m.id, m.ticket_id, m.sender_type, m.sender_id, COALESCE(u.full_name,''), m.message, m.created_at
+		FROM ticket_messages m
+		LEFT JOIN users u ON u.id = m.sender_id
+		WHERE m.tenant_id=$1 AND m.ticket_id=$2
+		ORDER BY m.created_at ASC
+	`, tenantID, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []TicketMessage
+	for rows.Next() {
+		var m TicketMessage
+		if err := rows.Scan(&m.ID, &m.TicketID, &m.SenderType, &m.SenderID, &m.SenderName, &m.Message, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, m)
+	}
+	return list, rows.Err()
+}
+
+func (s *Store) AddTicketMessage(ctx context.Context, tenantID, ticketID xid.ID, senderType string, senderID *xid.ID, message string) (*TicketMessage, error) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return nil, fmt.Errorf("pesan wajib")
+	}
+	if senderType == "" {
+		senderType = "staff"
+	}
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	var m TicketMessage
+	err := s.Pool.QueryRow(ctx, `
+		INSERT INTO ticket_messages (tenant_id, ticket_id, sender_type, sender_id, message)
+		VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at
+	`, tenantID, ticketID, senderType, senderID, message).Scan(&m.ID, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	m.TicketID = ticketID
+	m.SenderType = senderType
+	m.SenderID = senderID
+	m.Message = message
+	return &m, nil
 }
 
 type WorkOrder struct {

@@ -14,7 +14,7 @@ type SearchHit = {
 
 const kindLabel: Record<string, string> = {
   customer: "Pelanggan",
-  subscription: "Langganan",
+  subscription: "Secrets",
   invoice: "Tagihan",
   odp: "ODP",
   plan: "Paket",
@@ -28,7 +28,7 @@ const menuHits: { page: AdminPage; title: string; keywords: string }[] = [
   { page: "customers", title: "Pelanggan", keywords: "pelanggan customer" },
   { page: "clusters", title: "Cluster / POP", keywords: "cluster pop site" },
   { page: "plans", title: "Paket", keywords: "paket plan harga" },
-  { page: "subscriptions", title: "Langganan", keywords: "langganan subscription pppoe" },
+  { page: "subscriptions", title: "Secrets", keywords: "secret langganan subscription pppoe ppp" },
   { page: "invoices", title: "Tagihan", keywords: "tagihan invoice" },
   { page: "routers", title: "Router", keywords: "router mikrotik" },
   { page: "ipam", title: "IP Pool", keywords: "ipam ip pool cidr gateway router" },
@@ -37,7 +37,7 @@ const menuHits: { page: AdminPage; title: string; keywords: string }[] = [
   { page: "tickets", title: "Tiket", keywords: "tiket ticket" },
   { page: "leads", title: "Lead", keywords: "lead prospek" },
   { page: "accounting", title: "Akunting", keywords: "akunting accounting laporan" },
-  { page: "resellers", title: "Reseller", keywords: "reseller" },
+  { page: "resellers", title: "Reseller & Komisi", keywords: "reseller komisi commission agen" },
   { page: "tech", title: "Teknisi", keywords: "teknisi tech" },
   { page: "branding", title: "Branding", keywords: "branding logo favicon app name settings" },
   { page: "roles", title: "Roles", keywords: "roles rbac permission settings" },

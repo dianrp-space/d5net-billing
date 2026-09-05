@@ -121,6 +121,15 @@ func commentTag(spec *provision.ServiceSpec) string {
 	return "drp"
 }
 
+// brandComment is the RouterOS comment for tenant-owned objects (profiles, pools).
+func (c *Client) brandComment(ctx context.Context, tenantID xid.ID) string {
+	app, err := c.store.EffectiveAppName(ctx, tenantID)
+	if err != nil || strings.TrimSpace(app) == "" {
+		app = "drp-billing"
+	}
+	return provision.SanitizeBrandPrefix(app)
+}
+
 func mbpsLimit(n int) string {
 	if n <= 0 {
 		return "0"
@@ -162,6 +171,12 @@ func (c *Client) applyPPPoE(ctx context.Context, spec *provision.ServiceSpec) er
 		}
 		if spec.ProfileName != "" {
 			args = append(args, "=profile="+spec.ProfileName)
+		}
+		if ip := HostIP(spec.IPAddress); ip != "" {
+			args = append(args, "=remote-address="+ip)
+		}
+		if local := HostIP(spec.LocalAddress); local != "" {
+			args = append(args, "=local-address="+local)
 		}
 		return cl.Run(args...)
 	})

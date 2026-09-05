@@ -37,12 +37,12 @@ export async function swalConfirm(opts: ConfirmOptions | string): Promise<boolea
   return result.isConfirmed;
 }
 
-export async function swalAlert(opts: { title?: string; description: string } | string): Promise<void> {
+export async function swalAlert(opts: { title?: string; description: string; icon?: "info" | "success" | "warning" | "error" } | string): Promise<void> {
   const n = typeof opts === "string" ? { description: opts } : opts;
   await mixin().fire({
     title: n.title ?? "Pemberitahuan",
-    text: n.description,
-    icon: "info",
+    html: String(n.description).replace(/\n/g, "<br/>"),
+    icon: (typeof opts === "object" && opts.icon) || "info",
     confirmButtonText: "Tutup",
   });
 }

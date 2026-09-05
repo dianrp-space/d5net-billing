@@ -185,3 +185,44 @@ export async function apiUpload<T>(
   }
   return res.json() as Promise<T>;
 }
+
+/** Authenticated binary download (PDF/CSV) — bare &lt;a href&gt; cannot send Bearer. */
+export async function apiDownload(
+  path: string,
+  filename: string,
+  opts?: { platform?: boolean },
+): Promise<void> {
+  const platform = Boolean(opts?.platform);
+  const doFetch = async () => {
+    const headers = new Headers();
+    const token = platform ? getPlatformToken() : getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(path, { headers, credentials: "include" });
+  };
+  let res = await doFetch();
+  if (res.status === 401 && shouldAttemptRefresh(path, false)) {
+    const refreshed = await refreshAccessToken(platform);
+    if (refreshed) res = await doFetch();
+    else {
+      if (platform) clearPlatformToken();
+      else localStorage.removeItem(ADMIN_TOKEN);
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { platform } }));
+    }
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    try {
+      const j = JSON.parse(text) as { error?: string; detail?: string };
+      throw new Error(j.error || j.detail || text || res.statusText);
+    } catch (e) {
+      if (e instanceof SyntaxError) throw new Error(text || res.statusText);
+      throw e;
+    }
+  }
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}

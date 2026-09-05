@@ -18,6 +18,15 @@ make run-api
 cd web && npm install && npm run dev
 ```
 
+Vite listen di `0.0.0.0:5173`. PC lain di Wi‑Fi `192.168.100.0/24` bisa buka `http://<IP-laptop>:5173` (contoh `http://192.168.100.67:5173`). API default `0.0.0.0:8080`; frontend mem-proxy `/api`, `/uploads`, `/events`.
+
+Pastikan firewall mengizinkan port **5173** (dan **8080** jika API dipanggil langsung):
+
+```bash
+sudo ufw allow from 192.168.100.0/24 to any port 5173 proto tcp
+sudo ufw allow from 192.168.100.0/24 to any port 8080 proto tcp
+```
+
 Buat superadmin platform + tenant pertama:
 
 ```bash

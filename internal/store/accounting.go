@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
+
+	"github.com/dianrp/drp-billing/internal/xid"
 )
 
 type Account struct {
@@ -12,6 +15,15 @@ type Account struct {
 	Code string `json:"code"`
 	Name string `json:"name"`
 	Type string `json:"type"`
+}
+
+type Expense struct {
+	ID          xid.ID  `json:"id"`
+	Amount      int64   `json:"amount"`
+	Category    string  `json:"category"`
+	Description *string `json:"description,omitempty"`
+	ExpenseDate string  `json:"expense_date"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (s *Store) ListAccounts(ctx context.Context, tenantID xid.ID) ([]Account, error) {
@@ -31,7 +43,43 @@ func (s *Store) ListAccounts(ctx context.Context, tenantID xid.ID) ([]Account, e
 	return list, rows.Err()
 }
 
+func (s *Store) ListExpenses(ctx context.Context, tenantID xid.ID, limit, offset int) ([]Expense, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var total int64
+	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM expenses WHERE tenant_id=$1`, tenantID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, amount, category, description, expense_date::text, created_at
+		FROM expenses WHERE tenant_id=$1
+		ORDER BY expense_date DESC, created_at DESC
+		LIMIT $2 OFFSET $3
+	`, tenantID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var list []Expense
+	for rows.Next() {
+		var e Expense
+		if err := rows.Scan(&e.ID, &e.Amount, &e.Category, &e.Description, &e.ExpenseDate, &e.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		list = append(list, e)
+	}
+	return list, total, rows.Err()
+}
+
 func (s *Store) CreateExpense(ctx context.Context, tenantID xid.ID, amount int64, category, desc, date string) error {
+	if amount <= 0 {
+		return fmt.Errorf("nominal beban harus > 0")
+	}
+	category = strings.TrimSpace(category)
+	if category == "" {
+		category = "ops"
+	}
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}

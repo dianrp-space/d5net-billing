@@ -4,50 +4,113 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"fmt"
+	"strings"
 	"time"
 
+	"github.com/dianrp/drp-billing/internal/xid"
 	"github.com/jackc/pgx/v5"
 )
 
 type Lead struct {
-	ID        xid.ID    `json:"id"`
-	TenantID  xid.ID    `json:"tenant_id"`
-	FullName  string    `json:"full_name"`
-	Phone     string    `json:"phone"`
-	Email     *string   `json:"email,omitempty"`
-	Address   *string   `json:"address,omitempty"`
-	Latitude  *float64  `json:"latitude,omitempty"`
-	Longitude *float64  `json:"longitude,omitempty"`
-	ODPID     *xid.ID   `json:"odp_id,omitempty"`
-	Status    string    `json:"status"`
-	Notes     *string   `json:"notes,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            xid.ID     `json:"id"`
+	TenantID      xid.ID     `json:"tenant_id"`
+	FullName      string     `json:"full_name"`
+	Phone         string     `json:"phone"`
+	Email         *string    `json:"email,omitempty"`
+	Address       *string    `json:"address,omitempty"`
+	Latitude      *float64   `json:"latitude,omitempty"`
+	Longitude     *float64   `json:"longitude,omitempty"`
+	ODPID         *xid.ID    `json:"odp_id,omitempty"`
+	ODPCode       string     `json:"odp_code,omitempty"`
+	ODPName       string     `json:"odp_name,omitempty"`
+	Status        string     `json:"status"`
+	Notes         *string    `json:"notes,omitempty"`
+	ResellerID    *xid.ID    `json:"reseller_id,omitempty"`
+	ResellerName  string     `json:"reseller_name,omitempty"`
+	SalesUserID   *xid.ID    `json:"sales_user_id,omitempty"`
+	SalesUserName string     `json:"sales_user_name,omitempty"`
+	CustomerID    *xid.ID    `json:"customer_id,omitempty"`
+	ConvertedAt   *time.Time `json:"converted_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+var leadStatuses = map[string]bool{
+	"new": true, "contacted": true, "survey": true, "qualified": true, "converted": true, "lost": true,
+}
+
+func NormalizeLeadStatus(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return "new"
+	}
+	if leadStatuses[s] {
+		return s
+	}
+	return s
 }
 
 func (s *Store) CreateLead(ctx context.Context, l *Lead) error {
-	if l.Status == "" {
+	l.Status = NormalizeLeadStatus(l.Status)
+	if !leadStatuses[l.Status] {
 		l.Status = "new"
 	}
+	l.ResellerID, l.SalesUserID = NormalizeAttribution(l.ResellerID, l.SalesUserID)
 	return s.Pool.QueryRow(ctx, `
-		INSERT INTO leads (tenant_id, full_name, phone, email, address, latitude, longitude, odp_id, status, notes)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, created_at
-	`, l.TenantID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes).
+		INSERT INTO leads (tenant_id, full_name, phone, email, address, latitude, longitude, odp_id, status, notes, reseller_id, sales_user_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, created_at
+	`, l.TenantID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.ResellerID, l.SalesUserID).
 		Scan(&l.ID, &l.CreatedAt)
 }
 
-func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, limit, offset int) ([]Lead, int64, error) {
+func scanLead(row pgx.Row) (*Lead, error) {
+	var l Lead
+	err := row.Scan(
+		&l.ID, &l.TenantID, &l.FullName, &l.Phone, &l.Email, &l.Address,
+		&l.Latitude, &l.Longitude, &l.ODPID, &l.ODPCode, &l.ODPName,
+		&l.Status, &l.Notes, &l.ResellerID, &l.ResellerName, &l.SalesUserID, &l.SalesUserName,
+		&l.CustomerID, &l.ConvertedAt, &l.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &l, nil
+}
+
+const leadSelect = `
+	SELECT l.id, l.tenant_id, l.full_name, l.phone, l.email, l.address, l.latitude, l.longitude,
+	       l.odp_id, COALESCE(o.code, ''), COALESCE(o.name, ''),
+	       l.status, l.notes, l.reseller_id, COALESCE(r.name, ''), l.sales_user_id, COALESCE(u.full_name, ''),
+	       l.customer_id, l.converted_at, l.created_at
+	FROM leads l
+	LEFT JOIN odps o ON o.id = l.odp_id
+	LEFT JOIN resellers r ON r.id = l.reseller_id
+	LEFT JOIN users u ON u.id = l.sales_user_id
+`
+
+func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, status string, limit, offset int) ([]Lead, int64, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	where := `WHERE l.tenant_id=$1`
+	args := []any{tenantID}
+	if st := NormalizeLeadStatus(status); status != "" && leadStatuses[st] {
+		where += ` AND l.status=$2`
+		args = append(args, st)
+	}
 	var total int64
-	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM leads WHERE tenant_id=$1`, tenantID).Scan(&total); err != nil {
+	countQ := `SELECT COUNT(*) FROM leads l ` + where
+	if err := s.Pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.Pool.Query(ctx, `
-		SELECT id, tenant_id, full_name, phone, email, address, latitude, longitude, odp_id, status, notes, created_at
-		FROM leads WHERE tenant_id=$1 ORDER BY id DESC LIMIT $2 OFFSET $3
-	`, tenantID, limit, offset)
+	args = append(args, limit, offset)
+	lim := len(args) - 1
+	off := len(args)
+	q := leadSelect + ` ` + where + ` ORDER BY l.id DESC LIMIT $` + itoa(lim) + ` OFFSET $` + itoa(off)
+	rows, err := s.Pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -55,13 +118,134 @@ func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, limit, offset in
 	var list []Lead
 	for rows.Next() {
 		var l Lead
-		if err := rows.Scan(&l.ID, &l.TenantID, &l.FullName, &l.Phone, &l.Email, &l.Address,
-			&l.Latitude, &l.Longitude, &l.ODPID, &l.Status, &l.Notes, &l.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&l.ID, &l.TenantID, &l.FullName, &l.Phone, &l.Email, &l.Address,
+			&l.Latitude, &l.Longitude, &l.ODPID, &l.ODPCode, &l.ODPName,
+			&l.Status, &l.Notes, &l.ResellerID, &l.ResellerName, &l.SalesUserID, &l.SalesUserName,
+			&l.CustomerID, &l.ConvertedAt, &l.CreatedAt,
+		); err != nil {
 			return nil, 0, err
 		}
 		list = append(list, l)
 	}
 	return list, total, rows.Err()
+}
+
+func (s *Store) GetLead(ctx context.Context, tenantID, id xid.ID) (*Lead, error) {
+	return scanLead(s.Pool.QueryRow(ctx, leadSelect+`
+		WHERE l.tenant_id=$1 AND l.id=$2
+	`, tenantID, id))
+}
+
+func (s *Store) UpdateLead(ctx context.Context, l *Lead) error {
+	l.Status = NormalizeLeadStatus(l.Status)
+	if !leadStatuses[l.Status] {
+		return fmt.Errorf("status lead tidak valid")
+	}
+	l.ResellerID, l.SalesUserID = NormalizeAttribution(l.ResellerID, l.SalesUserID)
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE leads SET full_name=$3, phone=$4, email=$5, address=$6, latitude=$7, longitude=$8,
+		                 odp_id=$9, status=$10, notes=$11, reseller_id=$12, sales_user_id=$13, updated_at=NOW()
+		WHERE tenant_id=$1 AND id=$2 AND status <> 'converted'
+	`, l.TenantID, l.ID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.ResellerID, l.SalesUserID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateLeadStatus moves a non-converted lead between pipeline columns (kanban).
+func (s *Store) UpdateLeadStatus(ctx context.Context, tenantID, id xid.ID, status string) error {
+	status = NormalizeLeadStatus(status)
+	if !leadStatuses[status] || status == "converted" {
+		return fmt.Errorf("status lead tidak valid")
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE leads SET status=$3, updated_at=NOW()
+		WHERE tenant_id=$1 AND id=$2 AND status <> 'converted'
+	`, tenantID, id, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteLead(ctx context.Context, tenantID, id xid.ID) error {
+	tag, err := s.Pool.Exec(ctx, `DELETE FROM leads WHERE tenant_id=$1 AND id=$2`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ConvertLeadToCustomer creates a customer from the lead and marks the lead converted.
+// Optional resellerID/salesUserID override lead attribution (reseller wins if both set).
+// commissionBasis selects flat amount type (new_customer_flat | acquisition_flat).
+func (s *Store) ConvertLeadToCustomer(ctx context.Context, tenantID, leadID xid.ID, clusterID *xid.ID, customerCode string, resellerID, salesUserID *xid.ID, commissionBasis string) (*Customer, *Lead, error) {
+	lead, err := s.GetLead(ctx, tenantID, leadID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if lead.Status == "converted" || lead.CustomerID != nil {
+		return nil, nil, fmt.Errorf("lead sudah dikonversi")
+	}
+	phone := strings.TrimSpace(lead.Phone)
+	if phone == "" {
+		return nil, nil, fmt.Errorf("telepon lead wajib untuk konversi")
+	}
+	code := strings.TrimSpace(customerCode)
+	if code == "" {
+		if clusterID != nil {
+			code, err = s.NextCustomerCodeForCluster(ctx, tenantID, *clusterID)
+			if err != nil {
+				return nil, nil, err
+			}
+		} else {
+			code, err = s.NextCustomerCode(ctx, tenantID)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	rID, sID := NormalizeAttribution(resellerID, salesUserID)
+	if rID == nil && sID == nil {
+		rID, sID = NormalizeAttribution(lead.ResellerID, lead.SalesUserID)
+	}
+	c := &Customer{
+		TenantID: tenantID, ClusterID: clusterID, CustomerCode: code,
+		FullName: lead.FullName, Email: lead.Email, Phone: phone, Address: lead.Address,
+		Latitude: lead.Latitude, Longitude: lead.Longitude,
+		IsActive: true, PortalEnabled: true,
+		ResellerID: rID, SalesUserID: sID,
+	}
+	if err := s.CreateCustomer(ctx, c); err != nil {
+		return nil, nil, err
+	}
+	now := time.Now()
+	_, err = s.Pool.Exec(ctx, `
+		UPDATE leads SET status='converted', customer_id=$3, converted_at=$4,
+		                 reseller_id=$5, sales_user_id=$6, updated_at=NOW()
+		WHERE tenant_id=$1 AND id=$2
+	`, tenantID, leadID, c.ID, now, rID, sID)
+	if err != nil {
+		return nil, nil, err
+	}
+	_, _ = s.CreditCommission(ctx, tenantID, c.ID, &leadID, rID, sID, commissionBasis)
+	lead.Status = "converted"
+	lead.CustomerID = &c.ID
+	lead.ConvertedAt = &now
+	lead.ResellerID = rID
+	lead.SalesUserID = sID
+	return c, lead, nil
 }
 
 type Reseller struct {
@@ -102,6 +286,46 @@ func (s *Store) CreateResellerFull(ctx context.Context, r *Reseller) error {
 		INSERT INTO resellers (tenant_id, name, phone, commission_percent, is_active)
 		VALUES ($1,$2,$3,$4,$5) RETURNING id, balance, is_active, created_at
 	`, r.TenantID, r.Name, r.Phone, r.CommissionPercent, r.IsActive).Scan(&r.ID, &r.Balance, &r.IsActive, &r.CreatedAt)
+}
+
+func (s *Store) GetReseller(ctx context.Context, tenantID, id xid.ID) (*Reseller, error) {
+	var r Reseller
+	err := s.Pool.QueryRow(ctx, `
+		SELECT id, tenant_id, user_id, name, phone, commission_percent, balance, is_active, created_at
+		FROM resellers WHERE tenant_id=$1 AND id=$2
+	`, tenantID, id).Scan(&r.ID, &r.TenantID, &r.UserID, &r.Name, &r.Phone, &r.CommissionPercent, &r.Balance, &r.IsActive, &r.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+func (s *Store) UpdateReseller(ctx context.Context, r *Reseller) error {
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE resellers SET name=$3, phone=$4, commission_percent=$5, is_active=$6
+		WHERE tenant_id=$1 AND id=$2
+	`, r.TenantID, r.ID, r.Name, r.Phone, r.CommissionPercent, r.IsActive)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteReseller(ctx context.Context, tenantID, id xid.ID) error {
+	tag, err := s.Pool.Exec(ctx, `DELETE FROM resellers WHERE tenant_id=$1 AND id=$2`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 type Alert struct {

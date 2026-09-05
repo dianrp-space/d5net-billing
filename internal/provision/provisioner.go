@@ -16,7 +16,9 @@ type ServiceSpec struct {
 	ServiceType    string
 	ProfileName    string
 	IsolirProfile  string
-	IPAddress      string
+	IPAddress      string // static remote-address on PPP secret
+	LocalAddress   string // optional PPP local-address (gateway)
+	AddressPool    string // optional /ip/pool name for profile remote-address
 	MACAddress     string
 	Comment        string
 	DownloadMbps   int // optional; when >0 Apply may set simple queue
@@ -56,8 +58,15 @@ type Provisioner interface {
 }
 
 // ProfileEnsurer optionally creates/updates PPP or hotspot bandwidth profiles on a router.
+// price (IDR) is embedded in the RouterOS profile comment when > 0.
 type ProfileEnsurer interface {
-	EnsureBandwidthProfile(ctx context.Context, tenantID, routerID xid.ID, name string, downloadMbps, uploadMbps int, serviceType string) error
+	EnsureBandwidthProfile(ctx context.Context, tenantID, routerID xid.ID, name string, downloadMbps, uploadMbps int, serviceType, addressPool string, price int64) error
+}
+
+// IPPoolEnsurer syncs MikroTik /ip/pool from billing IPAM.
+type IPPoolEnsurer interface {
+	EnsureIPPool(ctx context.Context, tenantID, routerID xid.ID, name, network string, gateway *string) error
+	RemoveIPPool(ctx context.Context, tenantID, routerID xid.ID, name string) error
 }
 
 type Factory func(provisionerType string) (Provisioner, error)

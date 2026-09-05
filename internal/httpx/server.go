@@ -6,6 +6,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -27,7 +30,7 @@ func NewServer(origins []string, extra ...func(http.Handler) http.Handler) *Serv
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   origins,
+		AllowOriginFunc:  originAllowed(origins),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Tenant-ID"},
 		AllowCredentials: true,
@@ -42,6 +45,44 @@ func NewServer(origins []string, extra ...func(http.Handler) http.Handler) *Serv
 	api := humachi.New(r, config)
 
 	return &Server{Router: r, API: api}
+}
+
+// originAllowed matches exact CORS_ORIGINS entries, trailing "*" prefixes,
+// and LAN hosts on 192.168.100.0/24 (dev access from Wi‑Fi peers).
+func originAllowed(allowed []string) func(r *http.Request, origin string) bool {
+	return func(_ *http.Request, origin string) bool {
+		origin = strings.TrimSpace(origin)
+		if origin == "" {
+			return true
+		}
+		for _, a := range allowed {
+			a = strings.TrimSpace(a)
+			if a == "" {
+				continue
+			}
+			if a == "*" || a == origin {
+				return true
+			}
+			if strings.HasSuffix(a, "*") && strings.HasPrefix(origin, strings.TrimSuffix(a, "*")) {
+				return true
+			}
+		}
+		return isDevLANOrigin(origin)
+	}
+}
+
+func isDevLANOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	host := u.Hostname()
+	if !strings.HasPrefix(host, "192.168.100.") {
+		return false
+	}
+	last := strings.TrimPrefix(host, "192.168.100.")
+	n, err := strconv.Atoi(last)
+	return err == nil && n >= 0 && n <= 255
 }
 
 func WriteJSON(w http.ResponseWriter, status int, v any) {

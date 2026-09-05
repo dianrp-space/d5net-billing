@@ -12,9 +12,10 @@ import (
 type ctxKey struct{}
 
 type Info struct {
-	ID   xid.ID
-	Slug string
-	Role string
+	ID     xid.ID
+	Slug   string
+	Role   string
+	UserID xid.ID
 }
 
 func FromContext(ctx context.Context) (Info, bool) {
@@ -37,7 +38,8 @@ func Middleware(tokens *auth.TokenService) func(http.Handler) http.Handler {
 					if err != nil {
 						tid = xid.Nil()
 					}
-					info := Info{ID: tid, Role: claims.Role}
+					uid, _ := xid.Parse(claims.UserID)
+					info := Info{ID: tid, Role: claims.Role, UserID: uid}
 					ctx := WithInfo(r.Context(), info)
 					ctx = db.WithTenant(ctx, tid)
 					next.ServeHTTP(w, r.WithContext(ctx))

@@ -10,7 +10,7 @@ import (
 
 type Config struct {
 	AppEnv          string        `env:"APP_ENV" envDefault:"development"`
-	HTTPAddr        string        `env:"HTTP_ADDR" envDefault:"127.0.0.1:8080"`
+	HTTPAddr        string        `env:"HTTP_ADDR" envDefault:"0.0.0.0:8080"`
 	DatabaseURL     string        `env:"DATABASE_URL,required"`
 	JWTSecret       string        `env:"JWT_SECRET,required"`
 	JWTAccessTTL    time.Duration `env:"JWT_ACCESS_TTL" envDefault:"15m"`

@@ -43,21 +43,21 @@ release: build web
 	cp deploy/scripts/*.sh dist/drp-billing-$(VERSION)/
 	cp .env.example dist/drp-billing-$(VERSION)/
 
-run-api:
-	go run ./cmd/api
-
-run-worker:
-	go run ./cmd/worker
-
 dev:
 	@chmod +x scripts/dev.sh
 	@./scripts/dev.sh
 
 dev-api:
-	go run ./cmd/api
+	unset GOROOT; GOTOOLCHAIN=$${GOTOOLCHAIN:-go1.27.1} go run ./cmd/api
 
 dev-web:
-	cd web && npm run dev
+	cd web && npm run dev -- --host 0.0.0.0 --port 5173
+
+run-api:
+	unset GOROOT; GOTOOLCHAIN=$${GOTOOLCHAIN:-go1.27.1} go run ./cmd/api
+
+run-worker:
+	unset GOROOT; GOTOOLCHAIN=$${GOTOOLCHAIN:-go1.27.1} go run ./cmd/worker
 
 migrate-up:
 	@test -f .env || (echo "missing .env — copy from .env.example" && exit 1)

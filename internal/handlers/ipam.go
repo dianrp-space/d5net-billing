@@ -62,6 +62,10 @@ func registerIPAM(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		if err := syncIPPoolToRouter(ctx, d, out); err != nil {
+			return nil, httpx.BadRequest("pool tersimpan, tapi gagal sync ke RouterOS: " + err.Error())
+		}
+		resyncPoolAssignments(ctx, d, out)
 		return &struct{ Body store.IPPool }{Body: *out}, nil
 	})
 
@@ -82,6 +86,13 @@ func registerIPAM(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
+		old, err := d.Store.GetIPPool(ctx, tid, input.ID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound("pool tidak ditemukan")
+			}
+			return nil, httpx.Internal(err)
+		}
 		name := strings.TrimSpace(input.Body.Name)
 		network := strings.TrimSpace(input.Body.Network)
 		if name == "" || network == "" {
@@ -101,6 +112,18 @@ func registerIPAM(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		// Remove from previous router if unlinked / renamed / moved.
+		if old.RouterID != nil {
+			moved := out.RouterID == nil || *old.RouterID != *out.RouterID
+			renamed := old.Name != out.Name
+			if moved || renamed {
+				removeIPPoolFromRouter(ctx, d, tid, *old.RouterID, old.Name)
+			}
+		}
+		if err := syncIPPoolToRouter(ctx, d, out); err != nil {
+			return nil, httpx.BadRequest("pool tersimpan, tapi gagal sync ke RouterOS: " + err.Error())
+		}
+		resyncPoolAssignments(ctx, d, out)
 		return &struct{ Body store.IPPool }{Body: *out}, nil
 	})
 
@@ -114,11 +137,21 @@ func registerIPAM(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
+		old, err := d.Store.GetIPPool(ctx, tid, input.ID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound("pool tidak ditemukan")
+			}
+			return nil, httpx.Internal(err)
+		}
 		if err := d.Store.DeleteIPPool(ctx, tid, input.ID); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, httpx.NotFound("pool tidak ditemukan")
 			}
 			return nil, httpx.Internal(err)
+		}
+		if old.RouterID != nil {
+			removeIPPoolFromRouter(ctx, d, tid, *old.RouterID, old.Name)
 		}
 		return &struct{}{}, nil
 	})
@@ -163,6 +196,13 @@ func registerIPAM(api huma.API, d *Deps) {
 		if ip == "" {
 			return nil, httpx.BadRequest("ip_address wajib")
 		}
+		pool, err := d.Store.GetIPPool(ctx, tid, input.ID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound("pool tidak ditemukan")
+			}
+			return nil, httpx.Internal(err)
+		}
 		status := input.Body.Status
 		if status == "" {
 			status = "assigned"
@@ -173,6 +213,15 @@ func registerIPAM(api huma.API, d *Deps) {
 		}
 		if err := d.Store.AssignIP(ctx, a); err != nil {
 			return nil, httpx.Internal(err)
+		}
+		if a.CustomerID != nil {
+			if err := syncCustomerIPAssignment(ctx, d, pool, *a.CustomerID); err != nil {
+				return nil, httpx.BadRequest("IP tersimpan, tapi gagal sync ke RouterOS: " + err.Error())
+			}
+		} else if pool.RouterID != nil {
+			if err := syncIPPoolToRouter(ctx, d, pool); err != nil {
+				return nil, httpx.BadRequest("IP tersimpan, tapi gagal sync pool ke RouterOS: " + err.Error())
+			}
 		}
 		return &struct{ Body store.IPAssignment }{Body: *a}, nil
 	})
@@ -188,11 +237,28 @@ func registerIPAM(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
+		pool, err := d.Store.GetIPPool(ctx, tid, input.ID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound("pool tidak ditemukan")
+			}
+			return nil, httpx.Internal(err)
+		}
+		asg, err := d.Store.GetIPAssignment(ctx, tid, input.ID, input.AssignmentID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound("assignment tidak ditemukan")
+			}
+			return nil, httpx.Internal(err)
+		}
 		if err := d.Store.DeleteIPAssignment(ctx, tid, input.ID, input.AssignmentID); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, httpx.NotFound("assignment tidak ditemukan")
 			}
 			return nil, httpx.Internal(err)
+		}
+		if asg.CustomerID != nil {
+			clearCustomerStaticIPOnRouter(ctx, d, pool, *asg.CustomerID)
 		}
 		return &struct{}{}, nil
 	})
@@ -221,4 +287,20 @@ func cleanDNS(in []string) []string {
 		return nil
 	}
 	return out
+}
+
+func resyncPoolAssignments(ctx context.Context, d *Deps, pool *store.IPPool) {
+	if pool == nil || pool.RouterID == nil {
+		return
+	}
+	list, err := d.Store.ListIPAssignments(ctx, pool.TenantID, pool.ID)
+	if err != nil {
+		return
+	}
+	for _, a := range list {
+		if a.CustomerID == nil || a.Status != "assigned" {
+			continue
+		}
+		_ = syncCustomerIPAssignment(ctx, d, pool, *a.CustomerID)
+	}
 }

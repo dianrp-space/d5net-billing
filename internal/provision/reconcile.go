@@ -2,6 +2,7 @@ package provision
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -76,6 +77,41 @@ func SanitizeBrandPrefix(appName string) string {
 		s = s[:32]
 	}
 	return s
+}
+
+// FormatRpDots formats an amount like 150000 → "150.000" (Indonesia thousand separator).
+func FormatRpDots(n int64) string {
+	if n < 0 {
+		n = -n
+	}
+	s := strconv.FormatInt(n, 10)
+	if len(s) <= 3 {
+		return s
+	}
+	var b strings.Builder
+	rem := len(s) % 3
+	if rem > 0 {
+		b.WriteString(s[:rem])
+		if len(s) > rem {
+			b.WriteByte('.')
+		}
+	}
+	for i := rem; i < len(s); i += 3 {
+		if i > rem {
+			b.WriteByte('.')
+		}
+		b.WriteString(s[i : i+3])
+	}
+	return b.String()
+}
+
+// ProfileComment is RouterOS comment for PPP/hotspot profiles: "Brand Rp150.000".
+func ProfileComment(appName string, price int64) string {
+	prefix := SanitizeBrandPrefix(appName)
+	if price <= 0 {
+		return prefix
+	}
+	return prefix + " Rp" + FormatRpDots(price)
 }
 
 // CommentTag builds a RouterOS-friendly ownership comment: "Prefix:KODE Nama".

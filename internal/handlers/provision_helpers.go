@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/dianrp/drp-billing/internal/payment"
 	"github.com/dianrp/drp-billing/internal/provision"
@@ -18,6 +19,233 @@ func ownershipComment(ctx context.Context, d *Deps, tenantID xid.ID, code, name 
 		app = "drp-billing"
 	}
 	return provision.CommentTag(app, code, name)
+}
+
+func planProfileName(plan *store.Plan) string {
+	if plan == nil {
+		return ""
+	}
+	if plan.ProfileName != nil {
+		if p := strings.TrimSpace(*plan.ProfileName); p != "" {
+			return p
+		}
+	}
+	return plan.Code
+}
+
+// syncSubscriptionToRouter pushes PPPoE/hotspot secret to RouterOS (remove+add).
+// When oldUsername/oldRouter differ, removes the previous secret first.
+func syncSubscriptionToRouter(
+	ctx context.Context,
+	d *Deps,
+	sub *store.Subscription,
+	plan *store.Plan,
+	oldUsername string,
+	oldRouterID *xid.ID,
+) error {
+	if sub == nil || plan == nil {
+		return nil
+	}
+	switch sub.Status {
+	case "active", "suspended", "overdue":
+	default:
+		// pending / terminated: belum (atau tidak) ada secret di router
+		return nil
+	}
+	password := ""
+	if sub.Password != nil {
+		password = strings.TrimSpace(*sub.Password)
+	}
+	if password == "" {
+		return fmt.Errorf("password PPPoE kosong — isi password saat edit untuk sync ke RouterOS")
+	}
+	profile := planProfileName(plan)
+	comment := ownershipComment(ctx, d, sub.TenantID, sub.CustomerCode, sub.CustomerName)
+
+	removeOn := func(routerID xid.ID, username string) {
+		if username == "" {
+			return
+		}
+		r, err := d.Store.GetRouter(ctx, sub.TenantID, routerID)
+		if err != nil {
+			return
+		}
+		prov, err := d.Provisioner.Get(r.Provisioner)
+		if err != nil {
+			return
+		}
+		_ = prov.Remove(ctx, &provision.ServiceSpec{
+			TenantID: sub.TenantID, SubscriptionID: sub.ID, RouterID: routerID,
+			Username: username, Password: password, ServiceType: sub.ServiceType,
+		})
+	}
+
+	newRouter := sub.RouterID
+	usernameChanged := oldUsername != "" && oldUsername != sub.Username
+	routerChanged := false
+	if oldRouterID != nil && newRouter != nil {
+		routerChanged = *oldRouterID != *newRouter
+	} else if oldRouterID != nil && newRouter == nil {
+		routerChanged = true
+	} else if oldRouterID == nil && newRouter != nil {
+		routerChanged = false // first assign handled by Apply
+	}
+
+	if oldRouterID != nil && (usernameChanged || routerChanged || newRouter == nil) {
+		removeOn(*oldRouterID, oldUsername)
+	}
+	// If only username changed on same router, also remove new name collision then Apply
+	if newRouter != nil && usernameChanged && !routerChanged {
+		removeOn(*newRouter, oldUsername)
+	}
+
+	if newRouter == nil {
+		return nil
+	}
+	r, err := d.Store.GetRouter(ctx, sub.TenantID, *newRouter)
+	if err != nil {
+		return fmt.Errorf("router: %w", err)
+	}
+	prov, err := d.Provisioner.Get(r.Provisioner)
+	if err != nil {
+		return fmt.Errorf("provisioner: %w", err)
+	}
+	spec := &provision.ServiceSpec{
+		TenantID:       sub.TenantID,
+		SubscriptionID: sub.ID,
+		RouterID:       *newRouter,
+		Username:       sub.Username,
+		Password:       password,
+		ServiceType:    sub.ServiceType,
+		ProfileName:    profile,
+		DownloadMbps:   plan.DownloadMbps,
+		UploadMbps:     plan.UploadMbps,
+		Comment:        comment,
+	}
+	applyIPAMToSpec(ctx, d, sub, spec)
+	if ensurer, ok := prov.(provision.ProfileEnsurer); ok && profile != "" {
+		price := plan.Price
+		if cust, err := d.Store.GetCustomer(ctx, sub.TenantID, sub.CustomerID); err == nil && cust != nil {
+			if p, err := d.Store.ResolvePlanPrice(ctx, sub.TenantID, plan.ID, cust.ClusterID); err == nil {
+				price = p
+			}
+		}
+		_ = ensurer.EnsureBandwidthProfile(ctx, sub.TenantID, *newRouter, profile, plan.DownloadMbps, plan.UploadMbps, sub.ServiceType, spec.AddressPool, price)
+	}
+	if err := prov.Apply(ctx, spec); err != nil {
+		return err
+	}
+	// Keep suspended state on router after rewrite
+	if sub.Status == "suspended" {
+		if err := prov.Suspend(ctx, spec); err != nil {
+			slog.Warn("re-suspend after sync", "sub_id", sub.ID, "err", err)
+		}
+	}
+	return nil
+}
+
+// applyIPAMToSpec fills static remote-address / local-address / profile pool from IPAM.
+func applyIPAMToSpec(ctx context.Context, d *Deps, sub *store.Subscription, spec *provision.ServiceSpec) {
+	if sub == nil || spec == nil {
+		return
+	}
+	asg, err := d.Store.GetAssignedIPForCustomer(ctx, sub.TenantID, sub.CustomerID)
+	if err == nil && asg != nil {
+		if asg.Pool.RouterID == nil || sub.RouterID == nil || *asg.Pool.RouterID == *sub.RouterID {
+			spec.IPAddress = strings.TrimSpace(asg.IPAddress)
+			spec.AddressPool = asg.Pool.Name
+			if asg.Pool.Gateway != nil {
+				spec.LocalAddress = strings.TrimSpace(*asg.Pool.Gateway)
+			}
+			return
+		}
+	}
+	// No static assignment: still attach router pool name to PPP profile for dynamic IPs.
+	if sub.RouterID != nil {
+		if p, err := d.Store.GetFirstIPPoolForRouter(ctx, sub.TenantID, *sub.RouterID); err == nil && p != nil {
+			spec.AddressPool = p.Name
+			if p.Gateway != nil {
+				spec.LocalAddress = strings.TrimSpace(*p.Gateway)
+			}
+		}
+	}
+}
+
+// syncIPPoolToRouter creates/updates /ip/pool on the linked MikroTik.
+func syncIPPoolToRouter(ctx context.Context, d *Deps, pool *store.IPPool) error {
+	if pool == nil || pool.RouterID == nil {
+		return nil
+	}
+	r, err := d.Store.GetRouter(ctx, pool.TenantID, *pool.RouterID)
+	if err != nil {
+		return fmt.Errorf("router: %w", err)
+	}
+	prov, err := d.Provisioner.Get(r.Provisioner)
+	if err != nil {
+		return fmt.Errorf("provisioner: %w", err)
+	}
+	ensurer, ok := prov.(provision.IPPoolEnsurer)
+	if !ok {
+		return fmt.Errorf("provisioner %s tidak mendukung IP pool", r.Provisioner)
+	}
+	return ensurer.EnsureIPPool(ctx, pool.TenantID, *pool.RouterID, pool.Name, pool.Network, pool.Gateway)
+}
+
+func removeIPPoolFromRouter(ctx context.Context, d *Deps, tenantID xid.ID, routerID xid.ID, poolName string) {
+	r, err := d.Store.GetRouter(ctx, tenantID, routerID)
+	if err != nil {
+		return
+	}
+	prov, err := d.Provisioner.Get(r.Provisioner)
+	if err != nil {
+		return
+	}
+	ensurer, ok := prov.(provision.IPPoolEnsurer)
+	if !ok {
+		return
+	}
+	if err := ensurer.RemoveIPPool(ctx, tenantID, routerID, poolName); err != nil {
+		slog.Warn("hapus ip pool di RouterOS gagal", "pool", poolName, "err", err)
+	}
+}
+
+// syncCustomerIPAssignment pushes static IP onto the customer's PPP secret (and ensures pool exists).
+func syncCustomerIPAssignment(ctx context.Context, d *Deps, pool *store.IPPool, customerID xid.ID) error {
+	if pool == nil {
+		return nil
+	}
+	if err := syncIPPoolToRouter(ctx, d, pool); err != nil {
+		slog.Warn("sync ip pool ke RouterOS", "pool", pool.Name, "err", err)
+	}
+	sub, err := d.Store.FindProvisionableSubscriptionByCustomer(ctx, pool.TenantID, customerID, pool.RouterID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	plan, err := d.Store.GetPlan(ctx, pool.TenantID, sub.PlanID)
+	if err != nil {
+		return err
+	}
+	return syncSubscriptionToRouter(ctx, d, sub, plan, sub.Username, sub.RouterID)
+}
+
+func clearCustomerStaticIPOnRouter(ctx context.Context, d *Deps, pool *store.IPPool, customerID xid.ID) {
+	if pool == nil {
+		return
+	}
+	sub, err := d.Store.FindProvisionableSubscriptionByCustomer(ctx, pool.TenantID, customerID, pool.RouterID)
+	if err != nil {
+		return
+	}
+	plan, err := d.Store.GetPlan(ctx, pool.TenantID, sub.PlanID)
+	if err != nil {
+		return
+	}
+	if err := syncSubscriptionToRouter(ctx, d, sub, plan, sub.Username, sub.RouterID); err != nil {
+		slog.Warn("clear static IP di RouterOS gagal", "sub_id", sub.ID, "err", err)
+	}
 }
 
 func resumeSubscription(ctx context.Context, d *Deps, tenantID xid.ID, subID xid.ID) {

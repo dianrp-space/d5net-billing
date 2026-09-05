@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, ImageIcon, Users } from "lucide-react";
 import { api, apiUpload, clearPlatformToken } from "./api";
 import { applyBrandingMeta } from "./branding";
 import { BackupRestorePage } from "./BackupRestorePage";
-import { IconDownload, IconImage, IconPencil, IconShield, IconTrash, IconUser, IconUsers } from "./icons";
+import { IconPencil, IconShield, IconTrash, IconUser } from "./icons";
 import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FormDialog, IconButton, IconLink, Section, SecretInput, Table } from "./ui";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -52,7 +54,8 @@ export function PlatformApp({ onLogout }: { onLogout: () => void }) {
   }, [branding.data, page]);
 
   const appName = branding.data?.app_name || "drp-billing";
-  const pageTitle = page === "branding" ? "Branding" : page === "backup" ? "Backup / Restore" : "Tenant";
+  const pageTitle =
+    page === "branding" ? "Branding" : page === "backup" ? "Backup / Restore" : "Tenant";
 
   return (
     <div className="mx-auto max-w-5xl p-6">
@@ -81,39 +84,35 @@ export function PlatformApp({ onLogout }: { onLogout: () => void }) {
         </div>
       </div>
 
-      <div className="mb-6 flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={page === "tenants" ? "btn" : "btn-ghost"}
-          onClick={() => setPage("tenants")}
-        >
-          <span className="inline-flex items-center gap-1.5">
-            <IconUsers size={14} /> Tenant
-          </span>
-        </button>
-        <button
-          type="button"
-          className={page === "branding" ? "btn" : "btn-ghost"}
-          onClick={() => setPage("branding")}
-        >
-          <span className="inline-flex items-center gap-1.5">
-            <IconImage size={14} /> Branding
-          </span>
-        </button>
-        <button
-          type="button"
-          className={page === "backup" ? "btn" : "btn-ghost"}
-          onClick={() => setPage("backup")}
-        >
-          <span className="inline-flex items-center gap-1.5">
-            <IconDownload size={14} /> Backup / Restore
-          </span>
-        </button>
-      </div>
-
-      {page === "tenants" ? <PlatformTenants /> : null}
-      {page === "branding" ? <PlatformBranding /> : null}
-      {page === "backup" ? <BackupRestorePage platform /> : null}
+      <Tabs
+        value={page}
+        onValueChange={(v: string) => setPage(v as PlatformPage)}
+        className="space-y-0"
+      >
+        <TabsList aria-label="Menu platform" className="mb-6">
+          <TabsTrigger value="tenants">
+            <Users />
+            Tenant
+          </TabsTrigger>
+          <TabsTrigger value="branding">
+            <ImageIcon />
+            Branding
+          </TabsTrigger>
+          <TabsTrigger value="backup">
+            <Download />
+            Backup / Restore
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="tenants" className="mt-0">
+          <PlatformTenants />
+        </TabsContent>
+        <TabsContent value="branding" className="mt-0">
+          <PlatformBranding />
+        </TabsContent>
+        <TabsContent value="backup" className="mt-0">
+          <BackupRestorePage platform />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -28,6 +28,10 @@ type Customer struct {
 	CreatedAt     time.Time `json:"created_at"`
 	ClusterName   string    `json:"cluster_name,omitempty"`
 	ClusterCode   string    `json:"cluster_code,omitempty"`
+	ResellerID    *xid.ID   `json:"reseller_id,omitempty"`
+	ResellerName  string    `json:"reseller_name,omitempty"`
+	SalesUserID   *xid.ID   `json:"sales_user_id,omitempty"`
+	SalesUserName string    `json:"sales_user_name,omitempty"`
 }
 
 type CustomerFilter struct {
@@ -66,9 +70,12 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 	q := fmt.Sprintf(`
 		SELECT c.id, c.tenant_id, c.cluster_id, c.customer_code, c.full_name, c.email, c.phone, c.address,
 		       c.latitude, c.longitude, c.is_active, c.portal_enabled, c.created_at,
-		       COALESCE(s.name, ''), COALESCE(s.code, '')
+		       COALESCE(s.name, ''), COALESCE(s.code, ''),
+		       c.reseller_id, COALESCE(r.name, ''), c.sales_user_id, COALESCE(u.full_name, '')
 		FROM customers c
 		LEFT JOIN sites s ON s.id = c.cluster_id
+		LEFT JOIN resellers r ON r.id = c.reseller_id
+		LEFT JOIN users u ON u.id = c.sales_user_id
 		%s ORDER BY c.created_at DESC LIMIT %d OFFSET %d
 	`, where, limit, f.Offset)
 	rows, err := s.Pool.Query(ctx, q, args...)
@@ -80,7 +87,8 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 	for rows.Next() {
 		var c Customer
 		if err := rows.Scan(&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
-			&c.Latitude, &c.Longitude, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode); err != nil {
+			&c.Latitude, &c.Longitude, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode,
+			&c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName); err != nil {
 			return nil, 0, err
 		}
 		list = append(list, c)
@@ -91,7 +99,8 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 func scanCustomer(row pgx.Row) (*Customer, error) {
 	var c Customer
 	err := row.Scan(&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
-		&c.Latitude, &c.Longitude, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode)
+		&c.Latitude, &c.Longitude, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode,
+		&c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -104,9 +113,12 @@ func scanCustomer(row pgx.Row) (*Customer, error) {
 const customerSelect = `
 	SELECT c.id, c.tenant_id, c.cluster_id, c.customer_code, c.full_name, c.email, c.phone, c.address,
 	       c.latitude, c.longitude, c.is_active, c.portal_enabled, c.created_at,
-	       COALESCE(s.name, ''), COALESCE(s.code, '')
+	       COALESCE(s.name, ''), COALESCE(s.code, ''),
+	       c.reseller_id, COALESCE(r.name, ''), c.sales_user_id, COALESCE(u.full_name, '')
 	FROM customers c
 	LEFT JOIN sites s ON s.id = c.cluster_id
+	LEFT JOIN resellers r ON r.id = c.reseller_id
+	LEFT JOIN users u ON u.id = c.sales_user_id
 `
 
 func (s *Store) GetCustomer(ctx context.Context, tenantID xid.ID, id xid.ID) (*Customer, error) {
@@ -122,22 +134,24 @@ func (s *Store) CreateCustomer(ctx context.Context, c *Customer) error {
 	if err := s.SetTenantContext(ctx, c.TenantID); err != nil {
 		return err
 	}
+	c.ResellerID, c.SalesUserID = NormalizeAttribution(c.ResellerID, c.SalesUserID)
 	var hash any
 	if strings.TrimSpace(c.PasswordHash) != "" {
 		hash = c.PasswordHash
 	}
 	return s.Pool.QueryRow(ctx, `
 		INSERT INTO customers (tenant_id, cluster_id, customer_code, full_name, email, phone, address,
-		                       latitude, longitude, is_active, portal_enabled, password_hash)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, created_at
+		                       latitude, longitude, is_active, portal_enabled, password_hash, reseller_id, sales_user_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id, created_at
 	`, c.TenantID, c.ClusterID, c.CustomerCode, c.FullName, c.Email, c.Phone, c.Address,
-		c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled, hash).Scan(&c.ID, &c.CreatedAt)
+		c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled, hash, c.ResellerID, c.SalesUserID).Scan(&c.ID, &c.CreatedAt)
 }
 
 func (s *Store) UpdateCustomer(ctx context.Context, c *Customer) error {
 	if err := s.SetTenantContext(ctx, c.TenantID); err != nil {
 		return err
 	}
+	c.ResellerID, c.SalesUserID = NormalizeAttribution(c.ResellerID, c.SalesUserID)
 	var (
 		tag interface{ RowsAffected() int64 }
 		err error
@@ -146,18 +160,20 @@ func (s *Store) UpdateCustomer(ctx context.Context, c *Customer) error {
 		tag, err = s.Pool.Exec(ctx, `
 			UPDATE customers SET cluster_id=$3, full_name=$4, email=$5, phone=$6, address=$7,
 			                      customer_code=$8, latitude=$9, longitude=$10,
-			                      is_active=$11, portal_enabled=$12, password_hash=$13, updated_at=NOW()
+			                      is_active=$11, portal_enabled=$12, password_hash=$13,
+			                      reseller_id=$14, sales_user_id=$15, updated_at=NOW()
 			WHERE tenant_id=$1 AND id=$2
 		`, c.TenantID, c.ID, c.ClusterID, c.FullName, c.Email, c.Phone, c.Address, c.CustomerCode,
-			c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled, c.PasswordHash)
+			c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled, c.PasswordHash, c.ResellerID, c.SalesUserID)
 	} else {
 		tag, err = s.Pool.Exec(ctx, `
 			UPDATE customers SET cluster_id=$3, full_name=$4, email=$5, phone=$6, address=$7,
 			                      customer_code=$8, latitude=$9, longitude=$10,
-			                      is_active=$11, portal_enabled=$12, updated_at=NOW()
+			                      is_active=$11, portal_enabled=$12,
+			                      reseller_id=$13, sales_user_id=$14, updated_at=NOW()
 			WHERE tenant_id=$1 AND id=$2
 		`, c.TenantID, c.ID, c.ClusterID, c.FullName, c.Email, c.Phone, c.Address, c.CustomerCode,
-			c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled)
+			c.Latitude, c.Longitude, c.IsActive, c.PortalEnabled, c.ResellerID, c.SalesUserID)
 	}
 	if err != nil {
 		return err
@@ -217,7 +233,8 @@ func (s *Store) ListCustomersWithCoords(ctx context.Context, tenantID xid.ID) ([
 	for rows.Next() {
 		var c Customer
 		if err := rows.Scan(&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
-			&c.Latitude, &c.Longitude, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode); err != nil {
+			&c.Latitude, &c.Longitude, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode,
+			&c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName); err != nil {
 			return nil, err
 		}
 		list = append(list, c)

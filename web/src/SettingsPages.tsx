@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Globe, UserRound } from "lucide-react";
 import { api, apiUpload } from "./api";
 import { IconPencil, IconTrash } from "./icons";
 import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
 
 type Branding = {
@@ -617,48 +619,64 @@ export function UsersSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Section
-        title="User staf"
-        actions={
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              setForm({
-                email: "",
-                password: "",
-                full_name: "",
-                phone: "",
-                role_id: roleList[0]?.id || "",
-              });
-              setErr("");
-              setCreateOpen(true);
-            }}
+      <Tabs defaultValue="staff" className="space-y-0">
+        <TabsList aria-label="Users">
+          <TabsTrigger value="staff">
+            <UserRound />
+            User staf
+          </TabsTrigger>
+          <TabsTrigger value="portal">
+            <Globe />
+            Portal pelanggan
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="staff">
+          <Section
+            title="User staf"
+            actions={
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setForm({
+                    email: "",
+                    password: "",
+                    full_name: "",
+                    phone: "",
+                    role_id: roleList[0]?.id || "",
+                  });
+                  setErr("");
+                  setCreateOpen(true);
+                }}
+              >
+                + User
+              </button>
+            }
           >
-            + User
-          </button>
-        }
-      >
-        {users.isLoading ? (
-          <p className="text-[var(--muted)]">Memuat...</p>
-        ) : (
-          <Table columns={["Nama", "Email", "Role", "Status", "Aksi"]} rows={staffRows} />
-        )}
-      </Section>
-
-      <Section title="Portal pelanggan">
-        <p className="mb-3 text-sm text-[var(--muted)]">
-          Password default portal = nomor HP pelanggan. Kosongkan field password saat edit untuk mempertahankan password yang ada (atau mengisi otomatis dari HP bila belum punya password).
-        </p>
-        {portal.isLoading ? (
-          <p className="text-[var(--muted)]">Memuat...</p>
-        ) : (
-          <Table
-            columns={["Kode", "Nama", "Telepon", "Portal", "Password", "Aksi"]}
-            rows={portalRows}
-          />
-        )}
-      </Section>
+            {users.isLoading ? (
+              <p className="text-[var(--muted)]">Memuat...</p>
+            ) : (
+              <Table columns={["Nama", "Email", "Role", "Status", "Aksi"]} rows={staffRows} />
+            )}
+          </Section>
+        </TabsContent>
+        <TabsContent value="portal">
+          <Section title="Portal pelanggan">
+            <p className="mb-3 text-sm text-[var(--muted)]">
+              Password default portal = nomor HP pelanggan. Kosongkan field password saat edit untuk
+              mempertahankan password yang ada (atau mengisi otomatis dari HP bila belum punya password).
+            </p>
+            {portal.isLoading ? (
+              <p className="text-[var(--muted)]">Memuat...</p>
+            ) : (
+              <Table
+                columns={["Kode", "Nama", "Telepon", "Portal", "Password", "Aksi"]}
+                rows={portalRows}
+              />
+            )}
+          </Section>
+        </TabsContent>
+      </Tabs>
 
       <FormDialog open={createOpen} title="Tambah user staf" onClose={() => setCreateOpen(false)} wide>
         <form

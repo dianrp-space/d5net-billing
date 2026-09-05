@@ -136,7 +136,7 @@ func (s *Store) ListIPPools(ctx context.Context, tenantID xid.ID) ([]IPPool, err
 	var list []IPPool
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, p.gateway::text, p.dns_servers,
+			SELECT p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, host(p.gateway), p.dns_servers,
 			       COALESCE((SELECT COUNT(*) FROM ip_assignments a WHERE a.pool_id = p.id), 0)
 			FROM ip_pools p
 			LEFT JOIN routers r ON r.id = p.router_id
@@ -163,12 +163,36 @@ func (s *Store) GetIPPool(ctx context.Context, tenantID, id xid.ID) (*IPPool, er
 	var p IPPool
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
-			SELECT p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, p.gateway::text, p.dns_servers,
+			SELECT p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, host(p.gateway), p.dns_servers,
 			       COALESCE((SELECT COUNT(*) FROM ip_assignments a WHERE a.pool_id = p.id), 0)
 			FROM ip_pools p
 			LEFT JOIN routers r ON r.id = p.router_id
 			WHERE p.tenant_id = $1 AND p.id = $2
 		`, tenantID, id)
+		err := row.Scan(&p.ID, &p.TenantID, &p.RouterID, &p.RouterName, &p.Name, &p.Network, &p.Gateway, &p.DNSServers, &p.UsedCount)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (s *Store) GetFirstIPPoolForRouter(ctx context.Context, tenantID, routerID xid.ID) (*IPPool, error) {
+	var p IPPool
+	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `
+			SELECT p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, host(p.gateway), p.dns_servers,
+			       COALESCE((SELECT COUNT(*) FROM ip_assignments a WHERE a.pool_id = p.id), 0)
+			FROM ip_pools p
+			LEFT JOIN routers r ON r.id = p.router_id
+			WHERE p.tenant_id = $1 AND p.router_id = $2
+			ORDER BY p.name
+			LIMIT 1
+		`, tenantID, routerID)
 		err := row.Scan(&p.ID, &p.TenantID, &p.RouterID, &p.RouterName, &p.Name, &p.Network, &p.Gateway, &p.DNSServers, &p.UsedCount)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -234,7 +258,7 @@ func (s *Store) ListIPAssignments(ctx context.Context, tenantID xid.ID, poolID x
 	var list []IPAssignment
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT a.id, a.tenant_id, a.pool_id, a.customer_id, c.full_name, a.ip_address::text, a.mac_address::text, a.status
+			SELECT a.id, a.tenant_id, a.pool_id, a.customer_id, c.full_name, host(a.ip_address), a.mac_address::text, a.status
 			FROM ip_assignments a
 			LEFT JOIN customers c ON c.id = a.customer_id
 			WHERE a.tenant_id = $1 AND a.pool_id = $2
@@ -265,6 +289,27 @@ func (s *Store) AssignIP(ctx context.Context, a *IPAssignment) error {
 	})
 }
 
+func (s *Store) GetIPAssignment(ctx context.Context, tenantID, poolID, id xid.ID) (*IPAssignment, error) {
+	var a IPAssignment
+	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `
+			SELECT a.id, a.tenant_id, a.pool_id, a.customer_id, c.full_name, host(a.ip_address), a.mac_address::text, a.status
+			FROM ip_assignments a
+			LEFT JOIN customers c ON c.id = a.customer_id
+			WHERE a.tenant_id = $1 AND a.pool_id = $2 AND a.id = $3
+		`, tenantID, poolID, id)
+		err := row.Scan(&a.ID, &a.TenantID, &a.PoolID, &a.CustomerID, &a.CustomerName, &a.IPAddress, &a.MACAddress, &a.Status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 func (s *Store) DeleteIPAssignment(ctx context.Context, tenantID, poolID, id xid.ID) error {
 	return s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
@@ -278,6 +323,43 @@ func (s *Store) DeleteIPAssignment(ctx context.Context, tenantID, poolID, id xid
 		}
 		return nil
 	})
+}
+
+// CustomerIPAssignment is a static IP bound to a customer via IPAM.
+type CustomerIPAssignment struct {
+	IPAddress string
+	Pool      IPPool
+}
+
+// GetAssignedIPForCustomer returns the latest assigned IP (+ pool) for a customer.
+func (s *Store) GetAssignedIPForCustomer(ctx context.Context, tenantID, customerID xid.ID) (*CustomerIPAssignment, error) {
+	var out CustomerIPAssignment
+	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `
+			SELECT host(a.ip_address),
+			       p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, host(p.gateway), p.dns_servers,
+			       COALESCE((SELECT COUNT(*) FROM ip_assignments x WHERE x.pool_id = p.id), 0)
+			FROM ip_assignments a
+			JOIN ip_pools p ON p.id = a.pool_id AND p.tenant_id = a.tenant_id
+			LEFT JOIN routers r ON r.id = p.router_id
+			WHERE a.tenant_id = $1 AND a.customer_id = $2 AND a.status = 'assigned'
+			ORDER BY a.id DESC
+			LIMIT 1
+		`, tenantID, customerID)
+		err := row.Scan(
+			&out.IPAddress,
+			&out.Pool.ID, &out.Pool.TenantID, &out.Pool.RouterID, &out.Pool.RouterName,
+			&out.Pool.Name, &out.Pool.Network, &out.Pool.Gateway, &out.Pool.DNSServers, &out.Pool.UsedCount,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (s *Store) SaveRouterBackup(ctx context.Context, tenantID xid.ID, routerID xid.ID, filename, content, checksum string) error {
