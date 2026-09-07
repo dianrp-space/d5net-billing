@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -676,7 +677,7 @@ func registerCustomers(api huma.API, d *Deps) {
 		Search    string `query:"search"`
 		ClusterID string `query:"cluster_id"`
 		IsActive  string `query:"is_active"`
-		Limit     int    `query:"limit" minimum:"1" maximum:"100"`
+		Limit     int    `query:"limit" minimum:"1" maximum:"1000"`
 		Offset    int    `query:"offset" minimum:"0"`
 	}) (*struct {
 		Body struct {
@@ -920,6 +921,315 @@ func registerCustomers(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "deleted"}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "export-customers-csv", Method: http.MethodGet, Path: "/api/customers/export.csv",
+		Summary: "Export customers as CSV", Tags: []string{"Customers"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ClusterID string `query:"cluster_id"`
+		IsActive  string `query:"is_active"`
+	}) (*struct {
+		ContentType        string `header:"Content-Type"`
+		ContentDisposition string `header:"Content-Disposition"`
+		Body               []byte
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		clusterID, err := optionalQueryID(input.ClusterID)
+		if err != nil {
+			return nil, err
+		}
+		var isActive *bool
+		switch strings.ToLower(strings.TrimSpace(input.IsActive)) {
+		case "true", "1", "aktif", "active":
+			v := true
+			isActive = &v
+		case "false", "0", "nonaktif", "inactive":
+			v := false
+			isActive = &v
+		}
+		list, _, err := d.Store.ListCustomers(ctx, store.CustomerFilter{
+			TenantID: tid, ClusterID: clusterID, IsActive: isActive, Limit: 100000, Offset: 0,
+		})
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		var buf bytes.Buffer
+		w := csv.NewWriter(&buf)
+		_ = w.Write([]string{"customer_code", "full_name", "phone", "email", "address", "cluster_code",
+			"latitude", "longitude", "identity_type", "identity_number", "is_active", "portal_enabled"})
+		for _, c := range list {
+			email, addr, ccode := "", "", ""
+			if c.Email != nil {
+				email = *c.Email
+			}
+			if c.Address != nil {
+				addr = *c.Address
+			}
+			if c.ClusterID != nil {
+				ccode = c.ClusterCode
+			}
+			lat, lng := "", ""
+			if c.Latitude != nil {
+				lat = strconv.FormatFloat(*c.Latitude, 'f', -1, 64)
+			}
+			if c.Longitude != nil {
+				lng = strconv.FormatFloat(*c.Longitude, 'f', -1, 64)
+			}
+			idType, idNum := "", ""
+			if c.IdentityType != nil {
+				idType = *c.IdentityType
+			}
+			if c.IdentityNumber != nil {
+				idNum = *c.IdentityNumber
+			}
+			_ = w.Write([]string{c.CustomerCode, c.FullName, c.Phone, email, addr, ccode, lat, lng,
+				idType, idNum, strconv.FormatBool(c.IsActive), strconv.FormatBool(c.PortalEnabled)})
+		}
+		w.Flush()
+		if err := w.Error(); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct {
+			ContentType        string `header:"Content-Type"`
+			ContentDisposition string `header:"Content-Disposition"`
+			Body               []byte
+		}{
+			ContentType:        "text/csv; charset=utf-8",
+			ContentDisposition: `attachment; filename="customers.csv"`,
+			Body:               buf.Bytes(),
+		}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "import-customers-csv", Method: http.MethodPost, Path: "/api/customers/import",
+		Summary: "Import customers from CSV (upsert by customer_code)", Tags: []string{"Customers"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			CSV string `json:"csv"`
+		}
+	}) (*struct {
+		Body struct {
+			Created int      `json:"created"`
+			Updated int      `json:"updated"`
+			Skipped int      `json:"skipped"`
+			Errors  []string `json:"errors,omitempty"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		raw := strings.TrimSpace(input.Body.CSV)
+		if raw == "" {
+			return nil, httpx.BadRequest("csv is required")
+		}
+		clusters, err := d.Store.ListClusters(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		idByCode := map[string]xid.ID{}
+		for _, c := range clusters {
+			idByCode[strings.ToUpper(c.Code)] = c.ID
+		}
+
+		r := csv.NewReader(strings.NewReader(raw))
+		r.TrimLeadingSpace = true
+		r.FieldsPerRecord = -1
+		records, err := r.ReadAll()
+		if err != nil {
+			return nil, httpx.BadRequest("invalid csv: " + err.Error())
+		}
+		if len(records) == 0 {
+			return nil, httpx.BadRequest("csv is empty")
+		}
+
+		header := map[string]int{}
+		start := 0
+		first := records[0]
+		looksHeader := false
+		for i, h := range first {
+			key := strings.ToLower(strings.TrimSpace(h))
+			header[key] = i
+			if key == "full_name" || key == "phone" || key == "customer_code" {
+				looksHeader = true
+			}
+		}
+		if looksHeader {
+			start = 1
+		} else {
+			header = map[string]int{"customer_code": 0, "full_name": 1, "phone": 2, "email": 3, "address": 4,
+				"cluster_code": 5, "latitude": 6, "longitude": 7, "identity_type": 8, "identity_number": 9,
+				"is_active": 10, "portal_enabled": 11}
+		}
+		col := func(row []string, key string) string {
+			i, ok := header[key]
+			if !ok || i < 0 || i >= len(row) {
+				return ""
+			}
+			return strings.TrimSpace(row[i])
+		}
+		parseBool := func(v string, def bool) bool {
+			switch strings.ToLower(v) {
+			case "true", "1", "yes", "y", "aktif", "active":
+				return true
+			case "false", "0", "no", "n", "nonaktif", "inactive":
+				return false
+			}
+			return def
+		}
+
+		created, updated, skipped := 0, 0, 0
+		var errs []string
+		for i := start; i < len(records); i++ {
+			row := records[i]
+			if len(row) == 0 || (len(row) == 1 && strings.TrimSpace(row[0]) == "") {
+				continue
+			}
+			name := col(row, "full_name")
+			phone := col(row, "phone")
+			if name == "" || phone == "" {
+				skipped++
+				errs = append(errs, fmt.Sprintf("baris %d: full_name dan phone wajib", i+1))
+				continue
+			}
+			var clusterID *xid.ID
+			if cc := col(row, "cluster_code"); cc != "" {
+				if id, ok := idByCode[strings.ToUpper(cc)]; ok {
+					cid := id
+					clusterID = &cid
+				} else {
+					errs = append(errs, fmt.Sprintf("baris %d: cluster_code %q tidak ditemukan", i+1, cc))
+					skipped++
+					continue
+				}
+			}
+			var lat, lng *float64
+			if v := col(row, "latitude"); v != "" {
+				if f, perr := strconv.ParseFloat(v, 64); perr == nil {
+					lat = &f
+				} else {
+					errs = append(errs, fmt.Sprintf("baris %d: latitude tidak valid", i+1))
+					skipped++
+					continue
+				}
+			}
+			if v := col(row, "longitude"); v != "" {
+				if f, perr := strconv.ParseFloat(v, 64); perr == nil {
+					lng = &f
+				} else {
+					errs = append(errs, fmt.Sprintf("baris %d: longitude tidak valid", i+1))
+					skipped++
+					continue
+				}
+			}
+			var email, addr *string
+			if v := col(row, "email"); v != "" {
+				email = &v
+			}
+			if v := col(row, "address"); v != "" {
+				addr = &v
+			}
+			var identityType *string
+			if v := col(row, "identity_type"); v != "" {
+				identityType = normalizeIdentityType(&v)
+			}
+			var identityNumber *string
+			if v := col(row, "identity_number"); v != "" {
+				identityNumber = &v
+			}
+
+			code := col(row, "customer_code")
+			existing, gerr := d.Store.GetCustomerByCode(ctx, tid, code)
+			if gerr != nil && !errors.Is(gerr, store.ErrNotFound) {
+				errs = append(errs, fmt.Sprintf("baris %d: gagal baca", i+1))
+				skipped++
+				continue
+			}
+			if gerr == nil {
+				phoneChanged := existing.Phone != phone
+				existing.FullName = name
+				existing.Phone = phone
+				existing.Email = email
+				existing.Address = addr
+				existing.Latitude = lat
+				existing.Longitude = lng
+				existing.IdentityType = identityType
+				existing.IdentityNumber = identityNumber
+				if clusterID != nil {
+					existing.ClusterID = clusterID
+				}
+				existing.IsActive = parseBool(col(row, "is_active"), existing.IsActive)
+				existing.PortalEnabled = parseBool(col(row, "portal_enabled"), existing.PortalEnabled)
+				if phoneChanged {
+					if hash, herr := auth.HashPassword(phone); herr == nil {
+						existing.PasswordHash = hash
+					}
+				}
+				if err := d.Store.UpdateCustomer(ctx, existing); err != nil {
+					errs = append(errs, fmt.Sprintf("baris %d: gagal update", i+1))
+					skipped++
+					continue
+				}
+				updated++
+				continue
+			}
+			if code == "" {
+				if clusterID != nil {
+					code, err = d.Store.NextCustomerCodeForCluster(ctx, tid, *clusterID)
+				} else {
+					code, err = d.Store.NextCustomerCode(ctx, tid)
+				}
+				if err != nil {
+					errs = append(errs, fmt.Sprintf("baris %d: gagal buat kode", i+1))
+					skipped++
+					continue
+				}
+			}
+			hash, herr := auth.HashPassword(phone)
+			if herr != nil {
+				errs = append(errs, fmt.Sprintf("baris %d: gagal proses password", i+1))
+				skipped++
+				continue
+			}
+			nc := &store.Customer{
+				TenantID: tid, ClusterID: clusterID, CustomerCode: code,
+				FullName: name, Email: email, Phone: phone, Address: addr,
+				Latitude: lat, Longitude: lng,
+				IdentityType: identityType, IdentityNumber: identityNumber,
+				IsActive:      parseBool(col(row, "is_active"), true),
+				PortalEnabled: parseBool(col(row, "portal_enabled"), true),
+				PasswordHash:  hash,
+			}
+			if err := d.Store.CreateCustomer(ctx, nc); err != nil {
+				errs = append(errs, fmt.Sprintf("baris %d: gagal buat", i+1))
+				skipped++
+				continue
+			}
+			created++
+		}
+
+		out := &struct {
+			Body struct {
+				Created int      `json:"created"`
+				Updated int      `json:"updated"`
+				Skipped int      `json:"skipped"`
+				Errors  []string `json:"errors,omitempty"`
+			}
+		}{}
+		out.Body.Created = created
+		out.Body.Updated = updated
+		out.Body.Skipped = skipped
+		if len(errs) > 20 {
+			errs = append(errs[:20], fmt.Sprintf("… +%d error lain", len(errs)-20))
+		}
+		out.Body.Errors = errs
+		return out, nil
 	})
 
 	registerCustomerDocuments(api, d)
@@ -1670,6 +1980,30 @@ func syncPlanProfileToCluster(ctx context.Context, d *Deps, tid xid.ID, o *store
 	return results, synced, failed
 }
 
+// parseFlexibleDateTime parses RFC 3339 ("2006-01-02T15:04:05Z07:00"),
+// local datetime ("2006-01-02T15:04:05", assumed server-local, e.g. what the
+// web date inputs send), or a plain date ("2006-01-02", assumed local noon).
+// Returns ok=false when input is nil/empty (caller applies its default).
+func parseFlexibleDateTime(raw *string, loc *time.Location) (t time.Time, ok bool, err error) {
+	if raw == nil {
+		return time.Time{}, false, nil
+	}
+	s := strings.TrimSpace(*raw)
+	if s == "" {
+		return time.Time{}, false, nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, true, nil
+	}
+	if t, err := time.ParseInLocation("2006-01-02T15:04:05", s, loc); err == nil {
+		return t, true, nil
+	}
+	if t, err := time.ParseInLocation("2006-01-02", s, loc); err == nil {
+		return time.Date(t.Year(), t.Month(), t.Day(), 12, 0, 0, 0, loc), true, nil
+	}
+	return time.Time{}, false, httpx.BadRequest("format tanggal tidak valid (pakai YYYY-MM-DD atau RFC 3339)")
+}
+
 func registerSubscriptions(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-subscriptions", Method: http.MethodGet, Path: "/api/subscriptions",
@@ -2075,9 +2409,10 @@ func registerSubscriptions(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			StartedAt  *time.Time `json:"started_at,omitempty"`
-			NextBillAt *time.Time `json:"next_bill_at,omitempty"`
-			Prorate    *bool      `json:"prorate,omitempty"`
+			// Accepts RFC 3339, local "YYYY-MM-DDTHH:mm:ss", or plain "YYYY-MM-DD".
+			StartedAt  *string `json:"started_at,omitempty"`
+			NextBillAt *string `json:"next_bill_at,omitempty"`
+			Prorate    *bool   `json:"prorate,omitempty"`
 		}
 	}) (*struct {
 		Body struct {
@@ -2154,8 +2489,10 @@ func registerSubscriptions(api huma.API, d *Deps) {
 
 		now := time.Now()
 		start := now
-		if input.Body.StartedAt != nil && !input.Body.StartedAt.IsZero() {
-			start = input.Body.StartedAt.In(now.Location())
+		if st, ok, perr := parseFlexibleDateTime(input.Body.StartedAt, now.Location()); perr != nil {
+			return nil, perr
+		} else if ok {
+			start = st.In(now.Location())
 		}
 		// Normalize to local noon to avoid timezone day-shift when only a date is sent.
 		start = time.Date(start.Year(), start.Month(), start.Day(), 12, 0, 0, 0, now.Location())
@@ -2166,11 +2503,17 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		}
 
 		var nextBill time.Time
-		if useProrate && input.Body.NextBillAt != nil && !input.Body.NextBillAt.IsZero() {
-			nb := input.Body.NextBillAt.In(now.Location())
-			nextBill = time.Date(nb.Year(), nb.Month(), nb.Day(), 12, 0, 0, 0, now.Location())
-			if !nextBill.After(start) {
-				return nil, httpx.BadRequest("tanggal tagihan berikutnya harus setelah tanggal mulai")
+		if useProrate {
+			if nb, ok, perr := parseFlexibleDateTime(input.Body.NextBillAt, now.Location()); perr != nil {
+				return nil, perr
+			} else if ok {
+				n := nb.In(now.Location())
+				nextBill = time.Date(n.Year(), n.Month(), n.Day(), 12, 0, 0, 0, now.Location())
+				if !nextBill.After(start) {
+					return nil, httpx.BadRequest("tanggal tagihan berikutnya harus setelah tanggal mulai")
+				}
+			} else {
+				nextBill = d.Billing.NextBillDate(start, plan.BillingCycle)
 			}
 		} else {
 			nextBill = d.Billing.NextBillDate(start, plan.BillingCycle)
@@ -3914,6 +4257,7 @@ func registerPortal(api huma.API, d *Deps) {
 	}) (*struct {
 		Body struct {
 			Customer      store.Customer       `json:"customer"`
+			Customers     []store.Customer     `json:"customers"`
 			Subscriptions []store.Subscription `json:"subscriptions"`
 			Invoices      []store.Invoice      `json:"invoices"`
 			Payments      []store.Payment      `json:"payments"`
@@ -3922,29 +4266,75 @@ func registerPortal(api huma.API, d *Deps) {
 			TenantName    string               `json:"tenant_name"`
 		}
 	}, error) {
-		ten, cust, err := authenticatePortalCustomer(ctx, d, input.Body.TenantSlug, input.Body.TenantID, input.Body.Phone, input.Body.Password)
+		ten, custs, err := authenticatePortalCustomers(ctx, d, input.Body.TenantSlug, input.Body.TenantID, input.Body.Phone, input.Body.Password)
 		if err != nil {
 			return nil, err
 		}
-		invoices, _, _ := d.Store.ListInvoices(ctx, ten.ID, "", "", 20, 0)
+		byID := map[xid.ID]*store.Customer{}
+		for _, c := range custs {
+			byID[c.ID] = c
+		}
+		customers := make([]store.Customer, 0, len(custs))
+		for _, c := range custs {
+			customers = append(customers, *c)
+		}
+		var subs []store.Subscription
+		for _, c := range custs {
+			cid := c.ID
+			list, _, _ := d.Store.ListSubscriptions(ctx, ten.ID, "", &cid, 200, 0)
+			subs = append(subs, list...)
+		}
+		if subs == nil {
+			subs = []store.Subscription{}
+		}
+		// Tenant-wide recent invoices, then keep only rows of the logged-in accounts.
+		allInv, _, _ := d.Store.ListInvoices(ctx, ten.ID, "", "", 500, 0)
 		var custInvoices []store.Invoice
-		for _, inv := range invoices {
-			if inv.CustomerID == cust.ID {
-				custInvoices = append(custInvoices, inv)
+		for _, inv := range allInv {
+			c, ok := byID[inv.CustomerID]
+			if !ok {
+				continue
+			}
+			inv.CustomerCode = c.CustomerCode
+			custInvoices = append(custInvoices, inv)
+		}
+		if custInvoices == nil {
+			custInvoices = []store.Invoice{}
+		}
+		sort.Slice(custInvoices, func(i, j int) bool {
+			return custInvoices[i].DueDate.After(custInvoices[j].DueDate)
+		})
+		var payments []store.Payment
+		var balance int64
+		for _, c := range custs {
+			plist, _ := d.Store.ListCustomerPayments(ctx, ten.ID, c.ID, 20)
+			for i := range plist {
+				plist[i].CustomerName = c.FullName
+				plist[i].CustomerCode = c.CustomerCode
+				payments = append(payments, plist[i])
+			}
+			if b, berr := d.Store.GetWallet(ctx, ten.ID, c.ID); berr == nil {
+				balance += b
 			}
 		}
-		subs, _, _ := d.Store.ListSubscriptions(ctx, ten.ID, "", nil, 100, 0)
-		var custSubs []store.Subscription
-		for _, s := range subs {
-			if s.CustomerID == cust.ID {
-				custSubs = append(custSubs, s)
-			}
+		if payments == nil {
+			payments = []store.Payment{}
 		}
-		payments, _ := d.Store.ListCustomerPayments(ctx, ten.ID, cust.ID, 20)
-		balance, _ := d.Store.GetWallet(ctx, ten.ID, cust.ID)
+		sort.Slice(payments, func(i, j int) bool {
+			ti := payments[i].PaidAt
+			if ti == nil {
+				ti = &payments[i].CreatedAt
+			}
+			tj := payments[j].PaidAt
+			if tj == nil {
+				tj = &payments[j].CreatedAt
+			}
+			return ti.After(*tj)
+		})
 		out := &struct {
 			Body struct {
 				Customer      store.Customer       `json:"customer"`
+				Customers     []store.Customer     `json:"customers"`
 				Subscriptions []store.Subscription `json:"subscriptions"`
 				Invoices      []store.Invoice      `json:"invoices"`
 				Payments      []store.Payment      `json:"payments"`
@@ -3953,8 +4343,9 @@ func registerPortal(api huma.API, d *Deps) {
 				TenantName    string               `json:"tenant_name"`
 			}
 		}{}
-		out.Body.Customer = *cust
-		out.Body.Subscriptions = custSubs
+		out.Body.Customer = customers[0]
+		out.Body.Customers = customers
+		out.Body.Subscriptions = subs
 		out.Body.Invoices = custInvoices
 		out.Body.Payments = payments
 		out.Body.WalletBalance = balance
@@ -3968,19 +4359,36 @@ func registerPortal(api huma.API, d *Deps) {
 		Summary: "Change portal password", Tags: []string{"Portal"},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			TenantSlug      string `json:"tenant_slug"`
-			Phone           string `json:"phone"`
-			CurrentPassword string `json:"current_password"`
-			NewPassword     string `json:"new_password"`
+			TenantSlug      string  `json:"tenant_slug"`
+			Phone           string  `json:"phone"`
+			CurrentPassword string  `json:"current_password"`
+			NewPassword     string  `json:"new_password"`
+			CustomerID      *xid.ID `json:"customer_id,omitempty"`
 		}
 	}) (*struct{ Body map[string]string }, error) {
 		newPW := strings.TrimSpace(input.Body.NewPassword)
 		if len(newPW) < 6 {
 			return nil, httpx.BadRequest("password baru minimal 6 karakter")
 		}
-		ten, cust, err := authenticatePortalCustomer(ctx, d, input.Body.TenantSlug, xid.Nil(), input.Body.Phone, input.Body.CurrentPassword)
+		ten, custs, err := authenticatePortalCustomers(ctx, d, input.Body.TenantSlug, xid.Nil(), input.Body.Phone, input.Body.CurrentPassword)
 		if err != nil {
 			return nil, err
+		}
+		target := custs[0]
+		if input.Body.CustomerID != nil {
+			found := false
+			for _, c := range custs {
+				if c.ID == *input.Body.CustomerID {
+					target = c
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, httpx.BadRequest("akun tidak ditemukan")
+			}
+		} else if len(custs) > 1 {
+			return nil, httpx.BadRequest("pilih akun yang passwordnya diubah")
 		}
 		if newPW == strings.TrimSpace(input.Body.CurrentPassword) {
 			return nil, httpx.BadRequest("password baru harus berbeda dari password lama")
@@ -3989,15 +4397,16 @@ func registerPortal(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		if err := d.Store.UpdatePortalUser(ctx, ten.ID, cust.ID, true, &hash); err != nil {
+		if err := d.Store.UpdatePortalUser(ctx, ten.ID, target.ID, true, &hash); err != nil {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "ok"}}, nil
 	})
 }
 
-// authenticatePortalCustomer resolves tenant + customer and verifies portal password.
-func authenticatePortalCustomer(ctx context.Context, d *Deps, tenantSlug string, tenantID xid.ID, phone, password string) (*store.Tenant, *store.Customer, error) {
+// authenticatePortalCustomers resolves tenant + ALL customers sharing the phone
+// number whose portal password verifies (one payer, several installations).
+func authenticatePortalCustomers(ctx context.Context, d *Deps, tenantSlug string, tenantID xid.ID, phone, password string) (*store.Tenant, []*store.Customer, error) {
 	slug := strings.ToLower(strings.TrimSpace(tenantSlug))
 	var ten *store.Tenant
 	var err error
@@ -4019,35 +4428,46 @@ func authenticatePortalCustomer(ctx context.Context, d *Deps, tenantSlug string,
 	if !ten.IsActive {
 		return nil, nil, httpx.Unauthorized("tenant inactive")
 	}
-	cust, err := d.Store.GetCustomerByPhone(ctx, tid, strings.TrimSpace(phone))
-	if err != nil {
-		return nil, nil, httpx.Unauthorized("invalid credentials")
-	}
-	if !cust.IsActive || !cust.PortalEnabled {
-		return nil, nil, httpx.Unauthorized("invalid credentials")
-	}
+	phone = strings.TrimSpace(phone)
 	pw := strings.TrimSpace(password)
-	if pw == "" {
+	if phone == "" || pw == "" {
 		return nil, nil, httpx.Unauthorized("invalid credentials")
 	}
-	hash, err := d.Store.GetCustomerPasswordHash(ctx, tid, cust.ID)
+	candidates, err := d.Store.ListCustomersByPhone(ctx, tid, phone)
 	if err != nil {
-		return nil, nil, httpx.Unauthorized("invalid credentials")
+		return nil, nil, httpx.Internal(err)
 	}
-	if hash == "" {
-		if pw != cust.Phone {
-			return nil, nil, httpx.Unauthorized("invalid credentials")
+	var matched []*store.Customer
+	for i := range candidates {
+		c := &candidates[i]
+		if !c.IsActive || !c.PortalEnabled {
+			continue
 		}
-		if h, herr := auth.HashPassword(cust.Phone); herr == nil {
-			_ = d.Store.UpdatePortalUser(ctx, tid, cust.ID, true, &h)
+		hash, herr := d.Store.GetCustomerPasswordHash(ctx, tid, c.ID)
+		if herr != nil {
+			continue
 		}
-	} else {
+		if hash == "" {
+			// Legacy account without stored hash: default password is the phone itself.
+			if pw != c.Phone {
+				continue
+			}
+			if h, herr := auth.HashPassword(c.Phone); herr == nil {
+				_ = d.Store.UpdatePortalUser(ctx, tid, c.ID, true, &h)
+			}
+			matched = append(matched, c)
+			continue
+		}
 		ok, verr := auth.VerifyPassword(pw, hash)
 		if verr != nil || !ok {
-			return nil, nil, httpx.Unauthorized("invalid credentials")
+			continue
 		}
+		matched = append(matched, c)
 	}
-	return ten, cust, nil
+	if len(matched) == 0 {
+		return nil, nil, httpx.Unauthorized("invalid credentials")
+	}
+	return ten, matched, nil
 }
 
 func registerWebhooks(api huma.API, d *Deps) {

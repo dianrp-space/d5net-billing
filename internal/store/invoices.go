@@ -27,6 +27,7 @@ type Invoice struct {
 	IssuedAt       *time.Time `json:"issued_at,omitempty"`
 	PaidAt         *time.Time `json:"paid_at,omitempty"`
 	CustomerName   string     `json:"customer_name,omitempty"`
+	CustomerCode   string     `json:"customer_code,omitempty"`
 }
 
 type InvoiceItem struct {
@@ -38,16 +39,18 @@ type InvoiceItem struct {
 }
 
 type Payment struct {
-	ID         xid.ID     `json:"id"`
-	TenantID   xid.ID     `json:"tenant_id"`
-	CustomerID xid.ID     `json:"customer_id"`
-	InvoiceID  *xid.ID    `json:"invoice_id,omitempty"`
-	Amount     int64      `json:"amount"`
-	Method     string     `json:"method"`
-	Reference  *string    `json:"reference,omitempty"`
-	Status     string     `json:"status"`
-	PaidAt     *time.Time `json:"paid_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+	ID           xid.ID     `json:"id"`
+	TenantID     xid.ID     `json:"tenant_id"`
+	CustomerID   xid.ID     `json:"customer_id"`
+	InvoiceID    *xid.ID    `json:"invoice_id,omitempty"`
+	Amount       int64      `json:"amount"`
+	Method       string     `json:"method"`
+	Reference    *string    `json:"reference,omitempty"`
+	Status       string     `json:"status"`
+	PaidAt       *time.Time `json:"paid_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	CustomerName string     `json:"customer_name,omitempty"`
+	CustomerCode string     `json:"customer_code,omitempty"`
 }
 
 func (s *Store) NextInvoiceNumber(ctx context.Context, tenantID xid.ID) (string, error) {

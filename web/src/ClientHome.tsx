@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, clearClientSession } from "./api";
+import { applyBrandingMeta } from "./branding";
 import type { ClientPortalData } from "./ClientLogin";
 import { toastError, toastSuccess } from "./swal";
 import { ThemeToggle } from "./ThemeToggle";
@@ -18,6 +19,27 @@ export function ClientHome({
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState("");
 
+  // Session restore renders here directly (bypassing ClientLogin),
+  // so ensure the tab title too.
+  useEffect(() => {
+    applyBrandingMeta({
+      appName: data.tenant_name || data.tenant_slug,
+      titleSuffix: "Portal Pelanggan",
+      separator: "-",
+    });
+  }, [data.tenant_name, data.tenant_slug]);
+
+  const accounts = data.customers?.length
+    ? data.customers
+    : data.customer
+      ? [{ id: data.customer.id || "", full_name: data.customer.full_name, phone: data.customer.phone, customer_code: data.customer.customer_code }]
+      : [];
+  const multi = accounts.length > 1;
+  const [pwAccount, setPwAccount] = useState("");
+  const pwAccountId = pwAccount || accounts[0]?.id || "";
+  const accountLabel = (code?: string, name?: string) =>
+    code ? `${code}${name ? ` · ${name}` : ""}` : name || "—";
+
   async function onChangePassword(e: React.FormEvent) {
     e.preventDefault();
     setFormErr("");
@@ -25,6 +47,10 @@ export function ClientHome({
     const slug = data.tenant_slug?.trim() || "";
     if (!phone || !slug) {
       setFormErr("Sesi portal tidak lengkap. Silakan login ulang.");
+      return;
+    }
+    if (multi && !pwAccountId) {
+      setFormErr("Pilih akun yang passwordnya diubah.");
       return;
     }
     if (newPassword.length < 6) {
@@ -44,6 +70,7 @@ export function ClientHome({
           phone,
           current_password: currentPassword,
           new_password: newPassword,
+          ...(multi && pwAccountId ? { customer_id: pwAccountId } : {}),
         }),
       });
       setCurrentPassword("");
@@ -68,6 +95,18 @@ export function ClientHome({
           {data.customer?.phone ? (
             <p className="text-xs text-[var(--muted)]">Login: {data.customer.phone}</p>
           ) : null}
+          {multi ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {accounts.map((a) => (
+                <span
+                  key={a.id || a.customer_code}
+                  className="rounded-full border border-[var(--border)] bg-[var(--panel)] px-2 py-0.5 text-xs text-[var(--muted)]"
+                >
+                  {accountLabel(a.customer_code, a.full_name)}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
@@ -82,46 +121,88 @@ export function ClientHome({
           </button>
         </div>
       </header>
-      <Card title="Saldo" value={formatRp(data.wallet_balance ?? 0)} />
+      <Card title={multi ? `Saldo gabungan (${accounts.length} akun)` : "Saldo"} value={formatRp(data.wallet_balance ?? 0)} />
       <div className="mt-6">
         <Section title="Paket / Langganan">
           <Table
-            columns={["Username", "Paket", "Status"]}
-            rows={(data.subscriptions ?? []).map((s) => [s.username, s.plan_name, s.status])}
+            columns={multi ? ["Akun", "Username", "Paket", "Status"] : ["Username", "Paket", "Status"]}
+            rows={(data.subscriptions ?? []).map((s) =>
+              multi
+                ? [accountLabel(s.customer_code, s.customer_name), s.username, s.plan_name, s.status]
+                : [s.username, s.plan_name, s.status],
+            )}
           />
         </Section>
       </div>
       <div className="mt-6">
         <Section title="Tagihan">
           <Table
-            columns={["Nomor", "Total", "Jatuh tempo", "Status"]}
-            rows={(data.invoices ?? []).map((i) => [
-              i.invoice_number,
-              formatRp(i.total_amount),
-              i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
-              i.status,
-            ])}
+            columns={multi ? ["Akun", "Nomor", "Total", "Jatuh tempo", "Status"] : ["Nomor", "Total", "Jatuh tempo", "Status"]}
+            rows={(data.invoices ?? []).map((i) =>
+              multi
+                ? [
+                    accountLabel(i.customer_code, i.customer_name),
+                    i.invoice_number,
+                    formatRp(i.total_amount),
+                    i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
+                    i.status,
+                  ]
+                : [
+                    i.invoice_number,
+                    formatRp(i.total_amount),
+                    i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
+                    i.status,
+                  ],
+            )}
           />
         </Section>
       </div>
       <div className="mt-6">
         <Section title="Riwayat pembayaran">
           <Table
-            columns={["Tanggal", "Jumlah", "Metode", "Status"]}
-            rows={(data.payments ?? []).map((p) => [
-              p.paid_at || p.created_at
-                ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID")
-                : "—",
-              formatRp(p.amount),
-              p.method,
-              p.status,
-            ])}
+            columns={multi ? ["Akun", "Tanggal", "Jumlah", "Metode", "Status"] : ["Tanggal", "Jumlah", "Metode", "Status"]}
+            rows={(data.payments ?? []).map((p) =>
+              multi
+                ? [
+                    accountLabel(p.customer_code, p.customer_name),
+                    p.paid_at || p.created_at
+                      ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID")
+                      : "—",
+                    formatRp(p.amount),
+                    p.method,
+                    p.status,
+                  ]
+                : [
+                    p.paid_at || p.created_at
+                      ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID")
+                      : "—",
+                    formatRp(p.amount),
+                    p.method,
+                    p.status,
+                  ],
+            )}
           />
         </Section>
       </div>
       <div className="mt-6">
         <Section title="Ganti password">
           <form className="grid max-w-md gap-3" onSubmit={onChangePassword}>
+            {multi ? (
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Akun</span>
+                <select
+                  className="input"
+                  value={pwAccountId}
+                  onChange={(e) => setPwAccount(e.target.value)}
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id || a.customer_code} value={a.id}>
+                      {accountLabel(a.customer_code, a.full_name)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <SecretInput
               placeholder="Password saat ini"
               value={currentPassword}

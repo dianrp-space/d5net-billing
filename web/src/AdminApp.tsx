@@ -15,20 +15,29 @@ import {
 } from "@/components/ui/breadcrumb";
 import { api } from "./api";
 import {
+  IconBanknote,
   IconBell,
   IconBox,
+  IconBriefcase,
+  IconCable,
   IconChart,
   IconClock,
   IconDownload,
+  IconGauge,
+  IconHeadset,
   IconHome,
-  IconImage,
   IconMapPin,
   IconPlug,
   IconReceipt,
   IconRouter,
+  IconSend,
+  IconServer,
   IconSettings,
   IconShield,
+  IconShieldCheck,
   IconTicket,
+  IconUser,
+  IconUserPlus,
   IconUsers,
 } from "./icons";
 import { IconButton } from "./ui";
@@ -120,15 +129,15 @@ const navGroups: NavGroup[] = [
       { id: "dashboard", label: "Dashboard", icon: <IconHome /> },
       { id: "plans", label: "Paket", icon: <IconBox /> },
       { id: "invoices", label: "Tagihan", icon: <IconChart /> },
-      { id: "accounting", label: "Akunting", icon: <IconChart /> },
+      { id: "accounting", label: "Akunting", icon: <IconBanknote /> },
     ],
   },
   {
     label: "Customers",
     items: [
       { id: "customers", label: "Pelanggan", icon: <IconUsers /> },
-      { id: "leads", label: "Lead", icon: <IconUsers /> },
-      { id: "resellers", label: "Reseller & Komisi", icon: <IconUsers /> },
+      { id: "leads", label: "Lead", icon: <IconUserPlus /> },
+      { id: "resellers", label: "Reseller & Komisi", icon: <IconBriefcase /> },
     ],
   },
   {
@@ -136,16 +145,16 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "clusters", label: "Cluster / POP", icon: <IconMapPin /> },
       { id: "routers", label: "Router", icon: <IconRouter /> },
-      { id: "ipam", label: "IP Pool", icon: <IconRouter /> },
-      { id: "odp", label: "ODP / FTTH", icon: <IconMapPin /> },
+      { id: "ipam", label: "IP Pool", icon: <IconServer /> },
+      { id: "odp", label: "ODP / FTTH", icon: <IconCable /> },
       { id: "vouchers", label: "Voucher", icon: <IconTicket /> },
     ],
   },
   {
     label: "Ops",
     items: [
-      { id: "tickets", label: "Tiket", icon: <IconTicket /> },
-      { id: "sla-report", label: "Laporan SLA", icon: <IconChart /> },
+      { id: "tickets", label: "Tiket", icon: <IconHeadset /> },
+      { id: "sla-report", label: "Laporan SLA", icon: <IconGauge /> },
     ],
   },
   {
@@ -153,18 +162,18 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "webhooks", label: "Webhook", icon: <IconPlug /> },
       { id: "payment-gw", label: "Payment Gateway", icon: <IconReceipt /> },
-      { id: "messaging-gw", label: "Messaging Gateway", icon: <IconBell /> },
+      { id: "messaging-gw", label: "Messaging Gateway", icon: <IconSend /> },
       { id: "notifications", label: "Notifikasi", icon: <IconBell /> },
     ],
   },
   {
     label: "Settings",
     items: [
-      { id: "branding", label: "Umum", icon: <IconImage /> },
+      { id: "branding", label: "Umum", icon: <IconSettings /> },
       { id: "isolir-template", label: "Template Isolir", icon: <IconShield /> },
       { id: "jobs", label: "Cronjob", icon: <IconClock /> },
-      { id: "roles", label: "Roles", icon: <IconShield /> },
-      { id: "users", label: "Users", icon: <IconSettings /> },
+      { id: "roles", label: "Roles", icon: <IconShieldCheck /> },
+      { id: "users", label: "Users", icon: <IconUser /> },
       { id: "backup", label: "Backup / Restore", icon: <IconDownload /> },
     ],
   },

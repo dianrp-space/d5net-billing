@@ -571,6 +571,7 @@ export function IPAMPage() {
 
 export function AccountingPage() {
   const qc = useQueryClient();
+  const { confirm } = useAppDialog();
   const [tab, setTab] = useState("ringkasan");
   const [expOpen, setExpOpen] = useState(false);
   const [exp, setExp] = useState({
@@ -671,31 +672,29 @@ export function AccountingPage() {
     lainnya: "Lainnya",
   };
 
+  async function exportInvoices(kind: "csv" | "xlsx") {
+    const ok = await confirm({
+      title: "Export tagihan",
+      description: `Unduh data tagihan sebagai ${kind.toUpperCase()}?`,
+      confirmLabel: "Unduh",
+    });
+    if (!ok) return;
+    try {
+      await apiDownload(`/api/reports/invoices.${kind}`, `invoices.${kind}`);
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Export gagal");
+    }
+  }
+
   return (
     <Section
       title="Akunting & laporan"
       actions={
         <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              void apiDownload("/api/reports/invoices.csv", "invoices.csv").catch((e: Error) =>
-                toastError(e.message || "Export gagal"),
-              )
-            }
-          >
+          <Button type="button" variant="outline" onClick={() => void exportInvoices("csv")}>
             <IconDownload /> CSV
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              void apiDownload("/api/reports/invoices.xlsx", "invoices.xlsx").catch((e: Error) =>
-                toastError(e.message || "Export gagal"),
-              )
-            }
-          >
+          <Button type="button" variant="outline" onClick={() => void exportInvoices("xlsx")}>
             <IconDownload /> XLSX
           </Button>
           <Button type="button" onClick={() => setExpOpen(true)}>

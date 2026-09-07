@@ -251,11 +251,6 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
     setFormErr("");
   }
 
-  function countForCluster(id: string) {
-    if (id === "__none__") return unassignedCount;
-    return list.filter((o) => o.cluster_id === id).length;
-  }
-
   return (
     <Section
       title="ODP / FTTH"
@@ -277,25 +272,17 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
       ) : (
         <div className="mb-4">
           <Tabs value={tabId} onValueChange={selectClusterTab}>
-            <TabsList aria-label="Cluster / POP" className="h-auto min-h-10">
+            <TabsList aria-label="Cluster / POP">
               {clusters.map((c) => (
-                <TabsTrigger key={c.id} value={c.id} className="h-auto flex-col items-start gap-0.5 py-1.5 sm:flex-row sm:items-center">
-                  <span className="inline-flex items-center gap-2">
-                    <MapPin />
-                    {c.name}
-                  </span>
-                  <span className="text-[10px] font-normal text-[var(--muted)]">
-                    {c.code} · {countForCluster(c.id)}
-                  </span>
+                <TabsTrigger key={c.id} value={c.id} title={`${c.name} (${c.code})`}>
+                  <MapPin />
+                  {c.name}
                 </TabsTrigger>
               ))}
               {unassignedCount > 0 && (
-                <TabsTrigger value="__none__" className="h-auto flex-col items-start gap-0.5 py-1.5 sm:flex-row sm:items-center">
-                  <span className="inline-flex items-center gap-2">
-                    <MapPin />
-                    Tanpa cluster
-                  </span>
-                  <span className="text-[10px] font-normal text-[var(--muted)]">{unassignedCount}</span>
+                <TabsTrigger value="__none__">
+                  <MapPin />
+                  Tanpa cluster
                 </TabsTrigger>
               )}
             </TabsList>

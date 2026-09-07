@@ -4,6 +4,8 @@ import { LayoutGrid, List } from "lucide-react";
 import { api, apiUpload } from "./api";
 import { ProgressFileUpload } from "./ProgressFileUpload";
 import { useAppDialog } from "./confirm";
+import { nameWithSaya } from "./me";
+import { UserAvatar } from "./UserMenu";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import {
@@ -54,7 +56,9 @@ type TicketRow = {
 type TicketMessage = {
   id: string;
   sender_type: string;
+  sender_id?: string | null;
   sender_name?: string;
+  avatar_url?: string | null;
   message: string;
   image_urls?: string[];
   created_at: string;
@@ -803,6 +807,14 @@ export function TicketsPage() {
                 ) : (
                   messages.map((m) => {
                     const isStatus = m.sender_type === "system";
+                    const meId = meQ.data?.user_id;
+                    const displayName = nameWithSaya(
+                      isStatus
+                        ? `${m.sender_name || "Sistem"} · pindah status`
+                        : m.sender_name || m.sender_type,
+                      m.sender_id,
+                      meId,
+                    );
                     return (
                       <div
                         key={m.id}
@@ -812,11 +824,11 @@ export function TicketsPage() {
                             : "rounded-md border border-[var(--border)] p-2 text-sm"
                         }
                       >
-                        <p className="text-xs text-[var(--muted)]">
-                          {isStatus
-                            ? `${m.sender_name || "Sistem"} · pindah status`
-                            : m.sender_name || m.sender_type}{" "}
-                          · {formatWhen(m.created_at)}
+                        <p className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
+                          <UserAvatar name={m.sender_name} avatarUrl={m.avatar_url} />
+                          <span className="min-w-0 flex-1 truncate">
+                            {displayName} · {formatWhen(m.created_at)}
+                          </span>
                         </p>
                         {m.message ? (
                           <p className={isStatus ? "mt-1 text-[var(--muted)]" : "mt-1 whitespace-pre-wrap text-[var(--text)]"}>

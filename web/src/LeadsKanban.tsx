@@ -10,6 +10,8 @@ import {
   type StaffOpt,
 } from "./AdminExtra";
 import { useAppDialog } from "./confirm";
+import { nameWithSaya } from "./me";
+import { UserAvatar } from "./UserMenu";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import {
@@ -48,6 +50,10 @@ type LeadRow = {
   phone: string;
   email?: string | null;
   address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  identity_type?: string | null;
+  identity_number?: string | null;
   status: string;
   notes?: string | null;
   odp_id?: string | null;
@@ -68,6 +74,7 @@ type LeadComment = {
   lead_id: string;
   user_id?: string | null;
   user_name?: string;
+  avatar_url?: string | null;
   kind?: string;
   message: string;
   image_urls: string[];
@@ -103,6 +110,10 @@ type LeadForm = {
   phone: string;
   email: string;
   address: string;
+  latitude: string;
+  longitude: string;
+  identity_type: string;
+  identity_number: string;
   status: string;
   notes: string;
   reseller_id: string;
@@ -115,12 +126,27 @@ const emptyForm: LeadForm = {
   phone: "",
   email: "",
   address: "",
+  latitude: "",
+  longitude: "",
+  identity_type: "ktp",
+  identity_number: "",
   status: "new",
   notes: "",
   reseller_id: "",
   sales_user_id: "",
   assigned_to: "",
 };
+
+const IDENTITY_TYPES: { id: string; label: string }[] = [
+  { id: "ktp", label: "KTP" },
+  { id: "sim", label: "SIM" },
+  { id: "passport", label: "Paspor" },
+  { id: "other", label: "Lainnya" },
+];
+
+export function identityLabel(t?: string | null) {
+  return IDENTITY_TYPES.find((x) => x.id === (t || "").toLowerCase())?.label || "—";
+}
 
 const COLUMNS: { id: string; label: string; hint?: string }[] = [
   { id: "new", label: "Baru" },
@@ -241,10 +267,14 @@ export function LeadsPage() {
     queryFn: () => api<MePermissions & { user_id: string }>("/api/me"),
   });
   const canDispatch = canDispatchOps(meQ.data?.permissions);
+  const [showHistory, setShowHistory] = useState(false);
 
   const q = useQuery({
-    queryKey: ["leads", "kanban"],
-    queryFn: () => api<{ data: LeadRow[]; total: number }>("/api/leads?limit=200&offset=0"),
+    queryKey: ["leads", "kanban", showHistory],
+    queryFn: () =>
+      api<{ data: LeadRow[]; total: number }>(
+        `/api/leads?limit=200&offset=0${showHistory ? "" : "&hide_converted=true"}`,
+      ),
   });
   const clustersQ = useQuery({
     queryKey: ["clusters"],
@@ -272,8 +302,10 @@ export function LeadsPage() {
   const [convertReseller, setConvertReseller] = useState("");
   const [convertStaff, setConvertStaff] = useState("");
   const [convertBasis, setConvertBasis] = useState("new_customer_flat");
-  const [createInstallTicket, setCreateInstallTicket] = useState(true);
-  const [installAssignee, setInstallAssignee] = useState("");
+  const [convertLatitude, setConvertLatitude] = useState("");
+  const [convertLongitude, setConvertLongitude] = useState("");
+  const [convertIdentityType, setConvertIdentityType] = useState("ktp");
+  const [convertIdentityNumber, setConvertIdentityNumber] = useState("");
   const [assignLead, setAssignLead] = useState<LeadRow | null>(null);
   const [assignUser, setAssignUser] = useState("");
   const [assignTargetStatus, setAssignTargetStatus] = useState("contacted");
@@ -382,6 +414,10 @@ export function LeadsPage() {
       phone: l.phone,
       email: l.email || "",
       address: l.address || "",
+      latitude: l.latitude != null ? String(l.latitude) : "",
+      longitude: l.longitude != null ? String(l.longitude) : "",
+      identity_type: l.identity_type || "ktp",
+      identity_number: l.identity_number || "",
       status: l.status || "new",
       notes: l.notes || "",
       reseller_id: l.reseller_id || "",
@@ -413,8 +449,10 @@ export function LeadsPage() {
     setConvertReseller(l.reseller_id || "");
     setConvertStaff(l.sales_user_id || "");
     setConvertBasis("new_customer_flat");
-    setCreateInstallTicket(true);
-    setInstallAssignee(l.assigned_to || "");
+    setConvertLatitude(l.latitude != null ? String(l.latitude) : "");
+    setConvertLongitude(l.longitude != null ? String(l.longitude) : "");
+    setConvertIdentityType(l.identity_type || "ktp");
+    setConvertIdentityNumber(l.identity_number || "");
   }
 
   function resetConvertForm() {
@@ -423,8 +461,10 @@ export function LeadsPage() {
     setConvertReseller("");
     setConvertStaff("");
     setConvertBasis("new_customer_flat");
-    setCreateInstallTicket(true);
-    setInstallAssignee("");
+    setConvertLatitude("");
+    setConvertLongitude("");
+    setConvertIdentityType("ktp");
+    setConvertIdentityNumber("");
   }
 
   const save = useMutation({
@@ -432,7 +472,7 @@ export function LeadsPage() {
       if (needsAssignee(form.status) && !form.assigned_to) {
         throw new Error("Pilih teknisi mulai status dihubungi");
       }
-      const body = {
+      const body: Record<string, unknown> = {
         full_name: form.full_name.trim(),
         phone: form.phone.trim(),
         email: form.email.trim() || undefined,
@@ -443,6 +483,10 @@ export function LeadsPage() {
         sales_user_id: form.sales_user_id || undefined,
         assigned_to: needsAssignee(form.status) ? form.assigned_to || undefined : undefined,
       };
+      if (form.latitude.trim()) body.latitude = Number(form.latitude);
+      if (form.longitude.trim()) body.longitude = Number(form.longitude);
+      if (form.identity_type) body.identity_type = form.identity_type;
+      if (form.identity_number.trim()) body.identity_number = form.identity_number.trim();
       if (editId) return api(`/api/leads/${editId}`, { method: "PUT", body: JSON.stringify(body) });
       return api("/api/leads", { method: "POST", body: JSON.stringify(body) });
     },
@@ -505,40 +549,20 @@ export function LeadsPage() {
   const convert = useMutation({
     mutationFn: async () => {
       const lead = convertLead!;
-      const res = await api<{ customer: { id: string; customer_code: string }; lead: LeadRow }>(
+      const body: Record<string, unknown> = {
+        cluster_id: convertCluster || undefined,
+        reseller_id: convertReseller || undefined,
+        sales_user_id: convertStaff || undefined,
+        commission_basis: convertBasis || undefined,
+      };
+      if (convertLatitude.trim()) body.latitude = Number(convertLatitude);
+      if (convertLongitude.trim()) body.longitude = Number(convertLongitude);
+      if (convertIdentityType) body.identity_type = convertIdentityType;
+      if (convertIdentityNumber.trim()) body.identity_number = convertIdentityNumber.trim();
+      return api<{ customer: { id: string; customer_code: string }; lead: LeadRow }>(
         `/api/leads/${lead.id}/convert`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            cluster_id: convertCluster || undefined,
-            reseller_id: convertReseller || undefined,
-            sales_user_id: convertStaff || undefined,
-            commission_basis: convertBasis || undefined,
-          }),
-        },
+        { method: "POST", body: JSON.stringify(body) },
       );
-      if (createInstallTicket) {
-        const descParts = [lead.address ? `Alamat: ${lead.address}` : "", lead.notes ? `Catatan lead: ${lead.notes}` : ""].filter(
-          Boolean,
-        );
-        const ticket = await api<{ id: string }>("/api/tickets", {
-          method: "POST",
-          body: JSON.stringify({
-            customer_id: res.customer.id,
-            subject: `Instalasi: ${lead.full_name}`,
-            description: descParts.join("\n") || undefined,
-            category: "installation",
-            priority: "normal",
-          }),
-        });
-        if (installAssignee) {
-          await api(`/api/tickets/${ticket.id}/assign`, {
-            method: "PATCH",
-            body: JSON.stringify({ assigned_to: installAssignee }),
-          });
-        }
-      }
-      return { ...res, ticketCreated: createInstallTicket, ticketAssigned: Boolean(installAssignee) };
     },
     onSuccess: (res) => {
       resetConvertForm();
@@ -546,13 +570,7 @@ export function LeadsPage() {
       qc.invalidateQueries({ queryKey: ["customers"] });
       qc.invalidateQueries({ queryKey: ["commissions"] });
       qc.invalidateQueries({ queryKey: ["resellers"] });
-      qc.invalidateQueries({ queryKey: ["tickets"] });
-      const extra = res.ticketCreated
-        ? res.ticketAssigned
-          ? " · tiket instalasi dibuat & di-assign"
-          : " · tiket instalasi dibuat"
-        : "";
-      void toastSuccess(`Dikonversi ke pelanggan ${res.customer.customer_code}${extra}`);
+      void toastSuccess(`Dikonversi ke pelanggan ${res.customer.customer_code}`);
     },
     onError: (e: Error) => void toastError(e.message),
   });
@@ -649,6 +667,14 @@ export function LeadsPage() {
       title="Lead / pipeline"
       actions={
         <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[var(--muted)]">
+            <input
+              type="checkbox"
+              checked={showHistory}
+              onChange={(e) => setShowHistory(e.target.checked)}
+            />
+            Riwayat converted
+          </label>
           <div className="flex items-center rounded-md border border-[var(--border)] p-0.5">
             <IconButton
               label="Tampilan kanban"
@@ -677,8 +703,8 @@ export function LeadsPage() {
         {!canDispatch
           ? "Lead yang di-assign ke Anda. Seret antar kolom untuk ubah status, atau buka detail untuk komentar & foto."
           : view === "kanban"
-            ? "Kanban: seret ke Dihubungi untuk assign teknisi. Drop ke Converted membuka form konversi."
-            : "Daftar lead: assign teknisi mulai status dihubungi, komentar & lampiran gambar."}
+            ? "Kanban: seret ke Dihubungi untuk assign teknisi. Drop ke Converted membuka form konversi. Converted lebih dari 7 hari disembunyikan otomatis (centang Riwayat converted untuk melihat)."
+            : "Daftar lead: assign teknisi mulai status dihubungi, komentar & lampiran gambar. Converted lebih dari 7 hari disembunyikan otomatis."}
       </p>
 
       {view === "list" ? (
@@ -883,6 +909,16 @@ export function LeadsPage() {
               <p className="sm:col-span-2">
                 <span className="text-[var(--muted)]">Alamat:</span> {detail.address || "—"}
               </p>
+              <p>
+                <span className="text-[var(--muted)]">Koordinat:</span>{" "}
+                {detail.latitude != null && detail.longitude != null
+                  ? `${detail.latitude}, ${detail.longitude}`
+                  : "—"}
+              </p>
+              <p>
+                <span className="text-[var(--muted)]">Identitas:</span>{" "}
+                {detail.identity_number ? `${identityLabel(detail.identity_type)} · ${detail.identity_number}` : "—"}
+              </p>
               {detail.notes ? (
                 <p className="sm:col-span-2">
                   <span className="text-[var(--muted)]">Catatan:</span> {detail.notes}
@@ -1010,6 +1046,12 @@ export function LeadsPage() {
                 ) : (
                   comments.map((c) => {
                     const isStatus = c.kind === "status_change";
+                    const meId = meQ.data?.user_id;
+                    const displayName = nameWithSaya(
+                      isStatus ? `${c.user_name || "Sistem"} · pindah status` : c.user_name || "Tim",
+                      c.user_id,
+                      meId,
+                    );
                     return (
                       <div
                         key={c.id}
@@ -1019,9 +1061,10 @@ export function LeadsPage() {
                             : "rounded-md border border-[var(--border)] p-2 text-sm"
                         }
                       >
-                        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                          <span className="font-medium">
-                            {isStatus ? `${c.user_name || "Sistem"} · pindah status` : c.user_name || "Tim"}
+                        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                          <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
+                            <UserAvatar name={c.user_name} avatarUrl={c.avatar_url} />
+                            <span className="truncate">{displayName}</span>
                           </span>
                           <span className="text-[10px] text-[var(--muted)]">{formatWhen(c.created_at)}</span>
                         </div>
@@ -1180,6 +1223,37 @@ export function LeadsPage() {
             onChange={(e) => setForm({ ...form, address: e.target.value })}
           />
           <Input
+            type="number"
+            step="any"
+            placeholder="Latitude (peta)"
+            value={form.latitude}
+            onChange={(e) => setForm({ ...form, latitude: e.target.value })}
+          />
+          <Input
+            type="number"
+            step="any"
+            placeholder="Longitude (peta)"
+            value={form.longitude}
+            onChange={(e) => setForm({ ...form, longitude: e.target.value })}
+          />
+          <Select value={form.identity_type} onValueChange={(v) => setForm({ ...form, identity_type: v })}>
+            <SelectTrigger>
+              <SelectValue placeholder="Jenis identitas" />
+            </SelectTrigger>
+            <SelectContent>
+              {IDENTITY_TYPES.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            placeholder="Nomor identitas"
+            value={form.identity_number}
+            onChange={(e) => setForm({ ...form, identity_number: e.target.value })}
+          />
+          <Input
             className="sm:col-span-2"
             placeholder="Catatan"
             value={form.notes}
@@ -1232,6 +1306,43 @@ export function LeadsPage() {
           </div>
 
           <div className="sm:col-span-2">
+            <p className="mb-1.5 text-sm font-medium">Lokasi & identitas <span className="font-normal text-[var(--muted)]">(masuk ke data pelanggan)</span></p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                type="number"
+                step="any"
+                placeholder="Latitude (peta)"
+                value={convertLatitude}
+                onChange={(e) => setConvertLatitude(e.target.value)}
+              />
+              <Input
+                type="number"
+                step="any"
+                placeholder="Longitude (peta)"
+                value={convertLongitude}
+                onChange={(e) => setConvertLongitude(e.target.value)}
+              />
+              <Select value={convertIdentityType} onValueChange={setConvertIdentityType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Jenis identitas" />
+                </SelectTrigger>
+                <SelectContent>
+                  {IDENTITY_TYPES.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder="Nomor identitas"
+                value={convertIdentityNumber}
+                onChange={(e) => setConvertIdentityNumber(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="sm:col-span-2">
             <Label className="mb-1.5 block">Cluster (opsional)</Label>
             <Select value={convertCluster || "__none__"} onValueChange={(v) => setConvertCluster(v === "__none__" ? "" : v)}>
               <SelectTrigger>
@@ -1260,41 +1371,6 @@ export function LeadsPage() {
           />
 
           <CommissionBasisSelect value={convertBasis} onChange={setConvertBasis} />
-
-          <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--border)] p-3 sm:col-span-2">
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={createInstallTicket}
-                onChange={(e) => setCreateInstallTicket(e.target.checked)}
-              />
-              <span>
-                <span className="font-medium">Buat tiket instalasi</span>
-                <span className="block text-xs text-[var(--muted)]">
-                  Setelah convert, buat tiket kategori Instalasi untuk jadwal pemasangan (bisa di-assign ke teknisi).
-                </span>
-              </span>
-            </label>
-            {createInstallTicket ? (
-              <div>
-                <Label className="mb-1.5 block">Assign teknisi (opsional)</Label>
-                <SearchableSelect
-                  allowClear
-                  clearLabel="— Belum di-assign —"
-                  placeholder="Teknisi"
-                  searchPlaceholder="Cari teknisi…"
-                  value={installAssignee}
-                  onValueChange={setInstallAssignee}
-                  options={assignCandidates.map((u) => ({
-                    value: u.user_id,
-                    label: `${u.full_name}${u.role_slug ? ` · ${u.role_slug}` : ""}`,
-                    keywords: `${u.full_name} ${u.role_slug || ""}`,
-                  }))}
-                />
-              </div>
-            ) : null}
-          </div>
 
           <div className="flex flex-wrap gap-2 border-t border-[var(--border)] pt-3 sm:col-span-2">
             <Button type="submit" disabled={convert.isPending}>

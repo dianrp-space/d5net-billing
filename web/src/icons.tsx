@@ -100,9 +100,9 @@ export function IconUsers(props: IconProps) {
 export function IconUserCheck(props: IconProps) {
   return (
     <svg {...base(props)}>
-      <circle cx="9" cy="8" r="3.5" />
-      <path d="M2.5 19a6.5 6.5 0 0 1 13 0" />
-      <path d="m16 11 2 2 4-4" />
+      <circle cx="10" cy="8" r="3.5" />
+      <path d="M3.5 19a6.5 6.5 0 0 1 12 0" />
+      <path d="m15.5 12 2 2 4-4" />
     </svg>
   );
 }
@@ -311,7 +311,7 @@ export function IconSettings(props: IconProps) {
   return (
     <svg {...base(props)}>
       <circle cx="12" cy="12" r="3" />
-      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z" />
     </svg>
   );
 }
@@ -344,3 +344,95 @@ export function IconImage(props: IconProps) {
     </svg>
   );
 }
+
+/** Lead — tambah kontak baru. */
+export function IconUserPlus(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="10" cy="8" r="3.5" />
+      <path d="M3.5 19a6.5 6.5 0 0 1 11.5-3.3" />
+      <path d="M18 8v6" />
+      <path d="M15 11h6" />
+    </svg>
+  );
+}
+
+/** Reseller — partner bisnis. */
+export function IconBriefcase(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3" y="7" width="18" height="13" rx="2" />
+      <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+      <path d="M3 13h18" />
+    </svg>
+  );
+}
+
+/** IP Pool — jaringan / server. */
+export function IconServer(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3" y="4" width="18" height="7" rx="2" />
+      <rect x="3" y="13" width="18" height="7" rx="2" />
+      <path d="M7 7.5h.01" />
+      <path d="M7 16.5h.01" />
+    </svg>
+  );
+}
+
+/** ODP / FTTH — kabel serat / distribusi. */
+export function IconCable(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="10" y="3" width="4" height="7" rx="1" />
+      <rect x="10" y="14" width="4" height="7" rx="1" />
+      <path d="M8 10h8M8 14h8" />
+      <path d="M12 10v4" />
+    </svg>
+  );
+}
+
+/** Tiket dukungan — headset layanan. */
+export function IconHeadset(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 13v-1a8 8 0 0 1 16 0v1" />
+      <rect x="3" y="13" width="4" height="6" rx="1.5" />
+      <rect x="17" y="13" width="4" height="6" rx="1.5" />
+      <path d="M19 19a3 3 0 0 1-3 3h-2" />
+    </svg>
+  );
+}
+
+/** Laporan SLA — gauge / kecepatan layanan. */
+export function IconGauge(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 15a8 8 0 1 1 16 0" />
+      <path d="M12 15l3-4" />
+      <circle cx="12" cy="15" r="1.5" />
+    </svg>
+  );
+}
+
+/** Messaging gateway — kirim pesan. */
+export function IconSend(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 12 20 4l-4 8 4 8Z" />
+      <path d="M20 4 10 12" />
+      <path d="M12 12l8 8" />
+    </svg>
+  );
+}
+
+/** Roles — hak akses / lencana ceklis. */
+export function IconShieldCheck(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 3 5 6v6c0 5 3.5 7.5 7 9 3.5-1.5 7-4 7-9V6Z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}
+

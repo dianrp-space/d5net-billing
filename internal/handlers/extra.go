@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,26 +54,46 @@ func registerReports(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "export-invoices-csv", Method: http.MethodGet, Path: "/api/reports/invoices.csv",
 		Tags: []string{"Reports"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, _ *struct{}) (*struct {
-		ContentType string `header:"Content-Type"`
-		Body        string
+	}, func(ctx context.Context, input *struct {
+		Status string `query:"status"`
+		Search string `query:"search"`
+	}) (*struct {
+		ContentType        string `header:"Content-Type"`
+		ContentDisposition string `header:"Content-Disposition"`
+		Body               []byte
 	}, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		list, _, err := d.Store.ListInvoices(ctx, tid, "", "", 1000, 0)
+		list, _, err := d.Store.ListInvoices(ctx, tid, strings.TrimSpace(input.Status), strings.TrimSpace(input.Search), 100000, 0)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		out := "invoice_number,customer,total,status,due_date\n"
+		var buf bytes.Buffer
+		w := csv.NewWriter(&buf)
+		_ = w.Write([]string{"invoice_number", "customer", "due_date", "total", "paid_amount", "outstanding", "status"})
 		for _, inv := range list {
-			out += fmt.Sprintf("%s,%s,%d,%s,%s\n", inv.InvoiceNumber, inv.CustomerName, inv.TotalAmount, inv.Status, inv.DueDate.Format("2006-01-02"))
+			outstanding := inv.TotalAmount - inv.PaidAmount
+			_ = w.Write([]string{
+				inv.InvoiceNumber, inv.CustomerName, inv.DueDate.Format("2006-01-02"),
+				strconv.FormatInt(inv.TotalAmount, 10), strconv.FormatInt(inv.PaidAmount, 10),
+				strconv.FormatInt(outstanding, 10), inv.Status,
+			})
+		}
+		w.Flush()
+		if err := w.Error(); err != nil {
+			return nil, httpx.Internal(err)
 		}
 		return &struct {
-			ContentType string `header:"Content-Type"`
-			Body        string
-		}{ContentType: "text/csv", Body: out}, nil
+			ContentType        string `header:"Content-Type"`
+			ContentDisposition string `header:"Content-Disposition"`
+			Body               []byte
+		}{
+			ContentType:        "text/csv; charset=utf-8",
+			ContentDisposition: `attachment; filename="invoices.csv"`,
+			Body:               buf.Bytes(),
+		}, nil
 	})
 }
 
@@ -218,8 +241,9 @@ func registerAdvanced(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID xid.ID `path:"id"`
 	}) (*struct {
-		ContentType string `header:"Content-Type"`
-		Body        []byte
+		ContentType        string `header:"Content-Type"`
+		ContentDisposition string `header:"Content-Disposition"`
+		Body               []byte
 	}, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
@@ -230,9 +254,14 @@ func registerAdvanced(api huma.API, d *Deps) {
 			return nil, httpx.NotFound("invoice not found")
 		}
 		return &struct {
-			ContentType string `header:"Content-Type"`
-			Body        []byte
-		}{ContentType: "application/pdf", Body: invoice.RenderPDF(inv, items)}, nil
+			ContentType        string `header:"Content-Type"`
+			ContentDisposition string `header:"Content-Disposition"`
+			Body               []byte
+		}{
+			ContentType:        "application/pdf",
+			ContentDisposition: fmt.Sprintf(`attachment; filename="%s.pdf"`, inv.InvoiceNumber),
+			Body:               invoice.RenderPDF(inv, items),
+		}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -576,9 +605,10 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		OperationID: "list-leads", Method: http.MethodGet, Path: "/api/leads",
 		Tags: []string{"Leads"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		Status string `query:"status"`
-		Limit  int    `query:"limit"`
-		Offset int    `query:"offset"`
+		Status        string `query:"status"`
+		HideConverted bool   `query:"hide_converted"`
+		Limit         int    `query:"limit"`
+		Offset        int    `query:"offset"`
 	}) (*struct {
 		Body struct {
 			Data  []store.Lead `json:"data"`
@@ -594,7 +624,7 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			uid := userIDFromCtx(ctx)
 			assignedTo = &uid
 		}
-		list, total, err := d.Store.ListLeads(ctx, tid, input.Status, assignedTo, input.Limit, input.Offset)
+		list, total, err := d.Store.ListLeads(ctx, tid, input.Status, assignedTo, input.HideConverted, input.Limit, input.Offset)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -617,19 +647,21 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		Tags: []string{"Leads"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			FullName    string   `json:"full_name,omitempty"`
-			Name        string   `json:"name,omitempty"` // alias from UI
-			Phone       string   `json:"phone,omitempty"`
-			Email       *string  `json:"email,omitempty"`
-			Address     *string  `json:"address,omitempty"`
-			Latitude    *float64 `json:"latitude,omitempty"`
-			Longitude   *float64 `json:"longitude,omitempty"`
-			ODPID       *xid.ID  `json:"odp_id,omitempty"`
-			Status      string   `json:"status,omitempty"`
-			Notes       *string  `json:"notes,omitempty"`
-			ResellerID  *xid.ID  `json:"reseller_id,omitempty"`
-			SalesUserID *xid.ID  `json:"sales_user_id,omitempty"`
-			AssignedTo  *xid.ID  `json:"assigned_to,omitempty"`
+			FullName       string   `json:"full_name,omitempty"`
+			Name           string   `json:"name,omitempty"` // alias from UI
+			Phone          string   `json:"phone,omitempty"`
+			Email          *string  `json:"email,omitempty"`
+			Address        *string  `json:"address,omitempty"`
+			Latitude       *float64 `json:"latitude,omitempty"`
+			Longitude      *float64 `json:"longitude,omitempty"`
+			IdentityType   *string  `json:"identity_type,omitempty"`
+			IdentityNumber *string  `json:"identity_number,omitempty"`
+			ODPID          *xid.ID  `json:"odp_id,omitempty"`
+			Status         string   `json:"status,omitempty"`
+			Notes          *string  `json:"notes,omitempty"`
+			ResellerID     *xid.ID  `json:"reseller_id,omitempty"`
+			SalesUserID    *xid.ID  `json:"sales_user_id,omitempty"`
+			AssignedTo     *xid.ID  `json:"assigned_to,omitempty"`
 		}
 	}) (*struct{ Body store.Lead }, error) {
 		if err := requireDispatchOps(ctx, d); err != nil {
@@ -659,6 +691,8 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			TenantID: tid, FullName: fullName, Phone: phone,
 			Email: emptyToNil(input.Body.Email), Address: emptyToNil(input.Body.Address),
 			Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
+			IdentityType: normalizeIdentityType(input.Body.IdentityType),
+			IdentityNumber: emptyToNil(input.Body.IdentityNumber),
 			ODPID: input.Body.ODPID, Status: status, Notes: emptyToNil(input.Body.Notes),
 			ResellerID: rID, SalesUserID: sID, AssignedTo: input.Body.AssignedTo,
 		}
@@ -678,18 +712,20 @@ func registerOpsExtra(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			FullName    string   `json:"full_name"`
-			Phone       string   `json:"phone"`
-			Email       *string  `json:"email,omitempty"`
-			Address     *string  `json:"address,omitempty"`
-			Latitude    *float64 `json:"latitude,omitempty"`
-			Longitude   *float64 `json:"longitude,omitempty"`
-			ODPID       *xid.ID  `json:"odp_id,omitempty"`
-			Status      string   `json:"status,omitempty"`
-			Notes       *string  `json:"notes,omitempty"`
-			ResellerID  *xid.ID  `json:"reseller_id,omitempty"`
-			SalesUserID *xid.ID  `json:"sales_user_id,omitempty"`
-			AssignedTo  *xid.ID  `json:"assigned_to,omitempty"`
+			FullName       string   `json:"full_name"`
+			Phone          string   `json:"phone"`
+			Email          *string  `json:"email,omitempty"`
+			Address        *string  `json:"address,omitempty"`
+			Latitude       *float64 `json:"latitude,omitempty"`
+			Longitude      *float64 `json:"longitude,omitempty"`
+			IdentityType   *string  `json:"identity_type,omitempty"`
+			IdentityNumber *string  `json:"identity_number,omitempty"`
+			ODPID          *xid.ID  `json:"odp_id,omitempty"`
+			Status         string   `json:"status,omitempty"`
+			Notes          *string  `json:"notes,omitempty"`
+			ResellerID     *xid.ID  `json:"reseller_id,omitempty"`
+			SalesUserID    *xid.ID  `json:"sales_user_id,omitempty"`
+			AssignedTo     *xid.ID  `json:"assigned_to,omitempty"`
 		}
 	}) (*struct{ Body store.Lead }, error) {
 		if err := requireDispatchOps(ctx, d); err != nil {
@@ -710,6 +746,8 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			ID: input.ID, TenantID: tid, FullName: fullName, Phone: phone,
 			Email: emptyToNil(input.Body.Email), Address: emptyToNil(input.Body.Address),
 			Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
+			IdentityType: normalizeIdentityType(input.Body.IdentityType),
+			IdentityNumber: emptyToNil(input.Body.IdentityNumber),
 			ODPID: input.Body.ODPID, Status: status, Notes: emptyToNil(input.Body.Notes),
 			ResellerID: rID, SalesUserID: sID, AssignedTo: input.Body.AssignedTo,
 		}
@@ -843,11 +881,15 @@ func registerOpsExtra(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			ClusterID        *xid.ID `json:"cluster_id,omitempty"`
-			CustomerCode     string  `json:"customer_code,omitempty"`
-			ResellerID       *xid.ID `json:"reseller_id,omitempty"`
-			SalesUserID      *xid.ID `json:"sales_user_id,omitempty"`
-			CommissionBasis  string  `json:"commission_basis,omitempty"`
+			ClusterID       *xid.ID  `json:"cluster_id,omitempty"`
+			CustomerCode    string   `json:"customer_code,omitempty"`
+			Latitude        *float64 `json:"latitude,omitempty"`
+			Longitude       *float64 `json:"longitude,omitempty"`
+			IdentityType    *string  `json:"identity_type,omitempty"`
+			IdentityNumber  *string  `json:"identity_number,omitempty"`
+			ResellerID      *xid.ID  `json:"reseller_id,omitempty"`
+			SalesUserID     *xid.ID  `json:"sales_user_id,omitempty"`
+			CommissionBasis string   `json:"commission_basis,omitempty"`
 		}
 	}) (*struct {
 		Body struct {
@@ -861,6 +903,35 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
+		}
+		// Optional final touch-up from the convert dialog (coords & identity),
+		// saved onto the lead so the new customer picks them up automatically.
+		if input.Body.Latitude != nil || input.Body.Longitude != nil ||
+			input.Body.IdentityType != nil || input.Body.IdentityNumber != nil {
+			lead, gerr := d.Store.GetLead(ctx, tid, input.ID)
+			if errors.Is(gerr, store.ErrNotFound) {
+				return nil, httpx.NotFound("lead tidak ditemukan")
+			} else if gerr != nil {
+				return nil, httpx.Internal(gerr)
+			}
+			if input.Body.Latitude != nil {
+				lead.Latitude = input.Body.Latitude
+			}
+			if input.Body.Longitude != nil {
+				lead.Longitude = input.Body.Longitude
+			}
+			if input.Body.IdentityType != nil {
+				lead.IdentityType = normalizeIdentityType(input.Body.IdentityType)
+			}
+			if input.Body.IdentityNumber != nil {
+				lead.IdentityNumber = emptyToNil(input.Body.IdentityNumber)
+			}
+			if err := d.Store.UpdateLead(ctx, lead); err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					return nil, httpx.NotFound("lead tidak ditemukan atau sudah dikonversi")
+				}
+				return nil, httpx.BadRequest(err.Error())
+			}
 		}
 		cust, lead, err := d.Store.ConvertLeadToCustomer(ctx, tid, input.ID, input.Body.ClusterID, input.Body.CustomerCode, input.Body.ResellerID, input.Body.SalesUserID, input.Body.CommissionBasis)
 		if err != nil {
@@ -1408,17 +1479,20 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, _, err := d.Store.ListInvoices(ctx, tid, "", "", 5000, 0)
+		list, _, err := d.Store.ListInvoices(ctx, tid, "", "", 100000, 0)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
 		f := excelize.NewFile()
 		sheet := "Invoices"
 		_ = f.SetSheetName("Sheet1", sheet)
-		_ = f.SetSheetRow(sheet, "A1", &[]any{"invoice_number", "customer", "total", "status", "due_date"})
+		_ = f.SetSheetRow(sheet, "A1", &[]any{"invoice_number", "customer", "due_date", "total", "paid_amount", "outstanding", "status"})
 		for i, inv := range list {
 			cell := fmt.Sprintf("A%d", i+2)
-			_ = f.SetSheetRow(sheet, cell, &[]any{inv.InvoiceNumber, inv.CustomerName, inv.TotalAmount, inv.Status, inv.DueDate.Format("2006-01-02")})
+			_ = f.SetSheetRow(sheet, cell, &[]any{
+				inv.InvoiceNumber, inv.CustomerName, inv.DueDate.Format("2006-01-02"),
+				inv.TotalAmount, inv.PaidAmount, inv.TotalAmount - inv.PaidAmount, inv.Status,
+			})
 		}
 		buf, err := f.WriteToBuffer()
 		if err != nil {

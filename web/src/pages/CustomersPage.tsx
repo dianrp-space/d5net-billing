@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
-import { IconImage, IconLock, IconPencil, IconTrash } from "../icons";
+import { IconDownload, IconImage, IconLock, IconPencil, IconTrash, IconUpload } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
 import { FormDialog, IconButton, Section, Table } from "../ui";
@@ -115,6 +115,9 @@ export function CustomersPage({
   const [editId, setEditId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [formErr, setFormErr] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
 
   const previewQ = useQuery({
     queryKey: ["cluster-preview", form.cluster_id],
@@ -238,6 +241,65 @@ export function CustomersPage({
     setFormErr("");
   }
 
+  async function exportCsv() {
+    const ok = await confirm({
+      title: "Export pelanggan",
+      description: "Unduh data pelanggan sebagai CSV?",
+      confirmLabel: "Unduh",
+    });
+    if (!ok) return;
+    try {
+      const params = new URLSearchParams();
+      if (clusterFilter) params.set("cluster_id", clusterFilter);
+      if (statusFilter) params.set("is_active", statusFilter);
+      const qs = params.toString();
+      await apiDownload(`/api/customers/export.csv${qs ? `?${qs}` : ""}`, "customers.csv");
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Export gagal");
+    }
+  }
+
+  async function downloadTemplate() {
+    const ok = await confirm({
+      title: "Unduh template import",
+      description: "Unduh template CSV untuk import pelanggan?",
+      confirmLabel: "Unduh",
+    });
+    if (!ok) return;
+    const sample = [
+      "customer_code,full_name,phone,email,address,cluster_code,latitude,longitude,identity_type,identity_number,is_active,portal_enabled",
+      ",Budi Santoso,081234567890,budi@example.com,Jl. Merdeka No. 10,,-6.2,106.81667,ktp,3201234567890123,true,true",
+      ",Siti Aminah,081987654321,,,,,,sim,,true,true",
+    ].join("\n");
+    const blob = new Blob([sample + "\n"], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "customers-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function onImportFile(file: File) {
+    setImportBusy(true);
+    setImportMsg("");
+    try {
+      const csv = await file.text();
+      const res = await api<{ created: number; updated: number; skipped: number; errors?: string[] }>(
+        "/api/customers/import",
+        { method: "POST", body: JSON.stringify({ csv }) },
+      );
+      const errHint = res.errors?.length ? ` · ${res.errors.slice(0, 3).join("; ")}` : "";
+      setImportMsg(`Import selesai: ${res.created} baru, ${res.updated} diupdate, ${res.skipped} dilewati${errHint}`);
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      qc.invalidateQueries({ queryKey: ["ftth-map"] });
+    } catch (e: unknown) {
+      setImportMsg(e instanceof Error ? e.message : "Import gagal");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   const clusters = Array.isArray(clustersQ.data) ? clustersQ.data : [];
   const resellers = Array.isArray(resellersQ.data) ? resellersQ.data : [];
   const users = Array.isArray(usersQ.data) ? usersQ.data : [];
@@ -251,18 +313,26 @@ export function CustomersPage({
     <Section
       title="Pelanggan"
       actions={
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            setEditId(null);
-            setForm(emptyForm);
-            setFormErr("");
-            setCreateOpen(true);
-          }}
-        >
-          + Tambah
-        </button>
+        <span className="flex flex-wrap items-center gap-1.5">
+          <IconButton label="Export CSV" onClick={() => void exportCsv()}>
+            <IconDownload />
+          </IconButton>
+          <IconButton label="Import CSV" onClick={() => { setImportMsg(""); setImportOpen(true); }}>
+            <IconUpload />
+          </IconButton>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setEditId(null);
+              setForm(emptyForm);
+              setFormErr("");
+              setCreateOpen(true);
+            }}
+          >
+            + Tambah
+          </button>
+        </span>
       }
     >
       {formErr && !dialogOpen && <p className="mb-3 text-sm text-[var(--danger)]">{formErr}</p>}
@@ -342,6 +412,42 @@ export function CustomersPage({
           </span>,
         ])}
       />
+
+      <FormDialog open={importOpen} title="Import Pelanggan (CSV)" onClose={() => setImportOpen(false)}>
+        <div className="grid gap-3">
+          <p className="text-sm text-[var(--muted)]">
+            Kolom:{" "}
+            <code className="text-xs break-all">
+              customer_code,full_name,phone,email,address,cluster_code,latitude,longitude,identity_type,identity_number,is_active,portal_enabled
+            </code>
+            . Upsert berdasarkan <code className="text-xs">customer_code</code>; kode kosong = dibuat otomatis.
+            Password portal default = nomor HP.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-ghost" onClick={() => void downloadTemplate()}>
+              Unduh template
+            </button>
+            <label className="btn cursor-pointer">
+              {importBusy ? "Mengimpor…" : "Pilih file CSV"}
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                disabled={importBusy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void onImportFile(f);
+                }}
+              />
+            </label>
+            <button type="button" className="btn-ghost" onClick={() => setImportOpen(false)}>
+              Tutup
+            </button>
+          </div>
+          {importMsg && <p className="text-sm text-[var(--text-body)] whitespace-pre-wrap break-words">{importMsg}</p>}
+        </div>
+      </FormDialog>
 
       <FormDialog open={dialogOpen} wide title={editId ? "Edit pelanggan" : "Tambah pelanggan"} onClose={closeForm}>
         <form

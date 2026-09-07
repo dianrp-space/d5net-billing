@@ -208,6 +208,15 @@ func (s *Store) DeleteCustomer(ctx context.Context, tenantID xid.ID, id xid.ID) 
 	return nil
 }
 
+func (s *Store) GetCustomerByCode(ctx context.Context, tenantID xid.ID, code string) (*Customer, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	return scanCustomer(s.Pool.QueryRow(ctx, customerSelect+`
+		WHERE c.tenant_id = $1 AND c.customer_code = $2
+	`, tenantID, code))
+}
+
 func (s *Store) GetCustomerByPhone(ctx context.Context, tenantID xid.ID, phone string) (*Customer, error) {
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, err
@@ -215,6 +224,33 @@ func (s *Store) GetCustomerByPhone(ctx context.Context, tenantID xid.ID, phone s
 	return scanCustomer(s.Pool.QueryRow(ctx, customerSelect+`
 		WHERE c.tenant_id = $1 AND c.phone = $2
 	`, tenantID, phone))
+}
+
+// ListCustomersByPhone returns ALL customers sharing one phone number (e.g. one
+// payer for several installations), oldest first. Used by the portal combined login.
+func (s *Store) ListCustomersByPhone(ctx context.Context, tenantID xid.ID, phone string) ([]Customer, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	rows, err := s.Pool.Query(ctx, customerSelect+`
+		WHERE c.tenant_id = $1 AND c.phone = $2
+		ORDER BY c.created_at ASC
+	`, tenantID, phone)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []Customer
+	for rows.Next() {
+		var c Customer
+		if err := rows.Scan(&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
+			&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode,
+			&c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName); err != nil {
+			return nil, err
+		}
+		list = append(list, c)
+	}
+	return list, rows.Err()
 }
 
 func (s *Store) NextCustomerCode(ctx context.Context, tenantID xid.ID) (string, error) {

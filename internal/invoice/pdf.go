@@ -43,13 +43,14 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem) []byte {
 		fmt.Fprintf(&body, "Sisa: %d\n", inv.TotalAmount-inv.PaidAmount)
 	}
 	content := body.String()
+	stream := "BT /F1 10 Tf 12 TL 50 800 Td " + pdfEscape(content) + " ET"
 	var pdf bytes.Buffer
 	pdf.WriteString("%PDF-1.4\n")
 	objects := []string{
 		"<< /Type /Catalog /Pages 2 0 R >>",
 		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
 		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-		fmt.Sprintf("<< /Length %d >>\nstream\nBT /F1 10 Tf 50 800 Td %s ET\nendstream", 40+len(content), pdfEscape(content)),
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream),
 		"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
 	}
 	offsets := make([]int, len(objects)+1)

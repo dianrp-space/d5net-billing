@@ -5,10 +5,32 @@ import { LoginShell, SecretInput } from "./ui";
 import { AuthThemeCorner } from "./ThemeToggle";
 
 export type ClientPortalData = {
-  customer?: { full_name: string; phone: string; customer_code: string };
-  subscriptions?: { username: string; plan_name: string; status: string }[];
-  invoices?: { invoice_number: string; total_amount: number; status: string; due_date?: string }[];
-  payments?: { amount: number; method: string; status: string; paid_at?: string; created_at?: string }[];
+  customer?: { id?: string; full_name: string; phone: string; customer_code: string };
+  customers?: { id: string; full_name: string; phone: string; customer_code: string }[];
+  subscriptions?: {
+    username: string;
+    plan_name: string;
+    status: string;
+    customer_name?: string;
+    customer_code?: string;
+  }[];
+  invoices?: {
+    invoice_number: string;
+    total_amount: number;
+    status: string;
+    due_date?: string;
+    customer_name?: string;
+    customer_code?: string;
+  }[];
+  payments?: {
+    amount: number;
+    method: string;
+    status: string;
+    paid_at?: string;
+    created_at?: string;
+    customer_name?: string;
+    customer_code?: string;
+  }[];
   wallet_balance?: number;
   tenant_slug?: string;
   tenant_name?: string;
@@ -46,7 +68,8 @@ export function ClientLogin({
           applyBrandingMeta({
             appName: t.name || t.app_name,
             faviconUrl: t.favicon_url,
-            titleSuffix: "Portal",
+            titleSuffix: "Portal Pelanggan",
+            separator: "-",
           });
         }
       } catch {

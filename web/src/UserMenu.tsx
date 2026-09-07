@@ -31,7 +31,7 @@ export type MeUser = {
   role_slug?: string;
 };
 
-function UserAvatar({
+export function UserAvatar({
   name,
   email,
   avatarUrl,

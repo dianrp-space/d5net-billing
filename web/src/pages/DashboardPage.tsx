@@ -4,6 +4,7 @@ import { api, apiDownload } from "../api";
 import { IconTicket, IconUsers } from "../icons";
 import type { AdminPage } from "../admin/pages";
 import { AlertsPanel } from "../AdminExtra";
+import { useAppDialog } from "../confirm";
 import { Card, formatRp, Table, Button } from "../ui";
 import { toastError } from "../swal";
 
@@ -16,6 +17,7 @@ export function DashboardPage({
   fieldOps?: boolean;
   onNavigate: (p: AdminPage) => void;
 }) {
+  const { confirm } = useAppDialog();
   const stats = useQuery({
     queryKey: ["stats", fieldOps ? "field" : "admin"],
     queryFn: () => api<Record<string, number | string>>("/api/dashboard/stats"),
@@ -47,6 +49,20 @@ export function DashboardPage({
   const series = Array.isArray(chart.data) ? chart.data : [];
   const today = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
   const greetName = (userName || "").trim();
+
+  async function exportInvoices() {
+    const ok = await confirm({
+      title: "Export tagihan",
+      description: "Unduh data tagihan sebagai CSV?",
+      confirmLabel: "Unduh",
+    });
+    if (!ok) return;
+    try {
+      await apiDownload("/api/reports/invoices.csv", "invoices.csv");
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Export gagal");
+    }
+  }
 
   if (fieldOps) {
     return (
@@ -117,14 +133,7 @@ export function DashboardPage({
         </h2>
         <div className="flex flex-wrap items-center gap-2">
           <span className="btn-ghost text-sm">{today}</span>
-          <Button
-            type="button"
-            onClick={() =>
-              void apiDownload("/api/reports/invoices.csv", "invoices.csv").catch((e: Error) =>
-                toastError(e.message || "Export gagal"),
-              )
-            }
-          >
+          <Button type="button" onClick={() => void exportInvoices()}>
             Export CSV
           </Button>
         </div>

@@ -26,6 +26,8 @@ type Lead struct {
 	ODPName       string     `json:"odp_name,omitempty"`
 	Status        string     `json:"status"`
 	Notes         *string    `json:"notes,omitempty"`
+	IdentityType  *string    `json:"identity_type,omitempty"`
+	IdentityNumber *string   `json:"identity_number,omitempty"`
 	ResellerID    *xid.ID    `json:"reseller_id,omitempty"`
 	ResellerName  string     `json:"reseller_name,omitempty"`
 	SalesUserID     *xid.ID    `json:"sales_user_id,omitempty"`
@@ -74,9 +76,9 @@ func (s *Store) CreateLead(ctx context.Context, l *Lead) error {
 	}
 	l.ResellerID, l.SalesUserID = NormalizeAttribution(l.ResellerID, l.SalesUserID)
 	return s.Pool.QueryRow(ctx, `
-		INSERT INTO leads (tenant_id, full_name, phone, email, address, latitude, longitude, odp_id, status, notes, reseller_id, sales_user_id, assigned_to)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, created_at
-	`, l.TenantID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.ResellerID, l.SalesUserID, l.AssignedTo).
+		INSERT INTO leads (tenant_id, full_name, phone, email, address, latitude, longitude, odp_id, status, notes, identity_type, identity_number, reseller_id, sales_user_id, assigned_to)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id, created_at
+	`, l.TenantID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.IdentityType, l.IdentityNumber, l.ResellerID, l.SalesUserID, l.AssignedTo).
 		Scan(&l.ID, &l.CreatedAt)
 }
 
@@ -85,7 +87,8 @@ func scanLead(row pgx.Row) (*Lead, error) {
 	err := row.Scan(
 		&l.ID, &l.TenantID, &l.FullName, &l.Phone, &l.Email, &l.Address,
 		&l.Latitude, &l.Longitude, &l.ODPID, &l.ODPCode, &l.ODPName,
-		&l.Status, &l.Notes, &l.ResellerID, &l.ResellerName, &l.SalesUserID, &l.SalesUserName,
+		&l.Status, &l.Notes, &l.IdentityType, &l.IdentityNumber,
+		&l.ResellerID, &l.ResellerName, &l.SalesUserID, &l.SalesUserName,
 		&l.AssignedTo, &l.AssignedToName, &l.CustomerID, &l.ConvertedAt, &l.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -100,7 +103,8 @@ func scanLead(row pgx.Row) (*Lead, error) {
 const leadSelect = `
 	SELECT l.id, l.tenant_id, l.full_name, l.phone, l.email, l.address, l.latitude, l.longitude,
 	       l.odp_id, COALESCE(o.code, ''), COALESCE(o.name, ''),
-	       l.status, l.notes, l.reseller_id, COALESCE(r.name, ''), l.sales_user_id, COALESCE(u.full_name, ''),
+	       l.status, l.notes, l.identity_type, l.identity_number,
+	       l.reseller_id, COALESCE(r.name, ''), l.sales_user_id, COALESCE(u.full_name, ''),
 	       l.assigned_to, COALESCE(ua.full_name, ''),
 	       l.customer_id, l.converted_at, l.created_at
 	FROM leads l
@@ -110,7 +114,11 @@ const leadSelect = `
 	LEFT JOIN users ua ON ua.id = l.assigned_to
 `
 
-func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, status string, assignedTo *xid.ID, limit, offset int) ([]Lead, int64, error) {
+// convertedHideAfterDays: converted leads older than this are hidden from the
+// default pipeline view (data is kept; pass hideConverted=false for history).
+const convertedHideAfterDays = 7
+
+func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, status string, assignedTo *xid.ID, hideConverted bool, limit, offset int) ([]Lead, int64, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -123,6 +131,9 @@ func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, status string, a
 	if assignedTo != nil && !xid.IsNil(*assignedTo) {
 		args = append(args, *assignedTo)
 		where += fmt.Sprintf(` AND l.assigned_to=$%d`, len(args))
+	}
+	if hideConverted {
+		where += fmt.Sprintf(` AND NOT (l.status='converted' AND (l.converted_at IS NULL OR l.converted_at < NOW() - INTERVAL '%d days'))`, convertedHideAfterDays)
 	}
 	var total int64
 	countQ := `SELECT COUNT(*) FROM leads l ` + where
@@ -144,7 +155,8 @@ func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, status string, a
 		if err := rows.Scan(
 			&l.ID, &l.TenantID, &l.FullName, &l.Phone, &l.Email, &l.Address,
 			&l.Latitude, &l.Longitude, &l.ODPID, &l.ODPCode, &l.ODPName,
-			&l.Status, &l.Notes, &l.ResellerID, &l.ResellerName, &l.SalesUserID, &l.SalesUserName,
+			&l.Status, &l.Notes, &l.IdentityType, &l.IdentityNumber,
+			&l.ResellerID, &l.ResellerName, &l.SalesUserID, &l.SalesUserName,
 			&l.AssignedTo, &l.AssignedToName, &l.CustomerID, &l.ConvertedAt, &l.CreatedAt,
 		); err != nil {
 			return nil, 0, err
@@ -165,6 +177,7 @@ type LeadComment struct {
 	LeadID    xid.ID    `json:"lead_id"`
 	UserID    *xid.ID   `json:"user_id,omitempty"`
 	UserName  string    `json:"user_name,omitempty"`
+	AvatarURL *string   `json:"avatar_url,omitempty"`
 	Kind      string    `json:"kind"` // comment | status_change
 	Message   string    `json:"message"`
 	ImageURLs []string  `json:"image_urls"`
@@ -195,7 +208,7 @@ func (s *Store) ListLeadComments(ctx context.Context, tenantID, leadID xid.ID) (
 		return nil, err
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT c.id, c.lead_id, c.user_id, COALESCE(u.full_name, ''), COALESCE(c.kind, 'comment'),
+		SELECT c.id, c.lead_id, c.user_id, COALESCE(u.full_name, ''), u.avatar_url, COALESCE(c.kind, 'comment'),
 		       c.message, COALESCE(c.image_urls, '[]'::jsonb), c.created_at
 		FROM lead_comments c
 		LEFT JOIN users u ON u.id = c.user_id
@@ -210,7 +223,7 @@ func (s *Store) ListLeadComments(ctx context.Context, tenantID, leadID xid.ID) (
 	for rows.Next() {
 		var c LeadComment
 		var raw []byte
-		if err := rows.Scan(&c.ID, &c.LeadID, &c.UserID, &c.UserName, &c.Kind, &c.Message, &raw, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.LeadID, &c.UserID, &c.UserName, &c.AvatarURL, &c.Kind, &c.Message, &raw, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		if c.Kind == "" {
@@ -260,7 +273,7 @@ func (s *Store) AddLeadActivity(ctx context.Context, tenantID, leadID xid.ID, us
 	c.ImageURLs = []string{}
 	_ = json.Unmarshal(raw, &c.ImageURLs)
 	if userID != nil {
-		_ = s.Pool.QueryRow(ctx, `SELECT COALESCE(full_name,'') FROM users WHERE id=$1`, *userID).Scan(&c.UserName)
+		_ = s.Pool.QueryRow(ctx, `SELECT COALESCE(full_name,''), avatar_url FROM users WHERE id=$1`, *userID).Scan(&c.UserName, &c.AvatarURL)
 	}
 	return &c, nil
 }
@@ -280,10 +293,11 @@ func (s *Store) UpdateLead(ctx context.Context, l *Lead) error {
 	l.ResellerID, l.SalesUserID = NormalizeAttribution(l.ResellerID, l.SalesUserID)
 	tag, err := s.Pool.Exec(ctx, `
 		UPDATE leads SET full_name=$3, phone=$4, email=$5, address=$6, latitude=$7, longitude=$8,
-		                 odp_id=$9, status=$10, notes=$11, reseller_id=$12, sales_user_id=$13,
-		                 assigned_to=$14, updated_at=NOW()
+		                 odp_id=$9, status=$10, notes=$11, identity_type=$12, identity_number=$13,
+		                 reseller_id=$14, sales_user_id=$15,
+		                 assigned_to=$16, updated_at=NOW()
 		WHERE tenant_id=$1 AND id=$2 AND status <> 'converted'
-	`, l.TenantID, l.ID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.ResellerID, l.SalesUserID, l.AssignedTo)
+	`, l.TenantID, l.ID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.IdentityType, l.IdentityNumber, l.ResellerID, l.SalesUserID, l.AssignedTo)
 	if err != nil {
 		return err
 	}
@@ -395,6 +409,7 @@ func (s *Store) ConvertLeadToCustomer(ctx context.Context, tenantID, leadID xid.
 		TenantID: tenantID, ClusterID: clusterID, CustomerCode: code,
 		FullName: lead.FullName, Email: lead.Email, Phone: phone, Address: lead.Address,
 		Latitude: lead.Latitude, Longitude: lead.Longitude,
+		IdentityType: lead.IdentityType, IdentityNumber: lead.IdentityNumber,
 		IsActive: true, PortalEnabled: true,
 		ResellerID: rID, SalesUserID: sID,
 	}

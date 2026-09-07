@@ -38,6 +38,7 @@ type TicketMessage struct {
 	SenderType string    `json:"sender_type"`
 	SenderID   *xid.ID   `json:"sender_id,omitempty"`
 	SenderName string    `json:"sender_name,omitempty"`
+	AvatarURL  *string   `json:"avatar_url,omitempty"`
 	Message    string    `json:"message"`
 	ImageURLs  []string  `json:"image_urls"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -220,7 +221,7 @@ func (s *Store) ListTicketMessages(ctx context.Context, tenantID, ticketID xid.I
 		return nil, err
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT m.id, m.ticket_id, m.sender_type, m.sender_id, COALESCE(u.full_name,''), m.message,
+		SELECT m.id, m.ticket_id, m.sender_type, m.sender_id, COALESCE(u.full_name,''), u.avatar_url, m.message,
 		       COALESCE(m.image_urls, '[]'::jsonb), m.created_at
 		FROM ticket_messages m
 		LEFT JOIN users u ON u.id = m.sender_id
@@ -235,7 +236,7 @@ func (s *Store) ListTicketMessages(ctx context.Context, tenantID, ticketID xid.I
 	for rows.Next() {
 		var m TicketMessage
 		var raw []byte
-		if err := rows.Scan(&m.ID, &m.TicketID, &m.SenderType, &m.SenderID, &m.SenderName, &m.Message, &raw, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.TicketID, &m.SenderType, &m.SenderID, &m.SenderName, &m.AvatarURL, &m.Message, &raw, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		m.ImageURLs = []string{}
@@ -276,7 +277,7 @@ func (s *Store) AddTicketMessage(ctx context.Context, tenantID, ticketID xid.ID,
 	m.ImageURLs = []string{}
 	_ = json.Unmarshal(raw, &m.ImageURLs)
 	if senderID != nil {
-		_ = s.Pool.QueryRow(ctx, `SELECT COALESCE(full_name,'') FROM users WHERE id=$1`, *senderID).Scan(&m.SenderName)
+		_ = s.Pool.QueryRow(ctx, `SELECT COALESCE(full_name,''), avatar_url FROM users WHERE id=$1`, *senderID).Scan(&m.SenderName, &m.AvatarURL)
 	}
 	return &m, nil
 }

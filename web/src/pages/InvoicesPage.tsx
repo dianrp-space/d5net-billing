@@ -2,12 +2,14 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
+import { useAppDialog } from "../confirm";
 import { toastError } from "../swal";
 import { formatRp, Section, Table, Button } from "../ui";
 import { InvoiceActions } from "../AdminExtra";
 
 export function InvoicesPage() {
   const qc = useQueryClient();
+  const { confirm } = useAppDialog();
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -40,6 +42,24 @@ export function InvoicesPage() {
   const total = q.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / limit));
 
+  async function exportCsv() {
+    const ok = await confirm({
+      title: "Export tagihan",
+      description: "Unduh data tagihan (mengikuti filter & pencarian aktif) sebagai CSV?",
+      confirmLabel: "Unduh",
+    });
+    if (!ok) return;
+    try {
+      const params = new URLSearchParams();
+      if (status) params.set("status", status);
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+      const qs = params.toString();
+      await apiDownload(`/api/reports/invoices.csv${qs ? `?${qs}` : ""}`, "invoices.csv");
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Export gagal");
+    }
+  }
+
   return (
     <Section title="Tagihan">
       <ListToolbar
@@ -71,15 +91,7 @@ export function InvoicesPage() {
         onPageChange={setPage}
         total={total}
       >
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() =>
-            void apiDownload("/api/reports/invoices.csv", "invoices.csv").catch((e: Error) =>
-              toastError(e.message || "Export gagal"),
-            )
-          }
-        >
+        <Button type="button" variant="outline" onClick={() => void exportCsv()}>
           Export CSV
         </Button>
       </ListToolbar>
