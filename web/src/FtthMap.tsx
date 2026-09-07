@@ -82,6 +82,52 @@ function formatDistance(meters: number): string {
   return `${(meters / 1000).toFixed(meters < 10000 ? 2 : 1)} km`;
 }
 
+type MapMarkerKind = "pop" | "odp" | "customer";
+
+const MAP_MARKER = {
+  pop: { color: "#5A5A40", label: "POP" },
+  odp: { color: "#2563eb", label: "ODP" },
+  customer: { color: "#15803d", label: "Pelanggan" },
+} as const;
+
+/** Distinct SVG glyphs so POP / ODP / pelanggan are readable at a glance. */
+function mapMarkerSvg(kind: MapMarkerKind, color: string): string {
+  if (kind === "pop") {
+    // Tower / mast — POP / cluster
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 3v18M8 7l4-4 4 4M7 21h10M9 12h6M10 16h4" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="12" cy="10" r="2.2" fill="${color}"/>
+    </svg>`;
+  }
+  if (kind === "odp") {
+    // Distribution box — ODP
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="4" y="5" width="16" height="14" rx="2" stroke="${color}" stroke-width="2.2" fill="${color}" fill-opacity="0.18"/>
+      <path d="M8 9h8M8 12h8M8 15h5" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+    </svg>`;
+  }
+  // Home / customer
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M4 11.5 12 4l8 7.5" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M7 10.5V20h10v-9.5" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M10 20v-5h4v5" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+function createMapMarkerIcon(L: Window["L"], kind: MapMarkerKind) {
+  const { color, label } = MAP_MARKER[kind];
+  return L.divIcon({
+    className: `ftth-map-marker ftth-map-marker--${kind}`,
+    html: `<div class="ftth-map-marker-pin" style="--ftth-marker:${color}" title="${label}">
+      <span class="ftth-map-marker-glyph">${mapMarkerSvg(kind, "#fff")}</span>
+      <span class="ftth-map-marker-tail"></span>
+    </div>`,
+    iconSize: [32, 40],
+    iconAnchor: [16, 40],
+    popupAnchor: [0, -36],
+  });
+}
+
 type Basemap = "street" | "satellite";
 const BASEMAP_KEY = "drp_ftth_basemap";
 
@@ -461,12 +507,7 @@ export function MapODP({
     for (const c of clusters) {
       if (c.latitude == null || c.longitude == null) continue;
       pts.push({ lat: c.latitude, lng: c.longitude });
-      L.circleMarker([c.latitude, c.longitude], {
-        radius: 9,
-        color: "#5A5A40",
-        fillColor: "#5A5A40",
-        fillOpacity: 0.9,
-      })
+      L.marker([c.latitude, c.longitude], { icon: createMapMarkerIcon(L, "pop"), zIndexOffset: 300 })
         .bindPopup(`<b>POP ${c.name}</b><br/>${c.code}<br/><span style="opacity:.7">Klik saat mode gambar untuk snap</span>`)
         .on("click", snapClick(c.latitude, c.longitude))
         .addTo(group);
@@ -474,12 +515,7 @@ export function MapODP({
     for (const o of odpsList) {
       if (o.latitude == null || o.longitude == null) continue;
       pts.push({ lat: o.latitude, lng: o.longitude });
-      L.circleMarker([o.latitude, o.longitude], {
-        radius: 7,
-        color: "#2563eb",
-        fillColor: "#3b82f6",
-        fillOpacity: 0.9,
-      })
+      L.marker([o.latitude, o.longitude], { icon: createMapMarkerIcon(L, "odp"), zIndexOffset: 200 })
         .bindPopup(
           `<b>ODP ${o.name}</b><br/>${o.code}<br/>Port terpakai ${o.used_ports ?? 0}/${o.port_count}` +
             (o.free_ports != null ? ` · sisa ${o.free_ports}` : ""),
@@ -490,12 +526,7 @@ export function MapODP({
     for (const c of customers) {
       if (c.latitude == null || c.longitude == null) continue;
       pts.push({ lat: c.latitude, lng: c.longitude });
-      L.circleMarker([c.latitude, c.longitude], {
-        radius: 6,
-        color: "#15803d",
-        fillColor: "#22c55e",
-        fillOpacity: 0.9,
-      })
+      L.marker([c.latitude, c.longitude], { icon: createMapMarkerIcon(L, "customer"), zIndexOffset: 100 })
         .bindPopup(`<b>${c.full_name}</b><br/>${c.customer_code}`)
         .on("click", snapClick(c.latitude, c.longitude))
         .addTo(group);
@@ -631,9 +662,23 @@ export function MapODP({
         </span>
       </div>
       <p className="text-xs text-[var(--muted)]">
-        + ODP (form) atau Pasang di peta (klik koordinat). Tab cluster memfilter POP / ODP / pelanggan / jalur.
-        Marker: POP (olive) · ODP (biru) · Pelanggan (hijau).
+        + ODP (form) atau Pasang di peta (klik koordinat). Tab cluster memfilter POP / ODP / pelanggan /
+        jalur.
       </p>
+      <div className="ftth-map-legend" aria-label="Legenda marker peta">
+        <span className="ftth-map-legend-item">
+          <span className="ftth-map-legend-swatch ftth-map-legend-swatch--pop" aria-hidden />
+          POP (menara)
+        </span>
+        <span className="ftth-map-legend-item">
+          <span className="ftth-map-legend-swatch ftth-map-legend-swatch--odp" aria-hidden />
+          ODP (kotak)
+        </span>
+        <span className="ftth-map-legend-item">
+          <span className="ftth-map-legend-swatch ftth-map-legend-swatch--customer" aria-hidden />
+          Pelanggan (rumah)
+        </span>
+      </div>
       <div className="ftth-map-shell">
         <div className="ftth-map-basemap" role="group" aria-label="Tampilan peta">
           <button

@@ -545,6 +545,77 @@ input, select, textarea, button { font: inherit; }
   background: var(--accent);
   color: #fff;
 }
+.ftth-map-marker {
+  background: transparent !important;
+  border: none !important;
+}
+.ftth-map-marker-pin {
+  position: relative;
+  width: 32px;
+  height: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.35));
+}
+.ftth-map-marker-glyph {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--ftth-marker, #5a5a40);
+  border: 2px solid #fff;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.ftth-map-marker-glyph svg {
+  display: block;
+}
+.ftth-map-marker-tail {
+  width: 0;
+  height: 0;
+  margin-top: -1px;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 10px solid var(--ftth-marker, #5a5a40);
+}
+.ftth-map-marker--odp .ftth-map-marker-glyph {
+  border-radius: 7px;
+}
+.ftth-map-marker--pop .ftth-map-marker-glyph {
+  border-radius: 8px 8px 4px 4px;
+}
+.ftth-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.ftth-map-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.ftth-map-legend-swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.12);
+  background: #5a5a40;
+}
+.ftth-map-legend-swatch--pop {
+  background: #5a5a40;
+  border-radius: 3px 3px 1px 1px;
+}
+.ftth-map-legend-swatch--odp {
+  background: #2563eb;
+  border-radius: 3px;
+}
+.ftth-map-legend-swatch--customer {
+  background: #15803d;
+  border-radius: 999px;
+}
 .ftth-map-frame {
   height: 28rem;
   min-height: 22rem;
