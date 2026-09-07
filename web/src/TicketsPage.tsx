@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayoutGrid, List } from "lucide-react";
 import { api, apiUpload } from "./api";
+import { ProgressFileUpload } from "./ProgressFileUpload";
 import { useAppDialog } from "./confirm";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -15,9 +16,10 @@ import {
   KanbanOverlay,
   type KanbanCommitMeta,
 } from "./components/ui/kanban";
-import { IconCheck, IconImage, IconPencil, IconUserCheck } from "./icons";
+import { IconCheck, IconPencil, IconUserCheck } from "./icons";
 import { canDispatchOps, type MePermissions } from "./permissions";
 import { toastError, toastSuccess } from "./swal";
+import { ListToolbar, matchesQuery, useDebouncedValue } from "./ListToolbar";
 import {
   Button,
   FormDialog,
@@ -196,6 +198,8 @@ export function TicketsPage() {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
   const [status, setStatus] = useState("");
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [page, setPage] = useState(0);
   const limit = 20;
   const [open, setOpen] = useState(false);
@@ -207,8 +211,7 @@ export function TicketsPage() {
   const [assignUser, setAssignUser] = useState("");
   const [columns, setColumns] = useState<Record<string, TicketRow[]>>(emptyBoard);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const photoRef = useRef<HTMLInputElement>(null);
+  const [createImages, setCreateImages] = useState<string[]>([]);
   const [view, setView] = useState<"kanban" | "list">(() => {
     try {
       const v = localStorage.getItem(TICKETS_VIEW_KEY);
@@ -234,11 +237,16 @@ export function TicketsPage() {
   const canDispatch = canDispatchOps(meQ.data?.permissions);
 
   const listQ = useQuery({
-    queryKey: ["tickets", "list", status, page],
-    queryFn: () =>
-      api<{ data: TicketRow[]; total: number }>(
-        `/api/tickets?limit=${limit}&offset=${page * limit}${status ? `&status=${encodeURIComponent(status)}` : ""}`,
-      ),
+    queryKey: ["tickets", "list", status, debouncedSearch, page],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        limit: String(limit),
+        offset: String(page * limit),
+      });
+      if (status) params.set("status", status);
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+      return api<{ data: TicketRow[]; total: number }>(`/api/tickets?${params}`);
+    },
     enabled: view === "list",
   });
   const boardQ = useQuery({
@@ -271,8 +279,14 @@ export function TicketsPage() {
   const messages = Array.isArray(messagesQ.data) ? messagesQ.data : [];
 
   useEffect(() => {
-    if (view === "kanban") setColumns(boardFromList(boardList ?? []));
-  }, [view, boardList]);
+    if (view === "kanban") {
+      const all = boardList ?? [];
+      const filtered = all.filter((t) =>
+        matchesQuery(search, t.subject, t.customer_name, t.assignee_name, t.category),
+      );
+      setColumns(boardFromList(filtered));
+    }
+  }, [view, boardList, search]);
 
   useEffect(() => {
     if (!detail) {
@@ -299,11 +313,13 @@ export function TicketsPage() {
           category: form.category,
           priority: form.priority,
           customer_id: form.customer_id || undefined,
+          image_urls: createImages.length ? createImages : undefined,
         }),
       }),
     onSuccess: () => {
       setOpen(false);
       setForm(emptyForm);
+      setCreateImages([]);
       setFormErr("");
       qc.invalidateQueries({ queryKey: ["tickets"] });
       void toastSuccess("Tiket dibuat");
@@ -319,6 +335,7 @@ export function TicketsPage() {
       api(`/api/tickets/${id}/status`, { method: "PATCH", body: JSON.stringify({ status: st }) }),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["tickets"] });
+      qc.invalidateQueries({ queryKey: ["ticket-messages"] });
       if (detail) {
         void api<TicketRow>(`/api/tickets/${detail.id}`).then(setDetail).catch(() => undefined);
       }
@@ -362,20 +379,6 @@ export function TicketsPage() {
     },
     onError: (e: Error) => void toastError(e.message),
   });
-
-  async function onPickPhoto(file: File) {
-    if (!detail) return;
-    setPhotoBusy(true);
-    try {
-      const res = await apiUpload<{ url: string }>(`/api/tickets/${detail.id}/messages/photos`, file);
-      setPendingImages((prev) => [...prev, res.url]);
-      void toastSuccess("Gambar siap dilampirkan");
-    } catch (e) {
-      void toastError(e instanceof Error ? e.message : "Upload gagal");
-    } finally {
-      setPhotoBusy(false);
-    }
-  }
 
   function openDetail(t: TicketRow) {
     setDetail(t);
@@ -468,6 +471,7 @@ export function TicketsPage() {
               type="button"
               onClick={() => {
                 setForm(emptyForm);
+                setCreateImages([]);
                 setFormErr("");
                 setOpen(true);
               }}
@@ -490,30 +494,30 @@ export function TicketsPage() {
 
       {view === "list" ? (
         <>
-          <div className="mb-4 flex flex-wrap items-end gap-3">
-            <div className="min-w-[180px]">
-              <Label className="mb-1.5 block">Status</Label>
-              <Select
-                value={status || "__all__"}
-                onValueChange={(v) => {
-                  setStatus(v === "__all__" ? "" : v);
+          <ListToolbar
+            search={search}
+            onSearchChange={(v) => {
+              setSearch(v);
+              setPage(0);
+            }}
+            searchPlaceholder="Subjek atau pelanggan…"
+            filters={[
+              {
+                key: "status",
+                label: "Status",
+                value: status,
+                onChange: (v) => {
+                  setStatus(v);
                   setPage(0);
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">Semua</SelectItem>
-                  {COLUMNS.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+                },
+                options: COLUMNS.map((c) => ({ value: c.id, label: c.label })),
+              },
+            ]}
+            page={page}
+            pageCount={pages}
+            onPageChange={setPage}
+            total={total}
+          />
 
           <Table
             columns={["Subjek", "Pelanggan", "Kategori", "Prioritas", "Status", "SLA", "Aksi"]}
@@ -537,29 +541,15 @@ export function TicketsPage() {
               </span>,
             ])}
           />
-
-          <div className="mt-3 flex items-center justify-between gap-2 text-sm text-[var(--muted)]">
-            <span>
-              Halaman {page + 1} / {pages} · {total} tiket
-            </span>
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" size="sm" disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>
-                Sebelumnya
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={page + 1 >= pages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Berikutnya
-              </Button>
-            </div>
-          </div>
         </>
       ) : (
-        <Kanban
+        <>
+          <ListToolbar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Filter kanban: subjek, pelanggan…"
+          />
+          <Kanban
           value={columns}
           onValueChange={setColumns}
           getItemValue={(item) => item.id}
@@ -603,6 +593,7 @@ export function TicketsPage() {
             }}
           </KanbanOverlay>
         </Kanban>
+        </>
       )}
 
       <FormDialog
@@ -612,6 +603,7 @@ export function TicketsPage() {
         onClose={() => {
           setOpen(false);
           setFormErr("");
+          setCreateImages([]);
         }}
       >
         <form
@@ -684,11 +676,58 @@ export function TicketsPage() {
               }))}
             />
           </div>
+          <div className="sm:col-span-2">
+            <Label className="mb-1.5 block">Lampiran gambar (opsional)</Label>
+            {createImages.length > 0 ? (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {createImages.map((url) => (
+                  <div key={url} className="relative">
+                    <img
+                      src={url}
+                      alt=""
+                      className="h-16 w-16 rounded-md border border-[var(--border)] object-cover"
+                    />
+                    <button
+                      type="button"
+                      className="absolute -right-1 -top-1 rounded-full bg-[var(--danger)] px-1 text-[10px] text-white"
+                      title="Hapus lampiran"
+                      aria-label="Hapus lampiran"
+                      onClick={() => setCreateImages((prev) => prev.filter((u) => u !== url))}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <ProgressFileUpload
+              label="Lampirkan gambar"
+              hint="Bisa beberapa file; progress per file"
+              disabled={create.isPending}
+              uploadFile={async (file, onProgress) => {
+                const res = await apiUpload<{ url: string }>("/api/tickets/photos", file, { onProgress });
+                return res.url;
+              }}
+              onBatchComplete={(urls) => {
+                setCreateImages((prev) => [...prev, ...urls]);
+                void toastSuccess(
+                  urls.length > 1 ? `${urls.length} gambar siap dilampirkan` : "Gambar siap dilampirkan",
+                );
+              }}
+            />
+          </div>
           <div className="flex flex-wrap gap-2 sm:col-span-2">
             <Button type="submit" disabled={create.isPending}>
               {create.isPending ? "Menyimpan…" : "Simpan"}
             </Button>
-            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setOpen(false);
+                setCreateImages([]);
+              }}
+            >
               Batal
             </Button>
           </div>
@@ -757,34 +796,51 @@ export function TicketsPage() {
             </div>
 
             <div>
-              <h4 className="mb-2 text-sm font-semibold">Balasan</h4>
+              <h4 className="mb-2 text-sm font-semibold">Aktivitas</h4>
               <div className="mb-3 max-h-56 space-y-2 overflow-y-auto">
                 {messages.length === 0 ? (
-                  <p className="text-sm text-[var(--muted)]">Belum ada pesan.</p>
+                  <p className="text-sm text-[var(--muted)]">Belum ada aktivitas.</p>
                 ) : (
-                  messages.map((m) => (
-                    <div key={m.id} className="rounded-md border border-[var(--border)] p-2 text-sm">
-                      <p className="text-xs text-[var(--muted)]">
-                        {m.sender_name || m.sender_type} · {formatWhen(m.created_at)}
-                      </p>
-                      {m.message ? <p className="mt-1 whitespace-pre-wrap text-[var(--text)]">{m.message}</p> : null}
-                      {(m.image_urls?.length ?? 0) > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {m.image_urls!.map((url) => (
-                            <a
-                              key={url}
-                              href={url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block overflow-hidden rounded border border-[var(--border)]"
-                            >
-                              <img src={url} alt="" className="h-20 w-20 object-cover" />
-                            </a>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))
+                  messages.map((m) => {
+                    const isStatus = m.sender_type === "system";
+                    return (
+                      <div
+                        key={m.id}
+                        className={
+                          isStatus
+                            ? "rounded-md border border-dashed border-[var(--border)] bg-[var(--panel-muted)]/50 px-2 py-1.5 text-sm"
+                            : "rounded-md border border-[var(--border)] p-2 text-sm"
+                        }
+                      >
+                        <p className="text-xs text-[var(--muted)]">
+                          {isStatus
+                            ? `${m.sender_name || "Sistem"} · pindah status`
+                            : m.sender_name || m.sender_type}{" "}
+                          · {formatWhen(m.created_at)}
+                        </p>
+                        {m.message ? (
+                          <p className={isStatus ? "mt-1 text-[var(--muted)]" : "mt-1 whitespace-pre-wrap text-[var(--text)]"}>
+                            {m.message}
+                          </p>
+                        ) : null}
+                        {!isStatus && (m.image_urls?.length ?? 0) > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {m.image_urls!.map((url) => (
+                              <a
+                                key={url}
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block overflow-hidden rounded border border-[var(--border)]"
+                              >
+                                <img src={url} alt="" className="h-20 w-20 object-cover" />
+                              </a>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
                 )}
               </div>
               {pendingImages.length > 0 ? (
@@ -806,7 +862,7 @@ export function TicketsPage() {
                 </div>
               ) : null}
               <form
-                className="flex flex-wrap items-end gap-2"
+                className="grid gap-2"
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!msg.trim() && pendingImages.length === 0) return;
@@ -819,22 +875,23 @@ export function TicketsPage() {
                   value={msg}
                   onChange={(e) => setMsg(e.target.value)}
                 />
-                <IconButton
+                <ProgressFileUpload
                   label="Lampirkan gambar"
-                  disabled={photoBusy}
-                  onClick={() => photoRef.current?.click()}
-                >
-                  <IconImage />
-                </IconButton>
-                <input
-                  ref={photoRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (file) void onPickPhoto(file);
+                  hint="Progress upload per file"
+                  uploadFile={async (file, onProgress) => {
+                    if (!detail) throw new Error("Tiket tidak dipilih");
+                    const res = await apiUpload<{ url: string }>(
+                      `/api/tickets/${detail.id}/messages/photos`,
+                      file,
+                      { onProgress },
+                    );
+                    return res.url;
+                  }}
+                  onBatchComplete={(urls) => {
+                    setPendingImages((prev) => [...prev, ...urls]);
+                    void toastSuccess(
+                      urls.length > 1 ? `${urls.length} gambar siap dilampirkan` : "Gambar siap dilampirkan",
+                    );
                   }}
                 />
                 <Button type="submit" disabled={sendMsg.isPending || (!msg.trim() && pendingImages.length === 0)}>

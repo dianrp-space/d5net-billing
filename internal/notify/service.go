@@ -294,7 +294,7 @@ func (s *Service) HandleWhatsAppBot(ctx context.Context, tenantID xid.ID, phone,
 		if err != nil {
 			return "Nomor tidak terdaftar.", nil
 		}
-		invoices, _, err := s.store.ListInvoices(ctx, tenantID, "issued", 5, 0)
+		invoices, _, err := s.store.ListInvoices(ctx, tenantID, "issued", "", 5, 0)
 		if err != nil || len(invoices) == 0 {
 			return "Tidak ada tagihan aktif.", nil
 		}

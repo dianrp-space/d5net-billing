@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
 import { api, apiDownload, getToken } from "./api";
 import { useAppDialog } from "./confirm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconTrash, IconWrench } from "./icons";
+import { ListToolbar, matchesQuery } from "./ListToolbar";
 import { toastError, toastSuccess } from "./swal";
 import {
   Button,
@@ -27,7 +28,7 @@ import {
 export type ResellerOpt = { id: string; name: string; phone?: string | null; balance?: number; commission_percent?: number; is_active?: boolean };
 export type StaffOpt = { user_id: string; full_name: string; email: string; is_active: boolean; role_slug?: string };
 
-/** Pilih Reseller ATAU Staff/Tim (saling eksklusif). */
+/** Pilih Reseller ATAU Sales (saling eksklusif). */
 export function AttributionSelects({
   resellerId,
   salesUserId,
@@ -1016,7 +1017,20 @@ export function ResellersPage() {
   });
 
   const list = Array.isArray(q.data) ? q.data : [];
+  const [resellerSearch, setResellerSearch] = useState("");
+  const [commSearch, setCommSearch] = useState("");
+  const filteredResellers = useMemo(
+    () => list.filter((r) => matchesQuery(resellerSearch, r.name, r.phone)),
+    [list, resellerSearch],
+  );
   const commissions = commissionsQ.data?.data ?? [];
+  const filteredCommissions = useMemo(
+    () =>
+      commissions.filter((c) =>
+        matchesQuery(commSearch, c.customer_name, c.customer_code, c.reseller_name, c.sales_user_name, c.basis),
+      ),
+    [commissions, commSearch],
+  );
   const statusLabel: Record<string, string> = { pending: "Pending", paid: "Dibayar", void: "Void" };
 
   return (
@@ -1082,9 +1096,15 @@ export function ResellersPage() {
       </div>
 
       <h3 className="mb-2 text-sm font-semibold">Reseller</h3>
+      <ListToolbar
+        search={resellerSearch}
+        onSearchChange={setResellerSearch}
+        searchPlaceholder="Nama atau telepon…"
+        total={filteredResellers.length}
+      />
       <Table
         columns={["Nama", "Telepon", "Saldo", "Aktif", "Aksi"]}
-        rows={list.map((r) => [
+        rows={filteredResellers.map((r) => [
           r.name,
           r.phone ?? "—",
           formatRp(r.balance ?? 0),
@@ -1124,30 +1144,35 @@ export function ResellersPage() {
         ])}
       />
 
-      <div className="mt-8 mb-3 flex flex-wrap items-end justify-between gap-3">
-        <h3 className="text-sm font-semibold">Riwayat komisi</h3>
-        <div className="min-w-[160px]">
-          <Label className="mb-1.5 block">Status</Label>
-          <Select value={commStatus || "__all__"} onValueChange={(v) => setCommStatus(v === "__all__" ? "" : v)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Semua</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="paid">Dibayar</SelectItem>
-              <SelectItem value="void">Void</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="mt-8 mb-3">
+        <h3 className="mb-3 text-sm font-semibold">Riwayat komisi</h3>
+        <ListToolbar
+          search={commSearch}
+          onSearchChange={setCommSearch}
+          searchPlaceholder="Pelanggan, reseller, sales…"
+          filters={[
+            {
+              key: "status",
+              label: "Status",
+              value: commStatus,
+              onChange: setCommStatus,
+              options: [
+                { value: "pending", label: "Pending" },
+                { value: "paid", label: "Dibayar" },
+                { value: "void", label: "Void" },
+              ],
+            },
+          ]}
+          total={filteredCommissions.length}
+        />
       </div>
       <Table
         columns={["Tanggal", "Pelanggan", "Jenis", "Penerima", "Nominal", "Status", "Aksi"]}
-        rows={commissions.map((c) => [
+        rows={filteredCommissions.map((c) => [
           c.created_at ? new Date(c.created_at).toLocaleString("id-ID") : "—",
           c.customer_code ? `${c.customer_code} · ${c.customer_name || ""}` : c.customer_name || "—",
           commissionBasisLabel(c.basis || ""),
-          c.reseller_name ? `Reseller: ${c.reseller_name}` : c.sales_user_name ? `Staff: ${c.sales_user_name}` : "—",
+          c.reseller_name ? `Reseller: ${c.reseller_name}` : c.sales_user_name ? `Sales: ${c.sales_user_name}` : "—",
           formatRp(c.amount),
           statusLabel[c.status] || c.status,
           <span key={c.id} className="flex flex-wrap items-center gap-1.5">

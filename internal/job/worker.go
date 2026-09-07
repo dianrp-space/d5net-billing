@@ -52,24 +52,46 @@ func (w *Worker) runCycle(ctx context.Context) {
 		return
 	}
 	now := time.Now()
+	notifyBatch := 100
 	for _, t := range tenants {
 		if !t.IsActive {
 			continue
 		}
-		if n, err := w.billing.ProcessDueBilling(ctx, t.ID); err == nil && n > 0 {
-			slog.Info("generated invoices", "tenant", t.Slug, "count", n)
+		cfg, err := w.store.GetJobScheduleSettings(ctx, t.ID)
+		if err != nil {
+			slog.Warn("job schedule settings", "tenant", t.Slug, "err", err)
+			cfg = store.DefaultJobScheduleSettings()
 		}
-		if ids, err := w.billing.ProcessOverdueSuspensions(ctx, t.ID); err == nil {
-			for _, subID := range ids {
-				w.suspendSubscription(ctx, t.ID, subID)
+		if cfg.NotifyBatchSize > notifyBatch {
+			notifyBatch = cfg.NotifyBatchSize
+		}
+
+		if cfg.BillingEnabled {
+			if n, err := w.billing.ProcessDueBilling(ctx, t.ID); err == nil && n > 0 {
+				slog.Info("generated invoices", "tenant", t.Slug, "count", n)
 			}
 		}
-		w.processDunning(ctx, t.ID)
-		w.checkODPOutages(ctx, t.ID)
-		w.weeklyReconcile(ctx, t.ID, now)
-		w.monthlyReportEmail(ctx, t, now)
+		if cfg.IsolirEnabled {
+			if ids, err := w.billing.ProcessOverdueSuspensions(ctx, t.ID); err == nil {
+				for _, subID := range ids {
+					w.suspendSubscription(ctx, t.ID, subID)
+				}
+			}
+		}
+		if cfg.DunningEnabled {
+			w.processDunning(ctx, t.ID, cfg.DunningOffsets)
+		}
+		if cfg.OdpOutageEnabled {
+			w.checkODPOutages(ctx, t.ID)
+		}
+		if cfg.WeeklyReconcileEnabled {
+			w.weeklyReconcile(ctx, t.ID, now, cfg.WeeklyReconcileWeekday, cfg.WeeklyReconcileHour)
+		}
+		if cfg.MonthlyReportEnabled {
+			w.monthlyReportEmail(ctx, t, now, cfg.MonthlyReportDay, cfg.MonthlyReportHour)
+		}
 	}
-	if n, err := w.notify.ProcessPending(ctx, 100); err == nil && n > 0 {
+	if n, err := w.notify.ProcessPending(ctx, notifyBatch); err == nil && n > 0 {
 		slog.Info("sent notifications", "count", n)
 	}
 }
@@ -88,19 +110,18 @@ func (w *Worker) checkODPOutages(ctx context.Context, tenantID xid.ID) {
 		eid := o.ID
 		_ = w.store.CreateAlert(ctx, &store.Alert{
 			TenantID: tenantID, Severity: "critical", Kind: "odp_outage",
-			Title: fmt.Sprintf("Possible ODP outage: %s", o.Name),
-			Message: fmt.Sprintf("Offline ratio on ODP %s (%s) exceeds 50%%", o.Name, o.Code),
+			Title:      fmt.Sprintf("Possible ODP outage: %s", o.Name),
+			Message:    fmt.Sprintf("Offline ratio on ODP %s (%s) exceeds 50%%", o.Name, o.Code),
 			EntityType: &et, EntityID: &eid,
 		})
 	}
 }
 
-func (w *Worker) weeklyReconcile(ctx context.Context, tenantID xid.ID, now time.Time) {
-	if now.Weekday() != time.Sunday {
+func (w *Worker) weeklyReconcile(ctx context.Context, tenantID xid.ID, now time.Time, weekday, hour int) {
+	if int(now.Weekday()) != weekday {
 		return
 	}
-	// Run during the configured hour window (default 3 AM local); ClaimJob ensures once per Sunday.
-	if now.Hour() != 3 {
+	if now.Hour() != hour {
 		return
 	}
 	jobKey := now.Format("2006-01-02")
@@ -132,8 +153,8 @@ func (w *Worker) weeklyReconcile(ctx context.Context, tenantID xid.ID, now time.
 		eid := r.ID
 		_ = w.store.CreateAlert(ctx, &store.Alert{
 			TenantID: tenantID, Severity: "warn", Kind: "reconcile_drift",
-			Title: fmt.Sprintf("Router drift: %s", r.Name),
-			Message: fmt.Sprintf("%d drift(s) detected on dry-run reconcile for router %s", len(drifts), r.Name),
+			Title:      fmt.Sprintf("Router drift: %s", r.Name),
+			Message:    fmt.Sprintf("%d drift(s) detected on dry-run reconcile for router %s", len(drifts), r.Name),
 			EntityType: &et, EntityID: &eid,
 		})
 	}
@@ -173,7 +194,6 @@ func (w *Worker) suspendSubscription(ctx context.Context, tenantID xid.ID, subID
 	if ten != nil {
 		slug = ten.Slug
 	}
-	// Only push Web Proxy/pool infra when this subscription's router matches isolir settings.
 	sameRouter := isolirCfg.RouterID != nil && !xid.IsNil(*isolirCfg.RouterID) && *isolirCfg.RouterID == *sub.RouterID
 	if ensurer, ok := prov.(provision.IsolirEnsurer); ok && sameRouter && isolirCfg.PoolRanges != "" && isolirCfg.PortalBaseURL != "" {
 		if err := ensurer.EnsureIsolirInfra(ctx, tenantID, *sub.RouterID, isolirCfg, slug); err != nil {
@@ -200,7 +220,10 @@ func (w *Worker) suspendSubscription(ctx context.Context, tenantID xid.ID, subID
 	}
 }
 
-func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID) {
+func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, offsets []int) {
+	if len(offsets) == 0 {
+		offsets = store.DefaultJobScheduleSettings().DunningOffsets
+	}
 	invoices, err := w.store.ListDunningInvoices(ctx, tenantID)
 	if err != nil {
 		return
@@ -215,7 +238,7 @@ func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID) {
 		dueDay := time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, now.Location())
 		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		days := int(today.Sub(dueDay).Hours() / 24) // negative = before due
-		for _, target := range []int{-7, -3, 0, 1, 3} {
+		for _, target := range offsets {
 			if days != target {
 				continue
 			}
@@ -230,8 +253,8 @@ func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID) {
 	}
 }
 
-func (w *Worker) monthlyReportEmail(ctx context.Context, t store.Tenant, now time.Time) {
-	if now.Day() != 1 || now.Hour() != 8 {
+func (w *Worker) monthlyReportEmail(ctx context.Context, t store.Tenant, now time.Time, day, hour int) {
+	if now.Day() != day || now.Hour() != hour {
 		return
 	}
 	ok, err := w.store.ClaimJob(ctx, t.ID, "monthly_report", now.Format("2006-01"))

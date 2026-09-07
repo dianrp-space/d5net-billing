@@ -69,7 +69,7 @@ func (s *Store) GlobalSearch(ctx context.Context, tenantID xid.ID, q string, per
 
 	{
 		rows, err := s.Pool.Query(ctx, `
-			SELECT s.id::text, s.username, COALESCE(c.full_name, '') || ' · ' || COALESCE(p.name, '') || ' · ' || s.status
+			SELECT c.id::text, s.username, COALESCE(c.full_name, '') || ' · ' || COALESCE(p.name, '') || ' · ' || s.status
 			FROM subscriptions s
 			JOIN customers c ON c.id = s.customer_id
 			JOIN plans p ON p.id = s.plan_id
@@ -94,7 +94,7 @@ func (s *Store) GlobalSearch(ctx context.Context, tenantID xid.ID, q string, per
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		appendRows("subscription", "subscriptions", batch)
+		appendRows("subscription", "customers", batch)
 	}
 
 	{

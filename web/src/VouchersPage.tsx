@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "./api";
 import { useAppDialog } from "./confirm";
 import { Badge } from "./components/ui/badge";
 import { IconDownload, IconEye, IconRefresh, IconTrash } from "./icons";
+import { ListToolbar, matchesQuery } from "./ListToolbar";
 import { toastError, toastSuccess } from "./swal";
 import {
   Button,
@@ -117,6 +118,11 @@ export function VouchersPage() {
   });
 
   const batches = Array.isArray(batchesQ.data) ? batchesQ.data : [];
+  const [batchSearch, setBatchSearch] = useState("");
+  const filteredBatches = useMemo(
+    () => batches.filter((b) => matchesQuery(batchSearch, b.name, b.plan_name, b.router_name)),
+    [batches, batchSearch],
+  );
   const plans = (Array.isArray(plansQ.data) ? plansQ.data : []).filter(
     (p) => !p.service_type || p.service_type === "hotspot",
   );
@@ -221,9 +227,15 @@ export function VouchersPage() {
         <code className="text-xs">address-pool</code>) — pastikan pool sudah dibuat di menu IPAM.
       </p>
 
+      <ListToolbar
+        search={batchSearch}
+        onSearchChange={setBatchSearch}
+        searchPlaceholder="Nama batch, router, paket…"
+        total={filteredBatches.length}
+      />
       <Table
         columns={["Batch", "Router", "Paket", "Harga", "Qty", "Sync", "Tersedia", "Terpakai", "Aksi"]}
-        rows={batches.map((b) => [
+        rows={filteredBatches.map((b) => [
           <div key={`${b.id}-n`}>
             <p className="font-medium">{b.name}</p>
             <p className="text-[10px] text-[var(--muted)]">{formatWhen(b.created_at)}</p>
@@ -283,7 +295,7 @@ export function VouchersPage() {
           </span>,
         ])}
       />
-      {batches.length === 0 && !batchesQ.isLoading ? (
+      {filteredBatches.length === 0 && !batchesQ.isLoading ? (
         <p className="mt-3 text-sm text-[var(--muted)]">Belum ada batch. Generate batch untuk mulai.</p>
       ) : null}
 

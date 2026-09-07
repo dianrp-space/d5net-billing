@@ -26,10 +26,9 @@ const kindLabel: Record<string, string> = {
 
 const menuHits: { page: AdminPage; title: string; keywords: string }[] = [
   { page: "dashboard", title: "Dashboard", keywords: "dashboard overview" },
-  { page: "customers", title: "Pelanggan", keywords: "pelanggan customer" },
+  { page: "customers", title: "Pelanggan", keywords: "pelanggan customer secret langganan subscription pppoe" },
   { page: "clusters", title: "Cluster / POP", keywords: "cluster pop site" },
   { page: "plans", title: "Paket", keywords: "paket plan harga" },
-  { page: "subscriptions", title: "Secrets", keywords: "secret langganan subscription pppoe ppp" },
   { page: "invoices", title: "Tagihan", keywords: "tagihan invoice" },
   { page: "routers", title: "Router", keywords: "router mikrotik" },
   { page: "ipam", title: "IP Pool", keywords: "ipam ip pool cidr gateway router" },
@@ -40,8 +39,9 @@ const menuHits: { page: AdminPage; title: string; keywords: string }[] = [
   { page: "leads", title: "Lead", keywords: "lead prospek" },
   { page: "accounting", title: "Akunting", keywords: "akunting accounting laporan" },
   { page: "resellers", title: "Reseller & Komisi", keywords: "reseller komisi commission agen" },
-  { page: "branding", title: "Branding", keywords: "branding logo favicon app name settings" },
+  { page: "branding", title: "Umum", keywords: "umum general tenant nama pajak timezone logo favicon branding" },
   { page: "isolir-template", title: "Template Isolir", keywords: "isolir captive pool profil firewall nat redirect" },
+  { page: "jobs", title: "Cronjob", keywords: "cron job worker jadwal dunning reconcile laporan billing isolir" },
   { page: "notifications", title: "Notifikasi", keywords: "notifikasi broadcast dunning promo whatsapp delay" },
   { page: "roles", title: "Roles", keywords: "roles rbac permission settings" },
   { page: "users", title: "Users", keywords: "users staf portal pelanggan settings" },
@@ -70,7 +70,7 @@ export function HeaderSearch({
   onNavigate,
   allowedPages,
 }: {
-  onNavigate: (page: AdminPage) => void;
+  onNavigate: (page: AdminPage, rest?: string[]) => void;
   allowedPages?: string[] | null;
 }) {
   const [q, setQ] = useState("");
@@ -112,7 +112,11 @@ export function HeaderSearch({
   }, []);
 
   function go(hit: SearchHit) {
-    if (hit.page) onNavigate(hit.page as AdminPage);
+    if ((hit.kind === "subscription" || hit.kind === "customer") && hit.id) {
+      onNavigate("customers", [hit.id, "secrets"]);
+    } else if (hit.page) {
+      onNavigate(hit.page as AdminPage);
+    }
     setQ("");
     setDebounced("");
     setOpen(false);

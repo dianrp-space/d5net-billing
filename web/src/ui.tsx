@@ -130,25 +130,42 @@ export function LoginShell({
   );
 }
 
+/** Infer hover tone from Indonesian action labels so row icons feel distinct. */
+export type IconActionTone = "neutral" | "accent" | "secondary" | "success" | "danger";
+
+export function iconActionTone(label: string, danger?: boolean): IconActionTone {
+  const t = label.toLowerCase();
+  if (danger || /\b(hapus|delete|void|batal|nonaktif|buang)\b/.test(t)) return "danger";
+  if (/\b(aktifkan|tambah secret|secrets|secret|plug|pasang)\b/.test(t)) return "success";
+  if (/\b(ganti paket|sync|refresh|test|backup|restore|export|import|download|upload)\b/.test(t)) {
+    return "secondary";
+  }
+  if (/\b(edit|ubah|pensil|kelola|lihat|assign|convert|tandai|bayar)\b/.test(t)) return "accent";
+  return "neutral";
+}
+
 /** Compact icon-only action; always pass label for tooltip + a11y. */
 export function IconButton({
   label,
   children,
   danger,
+  tone,
   className = "",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   label: string;
   danger?: boolean;
+  tone?: IconActionTone;
 }) {
+  const resolved = tone ?? iconActionTone(label, danger);
   return (
     <Button
       type="button"
-      variant={danger ? "danger" : "ghost"}
+      variant={resolved === "danger" ? "danger" : "ghost"}
       size="icon"
       title={label}
       aria-label={label}
-      className={cn(className)}
+      className={cn("icon-action", `icon-action--${resolved}`, className)}
       {...props}
     >
       {children}
@@ -161,19 +178,24 @@ export function IconLink({
   href,
   children,
   className = "",
+  tone,
 }: {
   label: string;
   href: string;
   children: ReactNode;
   className?: string;
+  tone?: IconActionTone;
 }) {
+  const resolved = tone ?? iconActionTone(label);
   return (
     <a
       href={href}
       title={label}
       aria-label={label}
       className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border)] bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--panel-muted)] hover:text-[var(--text)] hover:border-[var(--accent)]",
+        "icon-action",
+        `icon-action--${resolved}`,
+        "inline-flex h-8 w-8 items-center justify-center rounded-md",
         className,
       )}
     >
@@ -252,12 +274,15 @@ export function FormDialog({
   onClose,
   children,
   wide,
+  asPage,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Render as in-page panel instead of modal (e.g. dedicated create route). */
+  asPage?: boolean;
 }) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -267,7 +292,7 @@ export function FormDialog({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || asPage) return;
     const onMove = (e: PointerEvent) => {
       if (!drag.current) return;
       setOffset({
@@ -284,7 +309,22 @@ export function FormDialog({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [open]);
+  }, [open, asPage]);
+
+  if (asPage) {
+    if (!open) return null;
+    return (
+      <div className={cn("panel-card p-5", wide ? "max-w-3xl" : "max-w-xl")}>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <h2 className="text-base font-semibold text-[var(--text)]">{title}</h2>
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            Batal
+          </button>
+        </div>
+        {children}
+      </div>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>

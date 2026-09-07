@@ -144,7 +144,7 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
     [poolsQ.data, network.ip_pool_id],
   );
 
-  const appName = brandingQ.data?.app_name || brandingQ.data?.name || tenantSlug || "ISP";
+  const appName = brandingQ.data?.name || brandingQ.data?.app_name || tenantSlug || "ISP";
   const logoURL = brandingQ.data?.logo_url || "";
   const loginURL = network.portal_base_url
     ? `${network.portal_base_url.replace(/\/$/, "")}/isolir/${tenantSlug || "slug"}`

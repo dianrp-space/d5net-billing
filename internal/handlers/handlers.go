@@ -53,6 +53,7 @@ func RegisterAll(api huma.API, d *Deps) {
 	registerPlatformBranding(api, d)
 	registerSettings(api, d)
 	registerIsolirSettings(api, d)
+	registerJobsSettings(api, d)
 	registerPublicIsolir(api, d)
 	registerNotifications(api, d)
 	registerIntegrations(api, d)
@@ -316,6 +317,7 @@ func registerAuth(api huma.API, d *Deps) {
 			UserID      xid.ID   `json:"user_id"`
 			Email       string   `json:"email"`
 			FullName    string   `json:"full_name"`
+			AvatarURL   *string  `json:"avatar_url,omitempty"`
 			RoleSlug    string   `json:"role_slug"`
 			RoleName    string   `json:"role_name"`
 			Permissions []string `json:"permissions"`
@@ -354,6 +356,7 @@ func registerAuth(api huma.API, d *Deps) {
 				UserID      xid.ID   `json:"user_id"`
 				Email       string   `json:"email"`
 				FullName    string   `json:"full_name"`
+				AvatarURL   *string  `json:"avatar_url,omitempty"`
 				RoleSlug    string   `json:"role_slug"`
 				RoleName    string   `json:"role_name"`
 				Permissions []string `json:"permissions"`
@@ -363,13 +366,90 @@ func registerAuth(api huma.API, d *Deps) {
 			UserID      xid.ID   `json:"user_id"`
 			Email       string   `json:"email"`
 			FullName    string   `json:"full_name"`
+			AvatarURL   *string  `json:"avatar_url,omitempty"`
 			RoleSlug    string   `json:"role_slug"`
 			RoleName    string   `json:"role_name"`
 			Permissions []string `json:"permissions"`
 			TenantID    xid.ID   `json:"tenant_id"`
 		}{
-			UserID: uid, Email: user.Email, FullName: user.FullName,
+			UserID: uid, Email: user.Email, FullName: user.FullName, AvatarURL: user.AvatarURL,
 			RoleSlug: roleSlug, RoleName: roleName, Permissions: perms, TenantID: tid,
+		}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "update-me", Method: http.MethodPut, Path: "/api/me",
+		Summary: "Update own profile (name, password)", Tags: []string{"Auth"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			FullName        string `json:"full_name"`
+			CurrentPassword string `json:"current_password,omitempty"`
+			NewPassword     string `json:"new_password,omitempty"`
+			ClearAvatar     bool   `json:"clear_avatar,omitempty"`
+		}
+	}) (*struct {
+		Body struct {
+			UserID    xid.ID  `json:"user_id"`
+			Email     string  `json:"email"`
+			FullName  string  `json:"full_name"`
+			AvatarURL *string `json:"avatar_url,omitempty"`
+		}
+	}, error) {
+		uid := userIDFromCtx(ctx)
+		if xid.IsNil(uid) {
+			return nil, httpx.Unauthorized("unauthorized")
+		}
+		user, err := d.Store.GetUserByID(ctx, uid)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.Unauthorized("unauthorized")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		fullName := strings.TrimSpace(input.Body.FullName)
+		if fullName == "" {
+			return nil, httpx.BadRequest("nama wajib diisi")
+		}
+		var newHash *string
+		if pw := strings.TrimSpace(input.Body.NewPassword); pw != "" {
+			if len(pw) < 8 {
+				return nil, httpx.BadRequest("password baru minimal 8 karakter")
+			}
+			ok, verr := auth.VerifyPassword(input.Body.CurrentPassword, user.PasswordHash)
+			if verr != nil || !ok {
+				return nil, httpx.BadRequest("password saat ini salah")
+			}
+			hash, herr := auth.HashPassword(pw)
+			if herr != nil {
+				return nil, httpx.Internal(herr)
+			}
+			newHash = &hash
+		}
+		if err := d.Store.UpdateMyProfile(ctx, uid, fullName, newHash); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		avatar := user.AvatarURL
+		if input.Body.ClearAvatar {
+			if err := d.Store.UpdateUserAvatar(ctx, uid, nil); err != nil {
+				return nil, httpx.Internal(err)
+			}
+			avatar = nil
+		}
+		return &struct {
+			Body struct {
+				UserID    xid.ID  `json:"user_id"`
+				Email     string  `json:"email"`
+				FullName  string  `json:"full_name"`
+				AvatarURL *string `json:"avatar_url,omitempty"`
+			}
+		}{Body: struct {
+			UserID    xid.ID  `json:"user_id"`
+			Email     string  `json:"email"`
+			FullName  string  `json:"full_name"`
+			AvatarURL *string `json:"avatar_url,omitempty"`
+		}{
+			UserID: uid, Email: user.Email, FullName: fullName, AvatarURL: avatar,
 		}}, nil
 	})
 
@@ -422,6 +502,28 @@ func userIDFromCtx(ctx context.Context) xid.ID {
 		return xid.Nil()
 	}
 	return t.UserID
+}
+
+// filterTenantUploadURLs keeps only paths under this tenant's /uploads/{tenantID}/ tree.
+func filterTenantUploadURLs(tenantID xid.ID, urls []string) []string {
+	if len(urls) == 0 {
+		return nil
+	}
+	prefix := "/uploads/" + tenantID.String() + "/"
+	out := make([]string, 0, len(urls))
+	seen := map[string]struct{}{}
+	for _, u := range urls {
+		u = strings.TrimSpace(u)
+		if u == "" || !strings.HasPrefix(u, prefix) {
+			continue
+		}
+		if _, ok := seen[u]; ok {
+			continue
+		}
+		seen[u] = struct{}{}
+		out = append(out, u)
+	}
+	return out
 }
 
 func rolePermissionsFromCtx(ctx context.Context, d *Deps) ([]string, error) {
@@ -539,6 +641,32 @@ func optionalQueryID(raw string) (*xid.ID, error) {
 	return &id, nil
 }
 
+func trimPtr(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*s)
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+func normalizeIdentityType(s *string) *string {
+	v := trimPtr(s)
+	if v == nil {
+		return nil
+	}
+	switch strings.ToLower(*v) {
+	case "ktp", "sim", "passport", "other":
+		out := strings.ToLower(*v)
+		return &out
+	default:
+		out := "other"
+		return &out
+	}
+}
+
 func registerCustomers(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-customers", Method: http.MethodGet, Path: "/api/customers",
@@ -547,6 +675,7 @@ func registerCustomers(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		Search    string `query:"search"`
 		ClusterID string `query:"cluster_id"`
+		IsActive  string `query:"is_active"`
 		Limit     int    `query:"limit" minimum:"1" maximum:"100"`
 		Offset    int    `query:"offset" minimum:"0"`
 	}) (*struct {
@@ -563,8 +692,17 @@ func registerCustomers(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
+		var isActive *bool
+		switch strings.ToLower(strings.TrimSpace(input.IsActive)) {
+		case "true", "1", "aktif", "active":
+			v := true
+			isActive = &v
+		case "false", "0", "nonaktif", "inactive":
+			v := false
+			isActive = &v
+		}
 		list, total, err := d.Store.ListCustomers(ctx, store.CustomerFilter{
-			TenantID: tid, ClusterID: clusterID, Search: input.Search, Limit: input.Limit, Offset: input.Offset,
+			TenantID: tid, ClusterID: clusterID, Search: input.Search, IsActive: isActive, Limit: input.Limit, Offset: input.Offset,
 		})
 		if err != nil {
 			return nil, httpx.Internal(err)
@@ -586,16 +724,18 @@ func registerCustomers(api huma.API, d *Deps) {
 		Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			ClusterID     *xid.ID  `json:"cluster_id,omitempty"`
-			CustomerCode  *string  `json:"customer_code,omitempty"`
-			FullName      string   `json:"full_name"`
-			Email         *string  `json:"email,omitempty"`
-			Phone         string   `json:"phone"`
-			Address       *string  `json:"address,omitempty"`
-			Latitude      *float64 `json:"latitude,omitempty"`
-			Longitude     *float64 `json:"longitude,omitempty"`
-			IsActive      *bool    `json:"is_active,omitempty"`
-			PortalEnabled *bool    `json:"portal_enabled,omitempty"`
+			ClusterID      *xid.ID  `json:"cluster_id,omitempty"`
+			CustomerCode   *string  `json:"customer_code,omitempty"`
+			FullName       string   `json:"full_name"`
+			Email          *string  `json:"email,omitempty"`
+			Phone          string   `json:"phone"`
+			Address        *string  `json:"address,omitempty"`
+			Latitude       *float64 `json:"latitude,omitempty"`
+			Longitude      *float64 `json:"longitude,omitempty"`
+			IdentityType   *string  `json:"identity_type,omitempty"`
+			IdentityNumber *string  `json:"identity_number,omitempty"`
+			IsActive       *bool    `json:"is_active,omitempty"`
+			PortalEnabled  *bool    `json:"portal_enabled,omitempty"`
 			ResellerID       *xid.ID  `json:"reseller_id,omitempty"`
 			SalesUserID      *xid.ID  `json:"sales_user_id,omitempty"`
 			CommissionBasis  string   `json:"commission_basis,omitempty"`
@@ -647,6 +787,7 @@ func registerCustomers(api huma.API, d *Deps) {
 			TenantID: tid, ClusterID: input.Body.ClusterID, CustomerCode: code,
 			FullName: name, Email: input.Body.Email, Phone: phone, Address: input.Body.Address,
 			Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
+			IdentityType: normalizeIdentityType(input.Body.IdentityType), IdentityNumber: trimPtr(input.Body.IdentityNumber),
 			IsActive: active, PortalEnabled: portal,
 			ResellerID: rID, SalesUserID: sID,
 		}
@@ -692,18 +833,20 @@ func registerCustomers(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			ClusterID     *xid.ID  `json:"cluster_id,omitempty"`
-			CustomerCode  string   `json:"customer_code"`
-			FullName      string   `json:"full_name"`
-			Email         *string  `json:"email,omitempty"`
-			Phone         string   `json:"phone"`
-			Address       *string  `json:"address,omitempty"`
-			Latitude      *float64 `json:"latitude,omitempty"`
-			Longitude     *float64 `json:"longitude,omitempty"`
-			IsActive      bool     `json:"is_active"`
-			PortalEnabled bool     `json:"portal_enabled"`
-			ResellerID    *xid.ID  `json:"reseller_id,omitempty"`
-			SalesUserID   *xid.ID  `json:"sales_user_id,omitempty"`
+			ClusterID      *xid.ID  `json:"cluster_id,omitempty"`
+			CustomerCode   string   `json:"customer_code"`
+			FullName       string   `json:"full_name"`
+			Email          *string  `json:"email,omitempty"`
+			Phone          string   `json:"phone"`
+			Address        *string  `json:"address,omitempty"`
+			Latitude       *float64 `json:"latitude,omitempty"`
+			Longitude      *float64 `json:"longitude,omitempty"`
+			IdentityType   *string  `json:"identity_type,omitempty"`
+			IdentityNumber *string  `json:"identity_number,omitempty"`
+			IsActive       bool     `json:"is_active"`
+			PortalEnabled  bool     `json:"portal_enabled"`
+			ResellerID     *xid.ID  `json:"reseller_id,omitempty"`
+			SalesUserID    *xid.ID  `json:"sales_user_id,omitempty"`
 		}
 	}) (*struct{ Body store.Customer }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -739,6 +882,8 @@ func registerCustomers(api huma.API, d *Deps) {
 		existing.Address = input.Body.Address
 		existing.Latitude = input.Body.Latitude
 		existing.Longitude = input.Body.Longitude
+		existing.IdentityType = normalizeIdentityType(input.Body.IdentityType)
+		existing.IdentityNumber = trimPtr(input.Body.IdentityNumber)
 		existing.IsActive = input.Body.IsActive
 		existing.PortalEnabled = input.Body.PortalEnabled
 		existing.ResellerID, existing.SalesUserID = store.NormalizeAttribution(input.Body.ResellerID, input.Body.SalesUserID)
@@ -771,6 +916,81 @@ func registerCustomers(api huma.API, d *Deps) {
 		}
 		if err := d.Store.DeleteCustomer(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
 			return nil, httpx.NotFound("customer not found")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "deleted"}}, nil
+	})
+
+	registerCustomerDocuments(api, d)
+}
+
+func registerCustomerDocuments(api huma.API, d *Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "list-customer-documents", Method: http.MethodGet, Path: "/api/customers/{id}/documents",
+		Tags: []string{"Customers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body []store.CustomerDocument }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListCustomerDocuments(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("customer not found")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.CustomerDocument{}
+		}
+		return &struct{ Body []store.CustomerDocument }{Body: list}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "add-customer-document", Method: http.MethodPost, Path: "/api/customers/{id}/documents",
+		Tags: []string{"Customers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			Kind    string `json:"kind"`
+			URL     string `json:"url"`
+			Caption string `json:"caption,omitempty"`
+		}
+	}) (*struct{ Body store.CustomerDocument }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var uploader *xid.ID
+		if uid := userIDFromCtx(ctx); !xid.IsNil(uid) {
+			uploader = &uid
+		}
+		doc, err := d.Store.AddCustomerDocument(ctx, tid, input.ID, uploader, input.Body.Kind, input.Body.URL, input.Body.Caption, "upload", nil)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("customer not found")
+		}
+		if err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+		return &struct{ Body store.CustomerDocument }{Body: *doc}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-customer-document", Method: http.MethodDelete, Path: "/api/customers/{id}/documents/{doc_id}",
+		Tags: []string{"Customers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID    xid.ID `path:"id"`
+		DocID xid.ID `path:"doc_id"`
+	}) (*struct{ Body map[string]string }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.DeleteCustomerDocument(ctx, tid, input.ID, input.DocID); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("dokumen tidak ditemukan")
 		} else if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -1455,9 +1675,10 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		OperationID: "list-subscriptions", Method: http.MethodGet, Path: "/api/subscriptions",
 		Tags: []string{"Subscriptions"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		Status string `query:"status"`
-		Limit  int    `query:"limit"`
-		Offset int    `query:"offset"`
+		Status     string `query:"status"`
+		CustomerID string `query:"customer_id"`
+		Limit      int    `query:"limit"`
+		Offset     int    `query:"offset"`
 	}) (*struct {
 		Body struct {
 			Data  []store.Subscription `json:"data"`
@@ -1468,7 +1689,11 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, total, err := d.Store.ListSubscriptions(ctx, tid, input.Status, input.Limit, input.Offset)
+		customerID, err := optionalQueryID(input.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		list, total, err := d.Store.ListSubscriptions(ctx, tid, input.Status, customerID, input.Limit, input.Offset)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -2364,6 +2589,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Status string `query:"status"`
+		Search string `query:"search"`
 		Limit  int    `query:"limit"`
 		Offset int    `query:"offset"`
 	}) (*struct {
@@ -2376,7 +2602,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, total, err := d.Store.ListInvoices(ctx, tid, input.Status, input.Limit, input.Offset)
+		list, total, err := d.Store.ListInvoices(ctx, tid, input.Status, input.Search, input.Limit, input.Offset)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -2446,6 +2672,7 @@ func registerTickets(api huma.API, d *Deps) {
 		Tags: []string{"Tickets"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Status string `query:"status"`
+		Search string `query:"search"`
 		Limit  int    `query:"limit"`
 		Offset int    `query:"offset"`
 	}) (*struct {
@@ -2463,7 +2690,7 @@ func registerTickets(api huma.API, d *Deps) {
 			uid := userIDFromCtx(ctx)
 			assignedTo = &uid
 		}
-		list, total, err := d.Store.ListTickets(ctx, tid, input.Status, assignedTo, input.Limit, input.Offset)
+		list, total, err := d.Store.ListTickets(ctx, tid, input.Status, input.Search, assignedTo, input.Limit, input.Offset)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -2486,11 +2713,12 @@ func registerTickets(api huma.API, d *Deps) {
 		Tags: []string{"Tickets"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			CustomerID  *xid.ID `json:"customer_id,omitempty"`
-			Subject     string  `json:"subject"`
-			Description string  `json:"description"`
-			Category    string  `json:"category"`
-			Priority    string  `json:"priority"`
+			CustomerID  *xid.ID  `json:"customer_id,omitempty"`
+			Subject     string   `json:"subject"`
+			Description string   `json:"description"`
+			Category    string   `json:"category"`
+			Priority    string   `json:"priority"`
+			ImageURLs   []string `json:"image_urls,omitempty"`
 		}
 	}) (*struct{ Body store.Ticket }, error) {
 		if err := requireDispatchOps(ctx, d); err != nil {
@@ -2521,6 +2749,17 @@ func registerTickets(api huma.API, d *Deps) {
 		}
 		if err := d.Store.CreateTicket(ctx, t); err != nil {
 			return nil, httpx.BadRequest(err.Error())
+		}
+		imageURLs := filterTenantUploadURLs(tid, input.Body.ImageURLs)
+		if len(imageURLs) > 0 {
+			var senderID *xid.ID
+			if info, ok := tenant.FromContext(ctx); ok && !xid.IsNil(info.UserID) {
+				uid := info.UserID
+				senderID = &uid
+			}
+			if _, err := d.Store.AddTicketMessage(ctx, tid, t.ID, "staff", senderID, "", imageURLs); err != nil {
+				return nil, httpx.BadRequest(err.Error())
+			}
 		}
 		full, _ := d.Store.GetTicket(ctx, tid, t.ID)
 		if full != nil {
@@ -2575,11 +2814,21 @@ func registerTickets(api huma.API, d *Deps) {
 		if err := enforceTicketAssigned(ctx, d, cur); err != nil {
 			return nil, err
 		}
+		fromStatus := cur.Status
+		newStatus := store.NormalizeTicketStatus(input.Body.Status)
 		if err := d.Store.UpdateTicketStatus(ctx, tid, input.ID, input.Body.Status); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, httpx.NotFound("tiket tidak ditemukan")
 			}
 			return nil, httpx.BadRequest(err.Error())
+		}
+		if newStatus != "" && fromStatus != newStatus {
+			var actor *xid.ID
+			if uid := userIDFromCtx(ctx); !xid.IsNil(uid) {
+				actor = &uid
+			}
+			msg := fmt.Sprintf("Status: %s → %s", store.TicketStatusLabel(fromStatus), store.TicketStatusLabel(newStatus))
+			_, _ = d.Store.AddTicketMessage(ctx, tid, input.ID, "system", actor, msg, nil)
 		}
 		t, err := d.Store.GetTicket(ctx, tid, input.ID)
 		if err != nil {
@@ -3677,14 +3926,14 @@ func registerPortal(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		invoices, _, _ := d.Store.ListInvoices(ctx, ten.ID, "", 20, 0)
+		invoices, _, _ := d.Store.ListInvoices(ctx, ten.ID, "", "", 20, 0)
 		var custInvoices []store.Invoice
 		for _, inv := range invoices {
 			if inv.CustomerID == cust.ID {
 				custInvoices = append(custInvoices, inv)
 			}
 		}
-		subs, _, _ := d.Store.ListSubscriptions(ctx, ten.ID, "", 100, 0)
+		subs, _, _ := d.Store.ListSubscriptions(ctx, ten.ID, "", nil, 100, 0)
 		var custSubs []store.Subscription
 		for _, s := range subs {
 			if s.CustomerID == cust.ID {

@@ -55,7 +55,22 @@ func NormalizeTicketStatus(s string) string {
 	return ""
 }
 
-func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status string, assignedTo *xid.ID, limit, offset int) ([]Ticket, int64, error) {
+func TicketStatusLabel(status string) string {
+	switch NormalizeTicketStatus(status) {
+	case "open":
+		return "Open"
+	case "in_progress":
+		return "In progress"
+	case "resolved":
+		return "Resolved"
+	case "closed":
+		return "Closed"
+	default:
+		return status
+	}
+}
+
+func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status, search string, assignedTo *xid.ID, limit, offset int) ([]Ticket, int64, error) {
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, 0, err
 	}
@@ -69,8 +84,16 @@ func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status string,
 		args = append(args, *assignedTo)
 		where += fmt.Sprintf(" AND t.assigned_to = $%d", len(args))
 	}
+	if q := strings.TrimSpace(search); q != "" {
+		args = append(args, "%"+q+"%")
+		n := len(args)
+		where += fmt.Sprintf(" AND (t.subject ILIKE $%d OR COALESCE(c.full_name,'') ILIKE $%d)", n, n)
+	}
 	var total int64
-	if err := s.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM tickets t "+where, args...).Scan(&total); err != nil {
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM tickets t
+		LEFT JOIN customers c ON c.id = t.customer_id
+		`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	if limit <= 0 {

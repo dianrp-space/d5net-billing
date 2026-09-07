@@ -52,7 +52,14 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-tenant-branding", Method: http.MethodGet, Path: "/api/settings/branding",
 		Tags: []string{"Settings"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body store.TenantBrandingView }, error) {
+	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Body struct {
+			store.TenantBrandingView
+			TenantName          string  `json:"tenant_name"`
+			Timezone            string  `json:"timezone"`
+			DefaultTaxPercent   float64 `json:"default_tax_percent"`
+		}
+	}, error) {
 		tid, err := requireSettings(ctx, d)
 		if err != nil {
 			return nil, err
@@ -61,7 +68,27 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body store.TenantBrandingView }{Body: *view}, nil
+		ten, err := d.Store.GetTenant(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		gen, err := d.Store.GetGeneralSettings(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := &struct {
+			Body struct {
+				store.TenantBrandingView
+				TenantName        string  `json:"tenant_name"`
+				Timezone          string  `json:"timezone"`
+				DefaultTaxPercent float64 `json:"default_tax_percent"`
+			}
+		}{}
+		out.Body.TenantBrandingView = *view
+		out.Body.TenantName = ten.Name
+		out.Body.Timezone = gen.Timezone
+		out.Body.DefaultTaxPercent = gen.DefaultTaxPercent
+		return out, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -69,22 +96,40 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		Tags: []string{"Settings"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			AppName      string  `json:"app_name"`
-			LogoURL      *string `json:"logo_url,omitempty"`
-			FaviconURL   *string `json:"favicon_url,omitempty"`
-			ClearLogo    bool    `json:"clear_logo,omitempty"`
-			ClearFavicon bool    `json:"clear_favicon,omitempty"`
+			TenantName        string  `json:"tenant_name"`
+			AppName           string  `json:"app_name"`
+			Timezone          string  `json:"timezone"`
+			DefaultTaxPercent float64 `json:"default_tax_percent"`
+			LogoURL           *string `json:"logo_url,omitempty"`
+			FaviconURL        *string `json:"favicon_url,omitempty"`
+			ClearLogo         bool    `json:"clear_logo,omitempty"`
+			ClearFavicon      bool    `json:"clear_favicon,omitempty"`
 		}
-	}) (*struct{ Body store.TenantBrandingView }, error) {
+	}) (*struct {
+		Body struct {
+			store.TenantBrandingView
+			TenantName        string  `json:"tenant_name"`
+			Timezone          string  `json:"timezone"`
+			DefaultTaxPercent float64 `json:"default_tax_percent"`
+		}
+	}, error) {
 		tid, err := requireSettings(ctx, d)
 		if err != nil {
 			return nil, err
 		}
+		tenantName := strings.TrimSpace(input.Body.TenantName)
+		if tenantName == "" {
+			return nil, httpx.BadRequest("nama tenant wajib diisi")
+		}
+		if err := d.Store.UpdateTenantName(ctx, tid, tenantName); err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+		// Keep app_name in sync with tenant display name for UI/title/comments.
 		raw, err := d.Store.GetTenantBrandingRaw(ctx, tid)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		b := &store.Branding{AppName: strings.TrimSpace(input.Body.AppName)}
+		b := &store.Branding{AppName: tenantName}
 		if input.Body.ClearLogo {
 			b.LogoURL = nil
 		} else if input.Body.LogoURL != nil {
@@ -102,11 +147,34 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		if err := d.Store.UpdateTenantBranding(ctx, tid, b); err != nil {
 			return nil, httpx.Internal(err)
 		}
+		gen := store.NormalizeGeneralSettings(store.GeneralSettings{
+			Timezone:          input.Body.Timezone,
+			DefaultTaxPercent: input.Body.DefaultTaxPercent,
+		})
+		if err := d.Store.UpsertGeneralSettings(ctx, tid, gen); err != nil {
+			return nil, httpx.Internal(err)
+		}
 		view, err := d.Store.ResolveTenantBranding(ctx, tid)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body store.TenantBrandingView }{Body: *view}, nil
+		ten, err := d.Store.GetTenant(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := &struct {
+			Body struct {
+				store.TenantBrandingView
+				TenantName        string  `json:"tenant_name"`
+				Timezone          string  `json:"timezone"`
+				DefaultTaxPercent float64 `json:"default_tax_percent"`
+			}
+		}{}
+		out.Body.TenantBrandingView = *view
+		out.Body.TenantName = ten.Name
+		out.Body.Timezone = gen.Timezone
+		out.Body.DefaultTaxPercent = gen.DefaultTaxPercent
+		return out, nil
 	})
 }
 
@@ -184,8 +252,91 @@ func MountStaticAndUploads(r chi.Router, d *Deps) {
 	r.Post("/api/platform/branding/favicon", uploadHandler(d, true, "favicon"))
 	r.Post("/api/work-orders/{id}/photos", workOrderPhotoUpload(d))
 	r.Post("/api/leads/{id}/comments/photos", leadCommentPhotoUpload(d))
+	r.Post("/api/leads/{id}/documents/photos", leadDocumentPhotoUpload(d))
 	r.Post("/api/tickets/{id}/messages/photos", ticketMessagePhotoUpload(d))
+	r.Post("/api/tickets/photos", ticketDraftPhotoUpload(d))
+	r.Post("/api/customers/{id}/documents/photos", customerDocumentPhotoUpload(d))
+	r.Post("/api/me/avatar", meAvatarUpload(d))
 	MountDBBackupRoutes(r, d)
+}
+
+func ticketDraftPhotoUpload(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		uid := userIDFromCtx(ctx)
+		if xid.IsNil(uid) {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		if err := r.ParseMultipartForm(upload.MaxBytes + (2 << 20)); err != nil {
+			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, `{"error":"file is required"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		kind := fmt.Sprintf("ticket-draft-%s-%d", uid.String(), time.Now().UnixNano())
+		url, err := saveUpload(d, tid, false, kind, file, header.Filename, header.Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
+	}
+}
+
+func meAvatarUpload(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		uid := userIDFromCtx(ctx)
+		if xid.IsNil(uid) {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		if _, err := d.Store.GetUserByID(ctx, uid); errors.Is(err, store.ErrNotFound) {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		} else if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		if err := r.ParseMultipartForm(upload.MaxBytes + (2 << 20)); err != nil {
+			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, `{"error":"file is required"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		kind := fmt.Sprintf("avatar-%s", uid.String())
+		url, err := saveUpload(d, tid, false, kind, file, header.Filename, header.Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+		if err := d.Store.UpdateUserAvatar(ctx, uid, &url); err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
+	}
 }
 
 func leadCommentPhotoUpload(d *Deps) http.HandlerFunc {
@@ -214,7 +365,7 @@ func leadCommentPhotoUpload(d *Deps) http.HandlerFunc {
 			http.Error(w, `{"error":"lead ini tidak di-assign ke Anda"}`, http.StatusForbidden)
 			return
 		}
-		if err := r.ParseMultipartForm(upload.MaxBytes + (1 << 20)); err != nil {
+		if err := r.ParseMultipartForm(upload.MaxBytes + (2 << 20)); err != nil {
 			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
 			return
 		}
@@ -261,7 +412,7 @@ func ticketMessagePhotoUpload(d *Deps) http.HandlerFunc {
 			http.Error(w, `{"error":"tiket ini tidak di-assign ke Anda"}`, http.StatusForbidden)
 			return
 		}
-		if err := r.ParseMultipartForm(upload.MaxBytes + (1 << 20)); err != nil {
+		if err := r.ParseMultipartForm(upload.MaxBytes + (2 << 20)); err != nil {
 			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
 			return
 		}
@@ -272,6 +423,100 @@ func ticketMessagePhotoUpload(d *Deps) http.HandlerFunc {
 		}
 		defer file.Close()
 		kind := fmt.Sprintf("ticket-%s-%d", ticketID.String(), time.Now().UnixNano())
+		url, err := saveUpload(d, tid, false, kind, file, header.Filename, header.Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
+	}
+}
+
+func leadDocumentPhotoUpload(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		rawID := chi.URLParam(r, "id")
+		leadID, err := xid.Parse(rawID)
+		if err != nil || xid.IsNil(leadID) {
+			http.Error(w, `{"error":"id tidak valid"}`, http.StatusBadRequest)
+			return
+		}
+		lead, err := d.Store.GetLead(ctx, tid, leadID)
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, `{"error":"lead tidak ditemukan"}`, http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		if err := enforceLeadAssigned(ctx, d, lead); err != nil {
+			http.Error(w, `{"error":"lead ini tidak di-assign ke Anda"}`, http.StatusForbidden)
+			return
+		}
+		st := store.NormalizeLeadStatus(lead.Status)
+		if st != "survey" && st != "qualified" {
+			http.Error(w, `{"error":"dokumen PSB hanya saat survey / proses pasang"}`, http.StatusBadRequest)
+			return
+		}
+		if err := r.ParseMultipartForm(upload.MaxBytes + (2 << 20)); err != nil {
+			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, `{"error":"file is required"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		kind := fmt.Sprintf("lead-doc-%s-%d", leadID.String(), time.Now().UnixNano())
+		url, err := saveUpload(d, tid, false, kind, file, header.Filename, header.Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
+	}
+}
+
+func customerDocumentPhotoUpload(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		rawID := chi.URLParam(r, "id")
+		customerID, err := xid.Parse(rawID)
+		if err != nil || xid.IsNil(customerID) {
+			http.Error(w, `{"error":"id tidak valid"}`, http.StatusBadRequest)
+			return
+		}
+		if _, err := d.Store.GetCustomer(ctx, tid, customerID); errors.Is(err, store.ErrNotFound) {
+			http.Error(w, `{"error":"pelanggan tidak ditemukan"}`, http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		if err := r.ParseMultipartForm(upload.MaxBytes + (2 << 20)); err != nil {
+			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, `{"error":"file is required"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		kind := fmt.Sprintf("cust-doc-%s-%d", customerID.String(), time.Now().UnixNano())
 		url, err := saveUpload(d, tid, false, kind, file, header.Filename, header.Size)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
@@ -309,7 +554,7 @@ func workOrderPhotoUpload(d *Deps) http.HandlerFunc {
 			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 			return
 		}
-		if err := r.ParseMultipartForm(upload.MaxBytes + (1 << 20)); err != nil {
+		if err := r.ParseMultipartForm(upload.MaxBytes + (2 << 20)); err != nil {
 			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
 			return
 		}

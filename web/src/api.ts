@@ -151,39 +151,55 @@ export async function api<T>(
 export async function apiUpload<T>(
   path: string,
   file: File,
-  opts?: { platform?: boolean; fieldName?: string },
+  opts?: { platform?: boolean; fieldName?: string; onProgress?: (percent: number) => void },
 ): Promise<T> {
   const platform = Boolean(opts?.platform);
   const field = opts?.fieldName || "file";
-  const doFetch = async () => {
-    const headers = new Headers();
-    const token = platform ? getPlatformToken() : getToken();
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-    const body = new FormData();
-    body.append(field, file);
-    return fetch(path, { method: "POST", headers, body, credentials: "include" });
-  };
-  let res = await doFetch();
+  const onProgress = opts?.onProgress;
+
+  const uploadOnce = (token: string | null) =>
+    new Promise<{ ok: boolean; status: number; text: string }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", path);
+      xhr.withCredentials = true;
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.upload.onprogress = (ev) => {
+        if (!onProgress || !ev.lengthComputable || ev.total <= 0) return;
+        onProgress(Math.min(99, Math.round((ev.loaded / ev.total) * 100)));
+      };
+      xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, text: xhr.responseText || "" });
+      xhr.onerror = () => reject(new Error("Jaringan gagal saat upload"));
+      xhr.onabort = () => reject(new Error("Upload dibatalkan"));
+      const body = new FormData();
+      body.append(field, file);
+      xhr.send(body);
+    });
+
+  let token = platform ? getPlatformToken() : getToken();
+  let res = await uploadOnce(token);
   if (res.status === 401 && shouldAttemptRefresh(path, false)) {
     const refreshed = await refreshAccessToken(platform);
-    if (refreshed) res = await doFetch();
-    else {
+    if (refreshed) {
+      token = platform ? getPlatformToken() : getToken();
+      res = await uploadOnce(token);
+    } else {
       if (platform) clearPlatformToken();
       else localStorage.removeItem(ADMIN_TOKEN);
       window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { platform } }));
     }
   }
   if (!res.ok) {
-    const text = await res.text();
     try {
-      const j = JSON.parse(text) as { error?: string; detail?: string };
-      throw new Error(j.error || j.detail || text);
+      const j = JSON.parse(res.text) as { error?: string; detail?: string };
+      throw new Error(j.error || j.detail || res.text || `HTTP ${res.status}`);
     } catch (e) {
-      if (e instanceof SyntaxError) throw new Error(text || res.statusText);
+      if (e instanceof SyntaxError) throw new Error(res.text || `HTTP ${res.status}`);
       throw e;
     }
   }
-  return res.json() as Promise<T>;
+  onProgress?.(100);
+  if (!res.text) return undefined as T;
+  return JSON.parse(res.text) as T;
 }
 
 /** Authenticated binary download (PDF/CSV) — bare &lt;a href&gt; cannot send Bearer. */

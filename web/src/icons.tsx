@@ -223,6 +223,16 @@ export function IconPlug(props: IconProps) {
   );
 }
 
+/** Gembok — secrets / akses terlindungi. */
+export function IconLock(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
 /** Petir — test koneksi router. */
 export function IconZap(props: IconProps) {
   return (
@@ -302,6 +312,16 @@ export function IconSettings(props: IconProps) {
     <svg {...base(props)}>
       <circle cx="12" cy="12" r="3" />
       <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </svg>
+  );
+}
+
+/** Jam — cronjob / jadwal worker. */
+export function IconClock(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
     </svg>
   );
 }

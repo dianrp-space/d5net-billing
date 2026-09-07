@@ -18,7 +18,7 @@ type Drift struct {
 }
 
 func Reconcile(ctx context.Context, st *store.Store, p Provisioner, tenantID xid.ID, routerID xid.ID, apply bool) ([]Drift, error) {
-	subs, _, err := st.ListSubscriptions(ctx, tenantID, "active", 1000, 0)
+	subs, _, err := st.ListSubscriptions(ctx, tenantID, "active", nil, 1000, 0)
 	if err != nil {
 		return nil, err
 	}

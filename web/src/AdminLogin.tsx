@@ -34,7 +34,7 @@ export function AdminLogin({
         if (!cancelled) {
           setTenant(t);
           applyBrandingMeta({
-            appName: t.app_name || t.name,
+            appName: t.name || t.app_name,
             faviconUrl: t.favicon_url,
             titleSuffix: "Admin",
           });
@@ -75,7 +75,7 @@ export function AdminLogin({
     }
   }
 
-  const brand = tenant?.app_name || tenant?.name || slug;
+  const brand = tenant?.name || tenant?.app_name || slug;
 
   return (
     <AuthThemeCorner>

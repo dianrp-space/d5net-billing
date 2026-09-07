@@ -60,6 +60,9 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 	if price, err := e.store.ResolvePlanPrice(ctx, tenantID, plan.ID, cust.ClusterID); err == nil {
 		plan.Price = price
 	}
+	if pct, err := e.store.EffectiveTaxPercent(ctx, tenantID); err == nil {
+		plan.TaxPercent = pct
+	}
 
 	invNum, err := e.store.NextInvoiceNumber(ctx, tenantID)
 	if err != nil {
@@ -297,7 +300,11 @@ func (e *Engine) QuotePlanChange(ctx context.Context, tenantID, subscriptionID, 
 	total := int64(0)
 	requires := false
 	if delta > 0 {
-		tax = int64(math.Round(float64(delta) * newPlan.TaxPercent / 100))
+		taxPct := newPlan.TaxPercent
+		if pct, err := e.store.EffectiveTaxPercent(ctx, tenantID); err == nil {
+			taxPct = pct
+		}
+		tax = int64(math.Round(float64(delta) * taxPct / 100))
 		total = delta + tax
 		requires = true
 	}

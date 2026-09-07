@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"errors"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"fmt"
 	"time"
+
+	"github.com/dianrp/drp-billing/internal/xid"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -143,15 +145,19 @@ type Subscription struct {
 	PortNumber   *int       `json:"port_number,omitempty"`
 }
 
-func (s *Store) ListSubscriptions(ctx context.Context, tenantID xid.ID, status string, limit, offset int) ([]Subscription, int64, error) {
+func (s *Store) ListSubscriptions(ctx context.Context, tenantID xid.ID, status string, customerID *xid.ID, limit, offset int) ([]Subscription, int64, error) {
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, 0, err
 	}
 	where := "WHERE s.tenant_id = $1"
 	args := []any{tenantID}
 	if status != "" {
-		where += " AND s.status = $2"
 		args = append(args, status)
+		where += fmt.Sprintf(" AND s.status = $%d", len(args))
+	}
+	if customerID != nil {
+		args = append(args, *customerID)
+		where += fmt.Sprintf(" AND s.customer_id = $%d", len(args))
 	}
 	var total int64
 	if err := s.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM subscriptions s "+where, args...).Scan(&total); err != nil {

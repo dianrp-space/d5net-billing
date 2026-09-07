@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"strings"
 	"time"
 
+	"github.com/dianrp/drp-billing/internal/xid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -95,18 +96,26 @@ func (s *Store) CreateInvoice(ctx context.Context, inv *Invoice, items []Invoice
 	return tx.Commit(ctx)
 }
 
-func (s *Store) ListInvoices(ctx context.Context, tenantID xid.ID, status string, limit, offset int) ([]Invoice, int64, error) {
+func (s *Store) ListInvoices(ctx context.Context, tenantID xid.ID, status, search string, limit, offset int) ([]Invoice, int64, error) {
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, 0, err
 	}
 	where := "WHERE i.tenant_id = $1"
 	args := []any{tenantID}
 	if status != "" {
-		where += " AND i.status = $2"
 		args = append(args, status)
+		where += fmt.Sprintf(" AND i.status = $%d", len(args))
+	}
+	if strings.TrimSpace(search) != "" {
+		args = append(args, "%"+strings.TrimSpace(search)+"%")
+		n := len(args)
+		where += fmt.Sprintf(" AND (i.invoice_number ILIKE $%d OR c.full_name ILIKE $%d)", n, n)
 	}
 	var total int64
-	if err := s.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM invoices i "+where, args...).Scan(&total); err != nil {
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM invoices i
+		JOIN customers c ON c.id = i.customer_id
+		`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	if limit <= 0 {

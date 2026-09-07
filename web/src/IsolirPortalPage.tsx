@@ -49,7 +49,7 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
         if (!cancelled) {
           setTenant(t);
           applyBrandingMeta({
-            appName: t.app_name || t.name,
+            appName: t.name || t.app_name,
             faviconUrl: t.favicon_url,
             titleSuffix: "Isolir",
           });
@@ -90,7 +90,7 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
     }
   }
 
-  const appName = tenant?.app_name || tenant?.name || "Isolir";
+  const appName = tenant?.name || tenant?.app_name || "Isolir";
 
   if (session) {
     return (

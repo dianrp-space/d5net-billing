@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiUpload } from "./api";
+import { compressImageForUpload } from "./imageCompress";
 import { useAppDialog } from "./confirm";
 import { Badge } from "./components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -254,8 +255,10 @@ export function TechPage() {
   });
 
   const photoMut = useMutation({
-    mutationFn: ({ id, file }: { id: string; file: File }) =>
-      apiUpload<WorkOrder>(`/api/work-orders/${id}/photos`, file),
+    mutationFn: async ({ id, file }: { id: string; file: File }) => {
+      const compressed = await compressImageForUpload(file);
+      return apiUpload<WorkOrder>(`/api/work-orders/${id}/photos`, compressed);
+    },
     onSuccess: (wo) => {
       qc.invalidateQueries({ queryKey: ["work-orders"] });
       setDetail(wo);

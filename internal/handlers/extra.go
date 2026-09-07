@@ -59,7 +59,7 @@ func registerReports(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, _, err := d.Store.ListInvoices(ctx, tid, "", 1000, 0)
+		list, _, err := d.Store.ListInvoices(ctx, tid, "", "", 1000, 0)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -736,18 +736,48 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			AssignedTo *xid.ID `json:"assigned_to,omitempty"`
 		}
 	}) (*struct{ Body store.Lead }, error) {
-		if err := requireDispatchOps(ctx, d); err != nil {
-			return nil, err
-		}
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if err := d.Store.UpdateLeadStatus(ctx, tid, input.ID, input.Body.Status, input.Body.AssignedTo); err != nil {
+		cur, err := d.Store.GetLead(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("lead tidak ditemukan atau sudah dikonversi")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		fromStatus := cur.Status
+		newStatus := store.NormalizeLeadStatus(input.Body.Status)
+		assignedTo := input.Body.AssignedTo
+
+		if isFieldOps(ctx, d) {
+			if err := enforceLeadAssigned(ctx, d, cur); err != nil {
+				return nil, err
+			}
+			// Teknisi assigned boleh pindah status, tapi tidak assign orang lain / convert / balik ke Baru.
+			switch newStatus {
+			case "converted", "new":
+				return nil, httpx.Forbidden("teknisi tidak bisa memindah lead ke status ini")
+			}
+			assignedTo = cur.AssignedTo
+		} else if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
+
+		if err := d.Store.UpdateLeadStatus(ctx, tid, input.ID, newStatus, assignedTo); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, httpx.NotFound("lead tidak ditemukan atau sudah dikonversi")
 			}
 			return nil, httpx.BadRequest(err.Error())
+		}
+		if fromStatus != newStatus {
+			var actor *xid.ID
+			if uid := userIDFromCtx(ctx); !xid.IsNil(uid) {
+				actor = &uid
+			}
+			msg := fmt.Sprintf("Status: %s → %s", store.LeadStatusLabel(fromStatus), store.LeadStatusLabel(newStatus))
+			_, _ = d.Store.AddLeadActivity(ctx, tid, input.ID, actor, "status_change", msg, nil)
 		}
 		out, err := d.Store.GetLead(ctx, tid, input.ID)
 		if err != nil {
@@ -919,6 +949,108 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			return nil, httpx.BadRequest(err.Error())
 		}
 		return &struct{ Body store.LeadComment }{Body: *c}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-lead-documents", Method: http.MethodGet, Path: "/api/leads/{id}/documents",
+		Tags: []string{"Leads"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body []store.LeadDocument }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lead, err := d.Store.GetLead(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("lead tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := enforceLeadAssigned(ctx, d, lead); err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListLeadDocuments(ctx, tid, input.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.LeadDocument{}
+		}
+		return &struct{ Body []store.LeadDocument }{Body: list}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "add-lead-document", Method: http.MethodPost, Path: "/api/leads/{id}/documents",
+		Tags: []string{"Leads"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			Kind    string `json:"kind"`
+			URL     string `json:"url"`
+			Caption string `json:"caption,omitempty"`
+		}
+	}) (*struct{ Body store.LeadDocument }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lead, err := d.Store.GetLead(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("lead tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := enforceLeadAssigned(ctx, d, lead); err != nil {
+			return nil, err
+		}
+		st := store.NormalizeLeadStatus(lead.Status)
+		if st != "survey" && st != "qualified" {
+			return nil, httpx.BadRequest("dokumen PSB hanya bisa ditambah saat status survey / proses pasang")
+		}
+		var uploader *xid.ID
+		if uid := userIDFromCtx(ctx); !xid.IsNil(uid) {
+			uploader = &uid
+		}
+		doc, err := d.Store.AddLeadDocument(ctx, tid, input.ID, uploader, input.Body.Kind, input.Body.URL, input.Body.Caption)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("lead tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+		return &struct{ Body store.LeadDocument }{Body: *doc}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-lead-document", Method: http.MethodDelete, Path: "/api/leads/{id}/documents/{doc_id}",
+		Tags: []string{"Leads"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID    xid.ID `path:"id"`
+		DocID xid.ID `path:"doc_id"`
+	}) (*struct{ Body map[string]string }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lead, err := d.Store.GetLead(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("lead tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := enforceLeadAssigned(ctx, d, lead); err != nil {
+			return nil, err
+		}
+		if err := d.Store.DeleteLeadDocument(ctx, tid, input.ID, input.DocID); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("dokumen tidak ditemukan")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "deleted"}}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -1276,7 +1408,7 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, _, err := d.Store.ListInvoices(ctx, tid, "", 5000, 0)
+		list, _, err := d.Store.ListInvoices(ctx, tid, "", "", 5000, 0)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}

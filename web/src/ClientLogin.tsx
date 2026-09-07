@@ -44,7 +44,7 @@ export function ClientLogin({
         if (!cancelled) {
           setTenant(t);
           applyBrandingMeta({
-            appName: t.app_name || t.name,
+            appName: t.name || t.app_name,
             faviconUrl: t.favicon_url,
             titleSuffix: "Portal",
           });
@@ -79,7 +79,7 @@ export function ClientLogin({
   return (
     <AuthThemeCorner>
       <LoginShell
-        brand={tenant?.app_name || tenant?.name || slug}
+        brand={tenant?.name || tenant?.app_name || slug}
         logoUrl={tenant?.logo_url}
         title="Portal pelanggan"
         subtitle={`Cek paket & tagihan · password default = nomor HP`}

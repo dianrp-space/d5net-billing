@@ -161,13 +161,33 @@ func (s *Store) GetLead(ctx context.Context, tenantID, id xid.ID) (*Lead, error)
 }
 
 type LeadComment struct {
-	ID          xid.ID    `json:"id"`
-	LeadID      xid.ID    `json:"lead_id"`
-	UserID      *xid.ID   `json:"user_id,omitempty"`
-	UserName    string    `json:"user_name,omitempty"`
-	Message     string    `json:"message"`
-	ImageURLs   []string  `json:"image_urls"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID        xid.ID    `json:"id"`
+	LeadID    xid.ID    `json:"lead_id"`
+	UserID    *xid.ID   `json:"user_id,omitempty"`
+	UserName  string    `json:"user_name,omitempty"`
+	Kind      string    `json:"kind"` // comment | status_change
+	Message   string    `json:"message"`
+	ImageURLs []string  `json:"image_urls"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func LeadStatusLabel(status string) string {
+	switch NormalizeLeadStatus(status) {
+	case "new":
+		return "Baru"
+	case "contacted":
+		return "Dihubungi"
+	case "survey":
+		return "Survey"
+	case "qualified":
+		return "Proses pasang"
+	case "converted":
+		return "Converted"
+	case "lost":
+		return "Lost"
+	default:
+		return status
+	}
 }
 
 func (s *Store) ListLeadComments(ctx context.Context, tenantID, leadID xid.ID) ([]LeadComment, error) {
@@ -175,8 +195,8 @@ func (s *Store) ListLeadComments(ctx context.Context, tenantID, leadID xid.ID) (
 		return nil, err
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT c.id, c.lead_id, c.user_id, COALESCE(u.full_name, ''), c.message,
-		       COALESCE(c.image_urls, '[]'::jsonb), c.created_at
+		SELECT c.id, c.lead_id, c.user_id, COALESCE(u.full_name, ''), COALESCE(c.kind, 'comment'),
+		       c.message, COALESCE(c.image_urls, '[]'::jsonb), c.created_at
 		FROM lead_comments c
 		LEFT JOIN users u ON u.id = c.user_id
 		WHERE c.tenant_id=$1 AND c.lead_id=$2
@@ -190,8 +210,11 @@ func (s *Store) ListLeadComments(ctx context.Context, tenantID, leadID xid.ID) (
 	for rows.Next() {
 		var c LeadComment
 		var raw []byte
-		if err := rows.Scan(&c.ID, &c.LeadID, &c.UserID, &c.UserName, &c.Message, &raw, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.LeadID, &c.UserID, &c.UserName, &c.Kind, &c.Message, &raw, &c.CreatedAt); err != nil {
 			return nil, err
+		}
+		if c.Kind == "" {
+			c.Kind = "comment"
 		}
 		c.ImageURLs = []string{}
 		if len(raw) > 0 {
@@ -203,23 +226,34 @@ func (s *Store) ListLeadComments(ctx context.Context, tenantID, leadID xid.ID) (
 }
 
 func (s *Store) AddLeadComment(ctx context.Context, tenantID, leadID xid.ID, userID *xid.ID, message string, imageURLs []string) (*LeadComment, error) {
+	return s.AddLeadActivity(ctx, tenantID, leadID, userID, "comment", message, imageURLs)
+}
+
+func (s *Store) AddLeadActivity(ctx context.Context, tenantID, leadID xid.ID, userID *xid.ID, kind, message string, imageURLs []string) (*LeadComment, error) {
 	if _, err := s.GetLead(ctx, tenantID, leadID); err != nil {
 		return nil, err
+	}
+	kind = strings.TrimSpace(strings.ToLower(kind))
+	if kind != "status_change" {
+		kind = "comment"
 	}
 	message = strings.TrimSpace(message)
 	if imageURLs == nil {
 		imageURLs = []string{}
 	}
-	if message == "" && len(imageURLs) == 0 {
+	if kind == "comment" && message == "" && len(imageURLs) == 0 {
 		return nil, fmt.Errorf("pesan atau gambar wajib")
+	}
+	if kind == "status_change" && message == "" {
+		return nil, fmt.Errorf("pesan status wajib")
 	}
 	raw, _ := json.Marshal(imageURLs)
 	var c LeadComment
 	err := s.Pool.QueryRow(ctx, `
-		INSERT INTO lead_comments (tenant_id, lead_id, user_id, message, image_urls)
-		VALUES ($1,$2,$3,$4,$5::jsonb)
-		RETURNING id, lead_id, user_id, message, COALESCE(image_urls, '[]'::jsonb), created_at
-	`, tenantID, leadID, userID, message, raw).Scan(&c.ID, &c.LeadID, &c.UserID, &c.Message, &raw, &c.CreatedAt)
+		INSERT INTO lead_comments (tenant_id, lead_id, user_id, kind, message, image_urls)
+		VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+		RETURNING id, lead_id, user_id, kind, message, COALESCE(image_urls, '[]'::jsonb), created_at
+	`, tenantID, leadID, userID, kind, message, raw).Scan(&c.ID, &c.LeadID, &c.UserID, &c.Kind, &c.Message, &raw, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -367,6 +401,7 @@ func (s *Store) ConvertLeadToCustomer(ctx context.Context, tenantID, leadID xid.
 	if err := s.CreateCustomer(ctx, c); err != nil {
 		return nil, nil, err
 	}
+	_, _ = s.CopyLeadDocumentsToCustomer(ctx, tenantID, leadID, c.ID)
 	now := time.Now()
 	_, err = s.Pool.Exec(ctx, `
 		UPDATE leads SET status='converted', customer_id=$3, converted_at=$4,

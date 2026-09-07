@@ -55,36 +55,52 @@ const PERM_PRESETS: { key: string; label: string; hint: string }[] = [
   { key: "customers", label: "Pelanggan & Lead", hint: "Pelanggan, Lead, Reseller & Komisi" },
   { key: "leads", label: "Lead saja", hint: "Hanya menu Lead" },
   { key: "billing", label: "Billing", hint: "Paket, Tagihan, Akunting" },
-  { key: "network", label: "Jaringan", hint: "Cluster, Router, Secrets, IP Pool, ODP, Voucher" },
+  { key: "network", label: "Jaringan", hint: "Cluster, Router, IP Pool, ODP, Voucher (+ Secrets lewat Pelanggan)" },
   { key: "ops", label: "Operasional", hint: "Menu Tiket (instalasi & support)" },
   { key: "tickets", label: "Tiket saja", hint: "Hanya menu Tiket" },
   { key: "sla-report", label: "Laporan SLA", hint: "Evaluasi SLA & waktu resolve tiket" },
-  { key: "settings", label: "Pengaturan", hint: "Branding, Isolir, Notifikasi, Roles, Users, Backup, Integrasi" },
+  { key: "settings", label: "Pengaturan", hint: "Umum, Isolir, Cronjob, Notifikasi, Roles, Users, Backup, Integrasi" },
 ];
 
 export function BrandingSettingsPage() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["settings-branding"],
-    queryFn: () => api<TenantBrandingView>("/api/settings/branding"),
+    queryFn: () =>
+      api<
+        TenantBrandingView & {
+          tenant_name: string;
+          timezone: string;
+          default_tax_percent: number;
+        }
+      >("/api/settings/branding"),
   });
-  const [appName, setAppName] = useState("");
+  const [tenantName, setTenantName] = useState("");
+  const [timezone, setTimezone] = useState("Asia/Jakarta");
+  const [taxPercent, setTaxPercent] = useState(0);
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    if (q.data) setAppName(q.data.overrides.app_name || "");
+    if (!q.data) return;
+    setTenantName(q.data.tenant_name || q.data.overrides.app_name || "");
+    setTimezone(q.data.timezone || "Asia/Jakarta");
+    setTaxPercent(Number(q.data.default_tax_percent) || 0);
   }, [q.data]);
 
   const save = useMutation({
     mutationFn: () =>
-      api<TenantBrandingView>("/api/settings/branding", {
+      api("/api/settings/branding", {
         method: "PUT",
-        body: JSON.stringify({ app_name: appName.trim() }),
+        body: JSON.stringify({
+          tenant_name: tenantName.trim(),
+          timezone: timezone.trim() || "Asia/Jakarta",
+          default_tax_percent: Math.max(0, Number(taxPercent) || 0),
+        }),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
       void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
-      void toastSuccess("Branding disimpan");
+      void toastSuccess("Pengaturan umum disimpan");
       setErr("");
     },
     onError: (e: Error) => {
@@ -95,10 +111,12 @@ export function BrandingSettingsPage() {
 
   const clearField = useMutation({
     mutationFn: (field: "logo" | "favicon") =>
-      api<TenantBrandingView>("/api/settings/branding", {
+      api("/api/settings/branding", {
         method: "PUT",
         body: JSON.stringify({
-          app_name: appName.trim(),
+          tenant_name: tenantName.trim(),
+          timezone: timezone.trim() || "Asia/Jakarta",
+          default_tax_percent: Math.max(0, Number(taxPercent) || 0),
           clear_logo: field === "logo",
           clear_favicon: field === "favicon",
         }),
@@ -127,25 +145,60 @@ export function BrandingSettingsPage() {
   const eff = view?.effective;
   const from = view?.from_owner;
 
+  const TIMEZONES = [
+    "Asia/Jakarta",
+    "Asia/Makassar",
+    "Asia/Jayapura",
+    "Asia/Singapore",
+    "UTC",
+  ];
+
   return (
-    <Section title="Branding">
+    <Section title="Umum">
       {q.isLoading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
       ) : (
         <div className="grid max-w-xl gap-4">
           <label className="grid gap-1 text-sm">
-            <span className="font-medium">Nama aplikasi</span>
+            <span className="font-medium">Nama tenant</span>
             <input
               className="input"
-              value={appName}
-              onChange={(e) => setAppName(e.target.value)}
-              placeholder={eff?.app_name || "drp-billing"}
+              value={tenantName}
+              onChange={(e) => setTenantName(e.target.value)}
+              placeholder="Nama perusahaan / ISP"
+              required
             />
-            {from?.app_name ? (
-              <span className="text-xs text-[var(--muted)]">Kosong = mengikuti owner ({eff?.app_name})</span>
-            ) : (
-              <span className="text-xs text-[var(--muted)]">Override tenant aktif</span>
-            )}
+            <span className="text-xs text-[var(--muted)]">Ditampilkan di sidebar, login, dan dokumen.</span>
+          </label>
+
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium">Timezone</span>
+            <select className="input" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+              {TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-[var(--muted)]">
+              Dipakai untuk jadwal worker / referensi waktu lokal tenant (server tetap memakai zona proses).
+            </span>
+          </label>
+
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium">Pajak default (%)</span>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              value={taxPercent}
+              onChange={(e) => setTaxPercent(Number(e.target.value))}
+            />
+            <span className="text-xs text-[var(--muted)]">
+              Diterapkan ke semua tagihan & ganti paket (bukan per paket).
+            </span>
           </label>
 
           <AssetRow

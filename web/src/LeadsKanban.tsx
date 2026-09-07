@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayoutGrid, List } from "lucide-react";
 import { api, apiUpload } from "./api";
+import { ProgressFileUpload } from "./ProgressFileUpload";
 import {
   AttributionSelects,
   CommissionBasisSelect,
@@ -21,9 +22,10 @@ import {
   KanbanOverlay,
   type KanbanCommitMeta,
 } from "./components/ui/kanban";
-import { IconImage, IconPencil, IconTrash, IconUserCheck, IconWrench } from "./icons";
+import { IconPencil, IconTrash, IconUserCheck, IconWrench } from "./icons";
 import { canDispatchOps, type MePermissions } from "./permissions";
 import { toastError, toastSuccess } from "./swal";
+import { ListToolbar, matchesQuery } from "./ListToolbar";
 import {
   Button,
   FormDialog,
@@ -66,10 +68,33 @@ type LeadComment = {
   lead_id: string;
   user_id?: string | null;
   user_name?: string;
+  kind?: string;
   message: string;
   image_urls: string[];
   created_at: string;
 };
+
+type LeadDocument = {
+  id: string;
+  lead_id: string;
+  kind: string;
+  url: string;
+  caption?: string;
+  uploader_name?: string;
+  created_at: string;
+};
+
+const DOC_KINDS: { id: string; label: string }[] = [
+  { id: "ktp", label: "KTP / identitas" },
+  { id: "rumah", label: "Rumah / lokasi" },
+  { id: "odp", label: "ODP" },
+  { id: "psb", label: "Proses PSB" },
+  { id: "other", label: "Lainnya" },
+];
+
+function docKindLabel(kind: string) {
+  return DOC_KINDS.find((k) => k.id === kind)?.label || kind;
+}
 
 type ClusterOpt = { id: string; name: string; code: string };
 
@@ -261,11 +286,11 @@ export function LeadsPage() {
     }
   });
   const [listStatus, setListStatus] = useState("");
+  const [leadSearch, setLeadSearch] = useState("");
   const [detail, setDetail] = useState<LeadRow | null>(null);
   const [commentText, setCommentText] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const photoRef = useRef<HTMLInputElement>(null);
+  const [docKind, setDocKind] = useState("psb");
 
   function setViewMode(next: "kanban" | "list") {
     setView(next);
@@ -285,7 +310,23 @@ export function LeadsPage() {
     return techs.length > 0 ? techs : active;
   })();
   const list = q.data?.data ?? [];
-  const filteredList = listStatus ? list.filter((l) => l.status === listStatus) : list;
+  const filteredList = useMemo(
+    () =>
+      list.filter((l) => {
+        if (listStatus && l.status !== listStatus) return false;
+        return matchesQuery(
+          leadSearch,
+          l.full_name,
+          l.phone,
+          l.address,
+          l.notes,
+          l.assigned_to_name,
+          l.reseller_name,
+          l.sales_user_name,
+        );
+      }),
+    [list, listStatus, leadSearch],
+  );
 
   const commentsQ = useQuery({
     queryKey: ["lead-comments", detail?.id],
@@ -293,6 +334,14 @@ export function LeadsPage() {
     enabled: Boolean(detail?.id),
   });
   const comments = Array.isArray(commentsQ.data) ? commentsQ.data : [];
+
+  const docsQ = useQuery({
+    queryKey: ["lead-documents", detail?.id],
+    queryFn: () => api<LeadDocument[]>(`/api/leads/${detail!.id}/documents`),
+    enabled: Boolean(detail?.id),
+  });
+  const leadDocs = Array.isArray(docsQ.data) ? docsQ.data : [];
+  const canEditLeadDocs = detail?.status === "survey" || detail?.status === "qualified";
 
   useEffect(() => {
     setColumns(boardFromList(list));
@@ -420,13 +469,17 @@ export function LeadsPage() {
 
   const moveStatus = useMutation({
     mutationFn: ({ id, status, assigned_to }: { id: string; status: string; assigned_to?: string }) =>
-      api(`/api/leads/${id}/status`, {
+      api<LeadRow>(`/api/leads/${id}/status`, {
         method: "PATCH",
         body: JSON.stringify({ status, assigned_to: assigned_to || undefined }),
       }),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       closeAssign();
       qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead-comments"] });
+      if (detail && updated?.id === detail.id) {
+        setDetail(updated);
+      }
       void toastSuccess("Status lead diperbarui");
     },
     onError: (e: Error) => {
@@ -522,19 +575,14 @@ export function LeadsPage() {
     onError: (e: Error) => void toastError(e.message),
   });
 
-  async function onPickPhoto(file: File) {
-    if (!detail) return;
-    setPhotoBusy(true);
-    try {
-      const res = await apiUpload<{ url: string }>(`/api/leads/${detail.id}/comments/photos`, file);
-      setPendingImages((prev) => [...prev, res.url]);
-      void toastSuccess("Gambar siap dilampirkan");
-    } catch (e) {
-      void toastError(e instanceof Error ? e.message : "Upload gagal");
-    } finally {
-      setPhotoBusy(false);
-    }
-  }
+  const removeLeadDoc = useMutation({
+    mutationFn: (docId: string) => api(`/api/leads/${detail!.id}/documents/${docId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["lead-documents", detail?.id] });
+      void toastSuccess("Dokumen dihapus");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
 
   function onValueCommit(next: Record<string, LeadRow[]>, meta: KanbanCommitMeta<LeadRow>) {
     const lead = next[meta.overContainer]?.[meta.overIndex];
@@ -546,17 +594,31 @@ export function LeadsPage() {
       // reorder dalam kolom — tidak perlu persist urutan ke API
       return;
     }
-    if (!canDispatch) {
-      setColumns(meta.previousValue);
-      return;
-    }
     if (meta.overContainer === "converted") {
       setColumns(meta.previousValue);
+      if (!canDispatch) {
+        void toastError("Hanya dispatcher yang bisa convert lead");
+        return;
+      }
       openConvert(lead);
       return;
     }
     if (lead.status === "converted") {
       setColumns(meta.previousValue);
+      return;
+    }
+    if (!canDispatch) {
+      if (meta.overContainer === "new") {
+        setColumns(meta.previousValue);
+        void toastError("Teknisi tidak bisa mengembalikan lead ke Baru");
+        return;
+      }
+      setColumns(
+        Object.fromEntries(
+          Object.entries(next).map(([k, rows]) => [k, rows.map((r) => (r.id === lead.id ? { ...r, status: k } : r))]),
+        ),
+      );
+      moveStatus.mutate({ id: lead.id, status: meta.overContainer });
       return;
     }
     if (meta.overContainer === "qualified" || meta.overContainer === "survey" || meta.overContainer === "contacted") {
@@ -613,7 +675,7 @@ export function LeadsPage() {
     >
       <p className="mb-4 text-sm text-[var(--muted)]">
         {!canDispatch
-          ? "Lead yang di-assign ke Anda (dari dihubungi / survey / proses pasang). Buka detail untuk komentar & foto."
+          ? "Lead yang di-assign ke Anda. Seret antar kolom untuk ubah status, atau buka detail untuk komentar & foto."
           : view === "kanban"
             ? "Kanban: seret ke Dihubungi untuk assign teknisi. Drop ke Converted membuka form konversi."
             : "Daftar lead: assign teknisi mulai status dihubungi, komentar & lampiran gambar."}
@@ -621,22 +683,21 @@ export function LeadsPage() {
 
       {view === "list" ? (
         <div className="space-y-4">
-          <div className="min-w-[180px] max-w-xs">
-            <Label className="mb-1.5 block">Status</Label>
-            <Select value={listStatus || "__all__"} onValueChange={(v) => setListStatus(v === "__all__" ? "" : v)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">Semua</SelectItem>
-                {COLUMNS.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <ListToolbar
+            search={leadSearch}
+            onSearchChange={setLeadSearch}
+            searchPlaceholder="Nama, telepon, alamat, teknisi…"
+            filters={[
+              {
+                key: "status",
+                label: "Status",
+                value: listStatus,
+                onChange: setListStatus,
+                options: COLUMNS.map((c) => ({ value: c.id, label: c.label })),
+              },
+            ]}
+            total={filteredList.length}
+          />
           <Table
             columns={["Nama", "Telepon", "Status", "Teknisi", "Atribusi", "Dibuat", "Aksi"]}
             onRowClick={(i) => openDetail(filteredList[i])}
@@ -694,6 +755,12 @@ export function LeadsPage() {
           ) : null}
         </div>
       ) : (
+      <>
+      <ListToolbar
+        search={leadSearch}
+        onSearchChange={setLeadSearch}
+        searchPlaceholder="Filter kanban: nama, telepon…"
+      />
       <Kanban
         value={columns}
         onValueChange={setColumns}
@@ -703,18 +770,22 @@ export function LeadsPage() {
         className="min-w-0"
       >
         <KanbanBoard>
-          {COLUMNS.map((col) => (
+          {COLUMNS.map((col) => {
+            const cards = (columns[col.id] ?? []).filter((l) =>
+              matchesQuery(leadSearch, l.full_name, l.phone, l.address, l.notes, l.assigned_to_name),
+            );
+            return (
             <KanbanColumn key={col.id} value={col.id}>
               <KanbanColumnHeader>
                 <div>
                   <p className="text-sm font-semibold text-[var(--text)]">{col.label}</p>
                   {col.hint ? <p className="text-[10px] text-[var(--muted)]">{col.hint}</p> : null}
                 </div>
-                <Badge variant="outline">{(columns[col.id] ?? []).length}</Badge>
+                <Badge variant="outline">{cards.length}</Badge>
               </KanbanColumnHeader>
               <KanbanColumnContent>
-                {(columns[col.id] ?? []).map((l) => {
-                  const locked = l.status === "converted" || !canDispatch;
+                {cards.map((l) => {
+                  const locked = l.status === "converted";
                   return (
                     <KanbanItem key={l.id} value={l.id} disabled={locked}>
                       <LeadCardBody
@@ -760,12 +831,13 @@ export function LeadsPage() {
                     </KanbanItem>
                   );
                 })}
-                {(columns[col.id] ?? []).length === 0 ? (
+                {cards.length === 0 ? (
                   <p className="px-2 py-6 text-center text-xs text-[var(--muted)]">Kosong</p>
                 ) : null}
               </KanbanColumnContent>
             </KanbanColumn>
-          ))}
+            );
+          })}
         </KanbanBoard>
 
         <KanbanOverlay>
@@ -781,6 +853,7 @@ export function LeadsPage() {
           }}
         </KanbanOverlay>
       </Kanban>
+      </>
       )}
 
       <FormDialog
@@ -817,38 +890,162 @@ export function LeadsPage() {
               ) : null}
             </div>
 
+            {detail.status !== "converted" ? (
+              <div className="flex flex-wrap gap-2">
+                {(canDispatch
+                  ? COLUMNS.filter((c) => c.id !== "converted" && c.id !== detail.status)
+                  : COLUMNS.filter((c) => !["converted", "new", detail.status].includes(c.id))
+                ).map((c) => (
+                  <Button
+                    key={c.id}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={moveStatus.isPending}
+                    onClick={() => {
+                      if (canDispatch && needsAssignee(c.id) && !detail.assigned_to) {
+                        openAssign(detail, c.id);
+                        return;
+                      }
+                      moveStatus.mutate({
+                        id: detail.id,
+                        status: c.id,
+                        assigned_to: detail.assigned_to || undefined,
+                      });
+                    }}
+                  >
+                    → {c.label}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+
             <div>
-              <h4 className="mb-2 text-sm font-semibold">Komentar tim</h4>
+              <h4 className="mb-2 text-sm font-semibold">Dokumentasi / Galeri PSB</h4>
+              <p className="mb-2 text-xs text-[var(--muted)]">
+                Foto KTP, lokasi, ODP, dan proses pasang. Saat convert, gambar ini jadi galeri pelanggan.
+              </p>
+              {docsQ.isLoading ? (
+                <p className="text-sm text-[var(--muted)]">Memuat…</p>
+              ) : leadDocs.length === 0 ? (
+                <p className="mb-2 text-sm text-[var(--muted)]">Belum ada dokumen.</p>
+              ) : (
+                <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {leadDocs.map((d) => (
+                    <div key={d.id} className="relative overflow-hidden rounded-md border border-[var(--border)]">
+                      <a href={d.url} target="_blank" rel="noreferrer" className="block">
+                        <img src={d.url} alt="" className="h-28 w-full object-cover" />
+                      </a>
+                      <div className="flex items-center justify-between gap-1 px-1.5 py-1 text-[10px]">
+                        <span className="truncate text-[var(--muted)]">{docKindLabel(d.kind)}</span>
+                        {canEditLeadDocs ? (
+                          <IconButton
+                            label="Hapus dokumen"
+                            danger
+                            onClick={() => {
+                              void confirm({
+                                title: "Hapus dokumen?",
+                                description: docKindLabel(d.kind),
+                                confirmLabel: "Hapus",
+                                danger: true,
+                              }).then((ok) => {
+                                if (ok) removeLeadDoc.mutate(d.id);
+                              });
+                            }}
+                          >
+                            <IconTrash />
+                          </IconButton>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {canEditLeadDocs ? (
+                <div className="grid gap-2">
+                  <div className="min-w-[140px] max-w-xs">
+                    <Label className="mb-1 block text-xs">Jenis</Label>
+                    <select className="input" value={docKind} onChange={(e) => setDocKind(e.target.value)}>
+                      {DOC_KINDS.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {k.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <ProgressFileUpload
+                    label="Unggah gambar"
+                    hint="Progress per file terlihat di bawah"
+                    uploadFile={async (file, onProgress) => {
+                      if (!detail) throw new Error("Lead tidak dipilih");
+                      const up = await apiUpload<{ url: string }>(
+                        `/api/leads/${detail.id}/documents/photos`,
+                        file,
+                        { onProgress },
+                      );
+                      await api(`/api/leads/${detail.id}/documents`, {
+                        method: "POST",
+                        body: JSON.stringify({ kind: docKind, url: up.url }),
+                      });
+                      return up.url;
+                    }}
+                    onBatchComplete={(urls) => {
+                      void qc.invalidateQueries({ queryKey: ["lead-documents", detail?.id] });
+                      void toastSuccess(urls.length > 1 ? `${urls.length} dokumen diunggah` : "Dokumen diunggah");
+                    }}
+                  />
+                </div>
+              ) : (
+                <p className="text-xs text-[var(--muted)]">Unggah dokumen saat status Survey / Proses pasang.</p>
+              )}
+            </div>
+
+            <div>
+              <h4 className="mb-2 text-sm font-semibold">Aktivitas</h4>
               <div className="mb-3 max-h-56 space-y-3 overflow-y-auto">
                 {commentsQ.isLoading ? (
                   <p className="text-sm text-[var(--muted)]">Memuat…</p>
                 ) : comments.length === 0 ? (
-                  <p className="text-sm text-[var(--muted)]">Belum ada komentar.</p>
+                  <p className="text-sm text-[var(--muted)]">Belum ada aktivitas.</p>
                 ) : (
-                  comments.map((c) => (
-                    <div key={c.id} className="rounded-md border border-[var(--border)] p-2 text-sm">
-                      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-                        <span className="font-medium">{c.user_name || "Tim"}</span>
-                        <span className="text-[10px] text-[var(--muted)]">{formatWhen(c.created_at)}</span>
-                      </div>
-                      {c.message ? <p className="whitespace-pre-wrap">{c.message}</p> : null}
-                      {(c.image_urls?.length ?? 0) > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {c.image_urls.map((url) => (
-                            <a
-                              key={url}
-                              href={url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block overflow-hidden rounded border border-[var(--border)]"
-                            >
-                              <img src={url} alt="" className="h-20 w-20 object-cover" />
-                            </a>
-                          ))}
+                  comments.map((c) => {
+                    const isStatus = c.kind === "status_change";
+                    return (
+                      <div
+                        key={c.id}
+                        className={
+                          isStatus
+                            ? "rounded-md border border-dashed border-[var(--border)] bg-[var(--panel-muted)]/50 px-2 py-1.5 text-sm"
+                            : "rounded-md border border-[var(--border)] p-2 text-sm"
+                        }
+                      >
+                        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                          <span className="font-medium">
+                            {isStatus ? `${c.user_name || "Sistem"} · pindah status` : c.user_name || "Tim"}
+                          </span>
+                          <span className="text-[10px] text-[var(--muted)]">{formatWhen(c.created_at)}</span>
                         </div>
-                      ) : null}
-                    </div>
-                  ))
+                        {c.message ? (
+                          <p className={isStatus ? "text-[var(--muted)]" : "whitespace-pre-wrap"}>{c.message}</p>
+                        ) : null}
+                        {!isStatus && (c.image_urls?.length ?? 0) > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {c.image_urls.map((url) => (
+                              <a
+                                key={url}
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block overflow-hidden rounded border border-[var(--border)]"
+                              >
+                                <img src={url} alt="" className="h-20 w-20 object-cover" />
+                              </a>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
                 )}
               </div>
 
@@ -871,36 +1068,33 @@ export function LeadsPage() {
                 </div>
               ) : null}
 
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="min-w-[200px] flex-1">
-                  <Input
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Tulis komentar…"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        if (commentText.trim() || pendingImages.length) sendComment.mutate();
-                      }
-                    }}
-                  />
-                </div>
-                <IconButton
+              <div className="grid gap-2">
+                <Input
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  placeholder="Tulis komentar…"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      if (commentText.trim() || pendingImages.length) sendComment.mutate();
+                    }
+                  }}
+                />
+                <ProgressFileUpload
                   label="Lampirkan gambar"
-                  disabled={photoBusy}
-                  onClick={() => photoRef.current?.click()}
-                >
-                  <IconImage />
-                </IconButton>
-                <input
-                  ref={photoRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (file) void onPickPhoto(file);
+                  hint="Gambar masuk antrian lampiran komentar"
+                  uploadFile={async (file, onProgress) => {
+                    if (!detail) throw new Error("Lead tidak dipilih");
+                    const res = await apiUpload<{ url: string }>(
+                      `/api/leads/${detail.id}/comments/photos`,
+                      file,
+                      { onProgress },
+                    );
+                    return res.url;
+                  }}
+                  onBatchComplete={(urls) => {
+                    setPendingImages((prev) => [...prev, ...urls]);
+                    void toastSuccess(urls.length > 1 ? `${urls.length} gambar siap dilampirkan` : "Gambar siap dilampirkan");
                   }}
                 />
                 <Button

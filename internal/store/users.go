@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/dianrp/drp-billing/internal/db"
@@ -27,6 +28,7 @@ type User struct {
 	PasswordHash    string     `json:"-"`
 	FullName        string     `json:"full_name"`
 	Phone           *string    `json:"phone,omitempty"`
+	AvatarURL       *string    `json:"avatar_url,omitempty"`
 	IsActive        bool       `json:"is_active"`
 	IsPlatformAdmin bool       `json:"is_platform_admin,omitempty"`
 	TOTPSecret      *string    `json:"-"`
@@ -56,12 +58,12 @@ type UserTenant struct {
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, full_name, phone, is_active, COALESCE(is_platform_admin,false),
+		SELECT id, email, password_hash, full_name, phone, avatar_url, is_active, COALESCE(is_platform_admin,false),
 		       totp_secret, totp_enabled, last_login_at, created_at
 		FROM users WHERE email = $1
 	`, email)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.Phone, &u.IsActive, &u.IsPlatformAdmin,
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.Phone, &u.AvatarURL, &u.IsActive, &u.IsPlatformAdmin,
 		&u.TOTPSecret, &u.TOTPEnabled, &u.LastLoginAt, &u.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -71,17 +73,43 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error)
 
 func (s *Store) GetUserByID(ctx context.Context, id xid.ID) (*User, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, full_name, phone, is_active, COALESCE(is_platform_admin,false),
+		SELECT id, email, password_hash, full_name, phone, avatar_url, is_active, COALESCE(is_platform_admin,false),
 		       totp_secret, totp_enabled, last_login_at, created_at
 		FROM users WHERE id = $1
 	`, id)
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.Phone, &u.IsActive, &u.IsPlatformAdmin,
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.Phone, &u.AvatarURL, &u.IsActive, &u.IsPlatformAdmin,
 		&u.TOTPSecret, &u.TOTPEnabled, &u.LastLoginAt, &u.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return &u, err
+}
+
+// UpdateMyProfile updates the signed-in user's display name and optionally password hash.
+func (s *Store) UpdateMyProfile(ctx context.Context, id xid.ID, fullName string, passwordHash *string) error {
+	fullName = strings.TrimSpace(fullName)
+	if fullName == "" {
+		return errors.New("full_name required")
+	}
+	if passwordHash != nil && *passwordHash != "" {
+		_, err := s.Pool.Exec(ctx, `
+			UPDATE users SET full_name=$2, password_hash=$3, updated_at=NOW() WHERE id=$1
+		`, id, fullName, *passwordHash)
+		return err
+	}
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE users SET full_name=$2, updated_at=NOW() WHERE id=$1
+	`, id, fullName)
+	return err
+}
+
+// UpdateUserAvatar sets or clears the user's avatar URL.
+func (s *Store) UpdateUserAvatar(ctx context.Context, id xid.ID, avatarURL *string) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE users SET avatar_url=$2, updated_at=NOW() WHERE id=$1
+	`, id, avatarURL)
+	return err
 }
 
 func (s *Store) ListUserTenants(ctx context.Context, userID xid.ID) ([]UserTenant, error) {

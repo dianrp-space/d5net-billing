@@ -93,14 +93,16 @@ func (s *Store) UpdateTenantBranding(ctx context.Context, tenantID xid.ID, b *Br
 	return nil
 }
 
-func coalesceStr(primary, fallback, def string) (value string, fromOwner bool) {
-	p := strings.TrimSpace(primary)
-	if p != "" {
-		return p, false
+// coalesceDisplayName prefers tenant branding app_name, then tenants.name (Umum), then platform branding.
+func coalesceDisplayName(appName, tenantName, ownerAppName, def string) (value string, fromOwner bool) {
+	if v := strings.TrimSpace(appName); v != "" {
+		return v, false
 	}
-	f := strings.TrimSpace(fallback)
-	if f != "" {
-		return f, true
+	if v := strings.TrimSpace(tenantName); v != "" {
+		return v, false
+	}
+	if v := strings.TrimSpace(ownerAppName); v != "" {
+		return v, true
 	}
 	return def, true
 }
@@ -124,8 +126,12 @@ func (s *Store) ResolveTenantBranding(ctx context.Context, tenantID xid.ID) (*Te
 	if err != nil {
 		return nil, err
 	}
+	tenantName := ""
+	if ten, terr := s.GetTenant(ctx, tenantID); terr == nil && ten != nil {
+		tenantName = ten.Name
+	}
 	view := &TenantBrandingView{Overrides: *raw}
-	app, fromApp := coalesceStr(raw.AppName, owner.AppName, "drp-billing")
+	app, fromApp := coalesceDisplayName(raw.AppName, tenantName, owner.AppName, "drp-billing")
 	logo, fromLogo := coalescePtr(raw.LogoURL, owner.LogoURL)
 	fav, fromFav := coalescePtr(raw.FaviconURL, owner.FaviconURL)
 	view.Effective = Branding{AppName: app, LogoURL: logo, FaviconURL: fav}

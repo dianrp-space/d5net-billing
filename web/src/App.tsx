@@ -25,7 +25,26 @@ function parseTenantRoute(path: string, kind: "admin" | "client") {
     slug: parts[0],
     login: parts[1] === "login",
     section: parts[1] && parts[1] !== "login" ? parts[1] : "",
+    rest: parts.slice(2),
   };
+}
+
+/** /admin/{slug}/customers/{id}/secrets[/new] | /customers/{id}/gallery|galery */
+function parseCustomerNestedRest(
+  section: string,
+  rest: string[],
+): { customerId: string; kind: "secrets" | "gallery"; create?: boolean } | null {
+  if (section !== "customers" || !rest[0]) return null;
+  if (rest.length === 2 && rest[1] === "secrets") {
+    return { customerId: rest[0], kind: "secrets", create: false };
+  }
+  if (rest.length === 3 && rest[1] === "secrets" && rest[2] === "new") {
+    return { customerId: rest[0], kind: "secrets", create: true };
+  }
+  if (rest.length === 2 && (rest[1] === "gallery" || rest[1] === "galery")) {
+    return { customerId: rest[0], kind: "gallery" };
+  }
+  return null;
 }
 
 export default function App() {
@@ -109,6 +128,16 @@ export default function App() {
         navigate(`/admin/${adminRoute.slug}/${section}`);
         return;
       }
+      // Allow nested customer secrets/gallery; ignore unknown nested paths.
+      if (adminRoute.section === "customers" && adminRoute.rest.length) {
+        if (!parseCustomerNestedRest(adminRoute.section, adminRoute.rest)) {
+          navigate(`/admin/${adminRoute.slug}/customers`);
+          return;
+        }
+      } else if (adminRoute.rest.length) {
+        navigate(`/admin/${adminRoute.slug}/${adminRoute.section}`);
+        return;
+      }
       setLastAdminPage(adminRoute.slug, adminRoute.section);
       return;
     }
@@ -183,13 +212,18 @@ export default function App() {
     if (!adminAuthed || (storedAdminSlug && storedAdminSlug !== adminRoute.slug)) return null;
     if (!adminRoute.section || !isAdminPage(adminRoute.section)) return null;
     const page = adminRoute.section as AdminPage;
+    const nested = parseCustomerNestedRest(adminRoute.section, adminRoute.rest || []);
     return (
       <AdminApp
         tenantSlug={adminRoute.slug}
         page={page}
-        onNavigate={(next) => {
+        customerSecretsId={nested?.kind === "secrets" ? nested.customerId : null}
+        customerSecretsCreate={Boolean(nested?.kind === "secrets" && nested.create)}
+        customerGalleryId={nested?.kind === "gallery" ? nested.customerId : null}
+        onNavigate={(next, rest) => {
           setLastAdminPage(adminRoute.slug, next);
-          navigate(`/admin/${adminRoute.slug}/${next}`);
+          const suffix = rest?.length ? `/${rest.join("/")}` : "";
+          navigate(`/admin/${adminRoute.slug}/${next}${suffix}`);
         }}
         onLogout={() => {
           refreshAuth();
