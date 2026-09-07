@@ -3,6 +3,7 @@ import { api } from "./api";
 import { applyBrandingMeta } from "./branding";
 import { formatRp, LoginShell, SecretInput } from "./ui";
 import { AuthThemeCorner } from "./ThemeToggle";
+import { QrisPayDialog, type QrisIntent } from "./QrisPayDialog";
 
 type PublicTenant = {
   slug: string;
@@ -26,6 +27,7 @@ type IsolirSession = {
   invoices: Invoice[];
   tenant_slug: string;
   tenant_name: string;
+  portal_token?: string;
 };
 
 function unpaid(inv: Invoice) {
@@ -40,6 +42,9 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
   const [session, setSession] = useState<IsolirSession | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [qrisOpen, setQrisOpen] = useState(false);
+  const [qrisInv, setQrisInv] = useState<Invoice | null>(null);
+  const [qris, setQris] = useState<QrisIntent | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +78,7 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
         invoices: Invoice[];
         tenant_slug: string;
         tenant_name: string;
+        portal_token?: string;
       }>("/api/portal/login", {
         method: "POST",
         body: JSON.stringify({ phone, password, tenant_slug: slug }),
@@ -82,9 +88,33 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
         invoices: (data.invoices || []).filter(unpaid),
         tenant_slug: data.tenant_slug || slug,
         tenant_name: data.tenant_name || tenant?.name || "",
+        portal_token: data.portal_token,
       });
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Login gagal");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function payQris(inv: Invoice) {
+    if (!session?.portal_token) {
+      setErr("Sesi portal tidak lengkap. Login ulang.");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      const intent = await api<QrisIntent>(`/api/portal/invoices/${inv.id}/checkout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.portal_token}` },
+        body: JSON.stringify({}),
+      });
+      setQris(intent);
+      setQrisInv(inv);
+      setQrisOpen(true);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Gagal membuat QRIS");
     } finally {
       setBusy(false);
     }
@@ -121,12 +151,14 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="text-sm font-bold">{formatRp(inv.total_amount - (inv.paid_amount || 0))}</p>
-                      <a
+                      <button
+                        type="button"
                         className="text-xs font-semibold text-[var(--accent)] underline"
-                        href={`/client/${encodeURIComponent(session.tenant_slug)}`}
+                        disabled={busy}
+                        onClick={() => void payQris(inv)}
                       >
-                        Bayar di portal
-                      </a>
+                        Bayar QRIS
+                      </button>
                     </div>
                   </li>
                 ))
@@ -139,8 +171,25 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
             >
               Keluar
             </button>
+            {err ? <p className="mt-2 text-sm text-[var(--danger)]">{err}</p> : null}
           </div>
         </div>
+        <QrisPayDialog
+          open={qrisOpen}
+          invoiceNumber={qrisInv?.invoice_number || ""}
+          intent={qris}
+          pollPath={qrisInv ? `/api/portal/invoices/${qrisInv.id}/payment-intent` : undefined}
+          cancelPath={qrisInv ? `/api/portal/invoices/${qrisInv.id}/payment-intent/cancel` : undefined}
+          pollHeaders={session.portal_token ? { Authorization: `Bearer ${session.portal_token}` } : undefined}
+          onClose={() => setQrisOpen(false)}
+          onPaid={() => {
+            if (!qrisInv) return;
+            setSession({
+              ...session,
+              invoices: session.invoices.filter((i) => i.id !== qrisInv.id),
+            });
+          }}
+        />
       </AuthThemeCorner>
     );
   }

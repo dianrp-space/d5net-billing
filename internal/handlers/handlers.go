@@ -725,21 +725,21 @@ func registerCustomers(api huma.API, d *Deps) {
 		Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			ClusterID      *xid.ID  `json:"cluster_id,omitempty"`
-			CustomerCode   *string  `json:"customer_code,omitempty"`
-			FullName       string   `json:"full_name"`
-			Email          *string  `json:"email,omitempty"`
-			Phone          string   `json:"phone"`
-			Address        *string  `json:"address,omitempty"`
-			Latitude       *float64 `json:"latitude,omitempty"`
-			Longitude      *float64 `json:"longitude,omitempty"`
-			IdentityType   *string  `json:"identity_type,omitempty"`
-			IdentityNumber *string  `json:"identity_number,omitempty"`
-			IsActive       *bool    `json:"is_active,omitempty"`
-			PortalEnabled  *bool    `json:"portal_enabled,omitempty"`
-			ResellerID       *xid.ID  `json:"reseller_id,omitempty"`
-			SalesUserID      *xid.ID  `json:"sales_user_id,omitempty"`
-			CommissionBasis  string   `json:"commission_basis,omitempty"`
+			ClusterID       *xid.ID  `json:"cluster_id,omitempty"`
+			CustomerCode    *string  `json:"customer_code,omitempty"`
+			FullName        string   `json:"full_name"`
+			Email           *string  `json:"email,omitempty"`
+			Phone           string   `json:"phone"`
+			Address         *string  `json:"address,omitempty"`
+			Latitude        *float64 `json:"latitude,omitempty"`
+			Longitude       *float64 `json:"longitude,omitempty"`
+			IdentityType    *string  `json:"identity_type,omitempty"`
+			IdentityNumber  *string  `json:"identity_number,omitempty"`
+			IsActive        *bool    `json:"is_active,omitempty"`
+			PortalEnabled   *bool    `json:"portal_enabled,omitempty"`
+			ResellerID      *xid.ID  `json:"reseller_id,omitempty"`
+			SalesUserID     *xid.ID  `json:"sales_user_id,omitempty"`
+			CommissionBasis string   `json:"commission_basis,omitempty"`
 		}
 	}) (*struct{ Body store.Customer }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -4264,6 +4264,7 @@ func registerPortal(api huma.API, d *Deps) {
 			WalletBalance int64                `json:"wallet_balance"`
 			TenantSlug    string               `json:"tenant_slug"`
 			TenantName    string               `json:"tenant_name"`
+			PortalToken   string               `json:"portal_token"`
 		}
 	}, error) {
 		ten, custs, err := authenticatePortalCustomers(ctx, d, input.Body.TenantSlug, input.Body.TenantID, input.Body.Phone, input.Body.Password)
@@ -4341,6 +4342,7 @@ func registerPortal(api huma.API, d *Deps) {
 				WalletBalance int64                `json:"wallet_balance"`
 				TenantSlug    string               `json:"tenant_slug"`
 				TenantName    string               `json:"tenant_name"`
+				PortalToken   string               `json:"portal_token"`
 			}
 		}{}
 		out.Body.Customer = customers[0]
@@ -4351,6 +4353,9 @@ func registerPortal(api huma.API, d *Deps) {
 		out.Body.WalletBalance = balance
 		out.Body.TenantSlug = ten.Slug
 		out.Body.TenantName = ten.Name
+		if tok, terr := d.Tokens.CreatePortalToken(ten.ID, customers[0].Phone); terr == nil {
+			out.Body.PortalToken = tok
+		}
 		return out, nil
 	})
 
@@ -4401,6 +4406,107 @@ func registerPortal(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "ok"}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-invoice-checkout", Method: http.MethodPost, Path: "/api/portal/invoices/{id}/checkout",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+		Body          struct {
+			TenantSlug string `json:"tenant_slug"`
+			Phone      string `json:"phone"`
+			Password   string `json:"password"`
+		}
+	}) (*struct{ Body store.PaymentIntent }, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, input.Body.TenantSlug, input.Body.Phone, input.Body.Password)
+		if err != nil {
+			return nil, err
+		}
+		inv, _, err := d.Store.GetInvoice(ctx, ten.ID, input.ID)
+		if err != nil {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		allowed := false
+		for _, c := range custs {
+			if c.ID == inv.CustomerID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		pi, err := checkoutInvoice(ctx, d, ten.ID, inv, payment.ProviderDRP, "")
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-invoice-payment-intent", Method: http.MethodGet, Path: "/api/portal/invoices/{id}/payment-intent",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+	}) (*struct{ Body store.PaymentIntent }, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		inv, _, err := d.Store.GetInvoice(ctx, ten.ID, input.ID)
+		if err != nil {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		allowed := false
+		for _, c := range custs {
+			if c.ID == inv.CustomerID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		pi, err := latestInvoicePaymentIntent(ctx, d, ten.ID, inv)
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-invoice-payment-intent-cancel", Method: http.MethodPost, Path: "/api/portal/invoices/{id}/payment-intent/cancel",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+	}) (*struct{ Body store.PaymentIntent }, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		inv, _, err := d.Store.GetInvoice(ctx, ten.ID, input.ID)
+		if err != nil {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		allowed := false
+		for _, c := range custs {
+			if c.ID == inv.CustomerID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		pi, err := cancelInvoicePaymentIntent(ctx, d, ten.ID, inv)
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
 	})
 }
 
@@ -4470,6 +4576,46 @@ func authenticatePortalCustomers(ctx context.Context, d *Deps, tenantSlug string
 	return ten, matched, nil
 }
 
+func authenticatePortalRequest(ctx context.Context, d *Deps, authorization, tenantSlug, phone, password string) (*store.Tenant, []*store.Customer, error) {
+	token := strings.TrimSpace(authorization)
+	if len(token) > 7 && strings.EqualFold(token[:7], "bearer ") {
+		token = strings.TrimSpace(token[7:])
+	}
+	if token != "" && d.Tokens != nil {
+		claims, err := d.Tokens.ParseToken(token)
+		if err == nil && claims != nil && claims.Type == "portal" {
+			tid, perr := xid.Parse(claims.TenantID)
+			if perr != nil {
+				return nil, nil, httpx.Unauthorized("invalid credentials")
+			}
+			ten, err := d.Store.GetTenant(ctx, tid)
+			if err != nil || ten == nil || !ten.IsActive {
+				return nil, nil, httpx.Unauthorized("invalid credentials")
+			}
+			portalPhone := strings.TrimSpace(claims.Email)
+			if portalPhone == "" {
+				return nil, nil, httpx.Unauthorized("invalid credentials")
+			}
+			candidates, err := d.Store.ListCustomersByPhone(ctx, tid, portalPhone)
+			if err != nil {
+				return nil, nil, httpx.Internal(err)
+			}
+			var matched []*store.Customer
+			for i := range candidates {
+				c := &candidates[i]
+				if c.IsActive && c.PortalEnabled {
+					matched = append(matched, c)
+				}
+			}
+			if len(matched) == 0 {
+				return nil, nil, httpx.Unauthorized("invalid credentials")
+			}
+			return ten, matched, nil
+		}
+	}
+	return authenticatePortalCustomers(ctx, d, tenantSlug, xid.Nil(), phone, password)
+}
+
 func registerWebhooks(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "payment-webhook", Method: http.MethodPost, Path: "/api/webhooks/payment/{provider}",
@@ -4481,10 +4627,13 @@ func registerWebhooks(api huma.API, d *Deps) {
 		XSignature         string `header:"X-Signature"`
 		XCallbackToken     string `header:"X-CALLBACK-TOKEN"`
 		XCallbackSignature string `header:"X-Callback-Signature"`
+		XDRPToken          string `header:"X-DRP-Token"`
+		XEventType         string `header:"X-Event-Type"`
+		Authorization      string `header:"Authorization"`
 	}) (*struct{ Body map[string]string }, error) {
-		prov, err := d.Payments.Get(input.Provider)
-		if err != nil {
-			return nil, httpx.NotFound("provider not found")
+		providerName := normalizePaymentProviderName(input.Provider)
+		if providerName == payment.ProviderManual {
+			return nil, httpx.BadRequest("manual provider has no webhook")
 		}
 
 		bodyMap := input.Body
@@ -4500,36 +4649,58 @@ func registerWebhooks(api huma.API, d *Deps) {
 			"X-Signature":          input.XSignature,
 			"X-CALLBACK-TOKEN":     input.XCallbackToken,
 			"X-Callback-Signature": input.XCallbackSignature,
+			"X-DRP-Token":          input.XDRPToken,
+			"X-Event-Type":         input.XEventType,
+			"Authorization":        input.Authorization,
+		}
+
+		parsed, err := payment.ParseWebhookEvent(providerName, bodyMap)
+		if err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+
+		var prov payment.Provider
+		var perr error
+		if parsed.ExternalID != "" {
+			if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, parsed.ExternalID); ierr == nil && pi != nil {
+				prov, perr = resolvePaymentProvider(ctx, d, pi.TenantID, providerName)
+			}
+		}
+		if prov == nil && d.Payments != nil && d.Payments.Has(providerName) {
+			prov, perr = d.Payments.Get(providerName)
+		}
+		if prov == nil {
+			if perr != nil {
+				return nil, httpx.NotFound("provider not found")
+			}
+			return nil, httpx.NotFound("provider not found")
 		}
 
 		var event *payment.WebhookEvent
-		// Verify when provider supports it and keys are configured (non-manual).
-		if input.Provider != "manual" && d.Payments.Has(input.Provider) {
-			verified, verr := prov.VerifyWebhook(ctx, headers, raw)
-			if verr != nil {
-				softFail := d.Config != nil && d.Config.AppEnv == "development"
-				if softFail {
-					slog.Warn("webhook signature soft-fail in development", "provider", input.Provider, "err", verr)
-				} else {
-					return nil, httpx.Unauthorized("invalid webhook signature")
-				}
+		verified, verr := prov.VerifyWebhook(ctx, headers, raw)
+		if verr != nil {
+			softFail := d.Config != nil && d.Config.AppEnv == "development"
+			if softFail {
+				slog.Warn("webhook signature soft-fail in development", "provider", providerName, "err", verr)
 			} else {
-				event = verified
+				return nil, httpx.Unauthorized("invalid webhook signature")
 			}
+		} else {
+			event = verified
 		}
 		if event == nil {
-			event, err = payment.ParseWebhookEvent(input.Provider, bodyMap)
-			if err != nil {
-				return nil, httpx.BadRequest(err.Error())
-			}
+			event = parsed
 		}
 
 		if event.ExternalID != "" {
+			if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, event.ExternalID); ierr == nil && pi != nil {
+				event.ExternalID = pi.ExternalID
+			}
 			_ = d.Store.UpdatePaymentIntentStatus(ctx, event.ExternalID, event.Status)
 		}
 
 		if payment.WebhookIsPaid(event.Status) && event.ExternalID != "" {
-			if err := completePaidWebhook(ctx, d, input.Provider, event); err != nil {
+			if err := completePaidWebhook(ctx, d, providerName, event); err != nil {
 				slog.Error("complete paid webhook", "external_id", event.ExternalID, "err", err)
 				return nil, httpx.Internal(err)
 			}
@@ -4820,4 +4991,3 @@ func registerVouchers(api huma.API, d *Deps) {
 		}, nil
 	})
 }
-

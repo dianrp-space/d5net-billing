@@ -13,9 +13,9 @@ func ParseWebhookEvent(provider string, body map[string]any) (*WebhookEvent, err
 	}
 
 	ev.ExternalID = firstString(body,
-		"external_id", "order_id", "merchant_ref", "reference", "id",
+		"referenceId", "reference_id", "external_id", "order_id", "merchant_ref", "reference", "id",
 	)
-	ev.Reference = firstString(body, "reference", "payment_id", "transaction_id", "merchant_ref")
+	ev.Reference = firstString(body, "transactionId", "transaction_id", "reference", "payment_id", "merchant_ref")
 
 	if v, ok := body["transaction_status"].(string); ok {
 		switch strings.ToLower(v) {
@@ -34,15 +34,18 @@ func ParseWebhookEvent(provider string, body map[string]any) (*WebhookEvent, err
 		}
 	}
 
-	ev.Amount = firstAmount(body, "amount", "gross_amount", "paid_amount", "total_amount")
+	ev.Amount = firstAmount(body, "amount", "paidAmount", "paid_amount", "gross_amount", "totalAmount", "total_amount")
 
 	// Nested Tripay-style payload: { "data": { ... } }
 	if data, ok := body["data"].(map[string]any); ok {
 		if ev.ExternalID == "" {
-			ev.ExternalID = firstString(data, "merchant_ref", "reference", "external_id", "order_id")
+			ev.ExternalID = firstString(data, "referenceId", "reference_id", "merchant_ref", "reference", "external_id", "order_id")
+		}
+		if ev.Reference == "" {
+			ev.Reference = firstString(data, "transactionId", "transaction_id")
 		}
 		if ev.Amount == 0 {
-			ev.Amount = firstAmount(data, "amount", "total_amount", "gross_amount")
+			ev.Amount = firstAmount(data, "amount", "paidAmount", "totalAmount", "total_amount", "gross_amount")
 		}
 		if st, ok := data["status"].(string); ok && st != "" {
 			switch strings.ToUpper(st) {

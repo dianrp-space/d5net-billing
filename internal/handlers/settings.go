@@ -55,9 +55,9 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 	}, func(ctx context.Context, _ *struct{}) (*struct {
 		Body struct {
 			store.TenantBrandingView
-			TenantName          string  `json:"tenant_name"`
-			Timezone            string  `json:"timezone"`
-			DefaultTaxPercent   float64 `json:"default_tax_percent"`
+			TenantName        string  `json:"tenant_name"`
+			Timezone          string  `json:"timezone"`
+			DefaultTaxPercent float64 `json:"default_tax_percent"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)

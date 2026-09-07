@@ -4,7 +4,9 @@ import { applyBrandingMeta } from "./branding";
 import type { ClientPortalData } from "./ClientLogin";
 import { toastError, toastSuccess } from "./swal";
 import { ThemeToggle } from "./ThemeToggle";
-import { Card, formatRp, Section, SecretInput, Table } from "./ui";
+import { Card, formatRp, IconButton, Section, SecretInput, Table } from "./ui";
+import { IconQrCode } from "./icons";
+import { QrisPayDialog, type QrisIntent } from "./QrisPayDialog";
 
 export function ClientHome({
   data,
@@ -36,9 +38,43 @@ export function ClientHome({
       : [];
   const multi = accounts.length > 1;
   const [pwAccount, setPwAccount] = useState("");
+  const [qrisOpen, setQrisOpen] = useState(false);
+  const [qrisInv, setQrisInv] = useState<{ id: string; number: string } | null>(null);
+  const [qris, setQris] = useState<QrisIntent | null>(null);
+  const [qrisBusy, setQrisBusy] = useState(false);
   const pwAccountId = pwAccount || accounts[0]?.id || "";
   const accountLabel = (code?: string, name?: string) =>
     code ? `${code}${name ? ` · ${name}` : ""}` : name || "—";
+  const portalHeaders: HeadersInit | undefined = data.portal_token
+    ? { Authorization: `Bearer ${data.portal_token}` }
+    : undefined;
+
+  async function payQris(inv: { id?: string; invoice_number: string; status: string; total_amount: number; paid_amount?: number }) {
+    if (!inv.id) {
+      void toastError("Tagihan tidak memiliki ID. Silakan login ulang.");
+      return;
+    }
+    if (!data.portal_token) {
+      void toastError("Sesi portal lama. Keluar lalu login ulang untuk bayar QRIS.");
+      return;
+    }
+    if (inv.status === "paid" || inv.total_amount <= (inv.paid_amount || 0)) return;
+    setQrisBusy(true);
+    try {
+      const intent = await api<QrisIntent>(`/api/portal/invoices/${inv.id}/checkout`, {
+        method: "POST",
+        headers: portalHeaders,
+        body: JSON.stringify({}),
+      });
+      setQris(intent);
+      setQrisInv({ id: inv.id, number: inv.invoice_number });
+      setQrisOpen(true);
+    } catch (err: unknown) {
+      void toastError(err instanceof Error ? err.message : "Gagal membuat QRIS");
+    } finally {
+      setQrisBusy(false);
+    }
+  }
 
   async function onChangePassword(e: React.FormEvent) {
     e.preventDefault();
@@ -137,23 +173,37 @@ export function ClientHome({
       <div className="mt-6">
         <Section title="Tagihan">
           <Table
-            columns={multi ? ["Akun", "Nomor", "Total", "Jatuh tempo", "Status"] : ["Nomor", "Total", "Jatuh tempo", "Status"]}
-            rows={(data.invoices ?? []).map((i) =>
-              multi
+            columns={multi ? ["Akun", "Nomor", "Total", "Jatuh tempo", "Status", "Aksi"] : ["Nomor", "Total", "Jatuh tempo", "Status", "Aksi"]}
+            rows={(data.invoices ?? []).map((i) => {
+              const unpaid = i.status !== "paid" && i.total_amount > (i.paid_amount || 0);
+              const action = unpaid ? (
+                <IconButton
+                  label="Bayar QRIS"
+                  disabled={qrisBusy}
+                  onClick={() => void payQris(i)}
+                >
+                  <IconQrCode />
+                </IconButton>
+              ) : (
+                "—"
+              );
+              return multi
                 ? [
                     accountLabel(i.customer_code, i.customer_name),
                     i.invoice_number,
                     formatRp(i.total_amount),
                     i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
                     i.status,
+                    action,
                   ]
                 : [
                     i.invoice_number,
                     formatRp(i.total_amount),
                     i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
                     i.status,
-                  ],
-            )}
+                    action,
+                  ];
+            })}
           />
         </Section>
       </div>
@@ -233,6 +283,16 @@ export function ClientHome({
           </form>
         </Section>
       </div>
+      <QrisPayDialog
+        open={qrisOpen}
+        invoiceNumber={qrisInv?.number || ""}
+        intent={qris}
+        pollPath={qrisInv ? `/api/portal/invoices/${qrisInv.id}/payment-intent` : undefined}
+        cancelPath={qrisInv ? `/api/portal/invoices/${qrisInv.id}/payment-intent/cancel` : undefined}
+        pollHeaders={portalHeaders}
+        onClose={() => setQrisOpen(false)}
+        onPaid={() => void toastSuccess("Pembayaran QRIS diterima")}
+      />
     </div>
   );
 }

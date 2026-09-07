@@ -14,21 +14,16 @@ func (s *Store) ListRecentAlerts(ctx context.Context, tenantID xid.ID, limit int
 
 func (s *Store) GetPaymentIntentByExternalID(ctx context.Context, externalID string) (*PaymentIntent, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT id, tenant_id, customer_id, invoice_id, provider, COALESCE(external_id,''), amount, status,
-		       COALESCE(checkout_url,''), created_at, updated_at
-		FROM payment_intents WHERE external_id = $1
-		ORDER BY id DESC LIMIT 1
+		SELECT `+paymentIntentSelectCols()+`
+		FROM payment_intents
+		WHERE external_id = $1 OR metadata->>'transaction_id' = $1
+		ORDER BY created_at DESC LIMIT 1
 	`, externalID)
-	var pi PaymentIntent
-	err := row.Scan(&pi.ID, &pi.TenantID, &pi.CustomerID, &pi.InvoiceID, &pi.Provider, &pi.ExternalID,
-		&pi.Amount, &pi.Status, &pi.CheckoutURL, &pi.CreatedAt, &pi.UpdatedAt)
+	pi, err := scanPaymentIntent(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &pi, nil
+	return pi, err
 }
 
 func (s *Store) UpdatePaymentIntentStatus(ctx context.Context, externalID, status string) error {

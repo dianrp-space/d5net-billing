@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { useAppDialog } from "./confirm";
-import { IconTrash } from "./icons";
+import { IconCopy, IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
@@ -17,13 +17,14 @@ type OutboundWebhook = {
 };
 
 type PaymentIntegration = {
-  midtrans_configured: boolean;
-  xendit_configured: boolean;
-  tripay_configured: boolean;
-  midtrans_enabled: boolean;
-  xendit_enabled: boolean;
-  tripay_enabled: boolean;
-  tripay_merchant_code: string;
+  configured: boolean;
+  enabled: boolean;
+  base_url: string;
+  method: string;
+  provider: string;
+  env_fallback: boolean;
+  webhook_path: string;
+  webhook_url: string;
   webhook_base_hint: string;
 };
 
@@ -178,25 +179,19 @@ export function PaymentGWPage() {
     queryFn: () => api<PaymentIntegration>("/api/integrations/payment"),
   });
   const [form, setForm] = useState({
-    midtrans_enabled: false,
-    xendit_enabled: false,
-    tripay_enabled: false,
-    tripay_merchant_code: "",
-    midtrans_server_key: "",
-    xendit_secret_key: "",
-    tripay_private_key: "",
+    enabled: false,
+    base_url: "",
+    api_key: "",
+    webhook_secret: "",
   });
 
   useEffect(() => {
     if (!q.data) return;
     setForm({
-      midtrans_enabled: q.data.midtrans_enabled,
-      xendit_enabled: q.data.xendit_enabled,
-      tripay_enabled: q.data.tripay_enabled,
-      tripay_merchant_code: q.data.tripay_merchant_code || "",
-      midtrans_server_key: "",
-      xendit_secret_key: "",
-      tripay_private_key: "",
+      enabled: q.data.enabled,
+      base_url: q.data.base_url || "",
+      api_key: "",
+      webhook_secret: "",
     });
   }, [q.data]);
 
@@ -205,82 +200,95 @@ export function PaymentGWPage() {
       api<PaymentIntegration>("/api/integrations/payment", {
         method: "PUT",
         body: JSON.stringify({
-          midtrans_enabled: form.midtrans_enabled,
-          xendit_enabled: form.xendit_enabled,
-          tripay_enabled: form.tripay_enabled,
-          tripay_merchant_code: form.tripay_merchant_code.trim(),
-          midtrans_server_key: form.midtrans_server_key.trim() || undefined,
-          xendit_secret_key: form.xendit_secret_key.trim() || undefined,
-          tripay_private_key: form.tripay_private_key.trim() || undefined,
+          enabled: form.enabled,
+          base_url: form.base_url.trim(),
+          api_key: form.api_key.trim() || undefined,
+          webhook_secret: form.webhook_secret.trim() || undefined,
         }),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["integration-payment"] });
-      setForm((f) => ({
-        ...f,
-        midtrans_server_key: "",
-        xendit_secret_key: "",
-        tripay_private_key: "",
-      }));
+      setForm((f) => ({ ...f, api_key: "", webhook_secret: "" }));
       void toastSuccess("Payment gateway disimpan");
     },
     onError: (e: Error) => void toastError(e.message),
   });
 
+  const webhookURL =
+    q.data?.webhook_url || q.data?.webhook_base_hint || q.data?.webhook_path || "/api/webhooks/payment/drp";
+
+  async function copyWebhook() {
+    try {
+      await navigator.clipboard.writeText(webhookURL);
+      void toastSuccess("Webhook URL disalin");
+    } catch {
+      void toastError("Gagal menyalin. Salin manual dari kolom Webhook URL.");
+    }
+  }
+
   return (
     <Section title="Payment Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Kredensial per tenant (terenkripsi). Kosongkan field secret untuk mempertahankan nilai lama. Webhook masuk:{" "}
-        <code className="text-xs">{q.data?.webhook_base_hint || "/api/webhooks/payment/{provider}"}</code>
+        Integrasi <strong>DRP Payment</strong> (QRIS saja). Kredensial per tenant disimpan terenkripsi. Kosongkan secret
+        untuk mempertahankan nilai lama.
       </p>
       {q.isLoading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
       ) : (
         <div className="grid max-w-xl gap-4">
           <ProviderBlock
-            title="Midtrans"
-            enabled={form.midtrans_enabled}
-            configured={Boolean(q.data?.midtrans_configured)}
-            onToggle={(v) => setForm({ ...form, midtrans_enabled: v })}
+            title="DRP Payment · QRIS"
+            enabled={form.enabled}
+            configured={Boolean(q.data?.configured)}
+            onToggle={(v) => setForm({ ...form, enabled: v })}
           >
-            <SecretInput
-              placeholder={q.data?.midtrans_configured ? "Server key baru (opsional)" : "Server key"}
-              value={form.midtrans_server_key}
-              onChange={(e) => setForm({ ...form, midtrans_server_key: e.target.value })}
-              autoComplete="off"
-            />
-          </ProviderBlock>
-          <ProviderBlock
-            title="Xendit"
-            enabled={form.xendit_enabled}
-            configured={Boolean(q.data?.xendit_configured)}
-            onToggle={(v) => setForm({ ...form, xendit_enabled: v })}
-          >
-            <SecretInput
-              placeholder={q.data?.xendit_configured ? "Secret key baru (opsional)" : "Secret key"}
-              value={form.xendit_secret_key}
-              onChange={(e) => setForm({ ...form, xendit_secret_key: e.target.value })}
-              autoComplete="off"
-            />
-          </ProviderBlock>
-          <ProviderBlock
-            title="Tripay"
-            enabled={form.tripay_enabled}
-            configured={Boolean(q.data?.tripay_configured)}
-            onToggle={(v) => setForm({ ...form, tripay_enabled: v })}
-          >
-            <input
-              className="input"
-              placeholder="Merchant code"
-              value={form.tripay_merchant_code}
-              onChange={(e) => setForm({ ...form, tripay_merchant_code: e.target.value })}
-            />
-            <SecretInput
-              placeholder={q.data?.tripay_configured ? "Private key baru (opsional)" : "Private key"}
-              value={form.tripay_private_key}
-              onChange={(e) => setForm({ ...form, tripay_private_key: e.target.value })}
-              autoComplete="off"
-            />
+            <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+              Setiap QRIS mendapat <strong>kode unik 3 digit</strong> yang ditambahkan ke nominal tagihan. Pelanggan harus
+              bayar <strong>tepat</strong> jumlah itu supaya konfirmasi otomatis (webhook) bisa mencocokkan pembayaran.
+            </p>
+            {q.data?.env_fallback ? (
+              <p className="text-[11px] text-[var(--muted)]">Kunci platform (env) aktif. Isi field di bawah untuk override per tenant.</p>
+            ) : null}
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">API base URL</span>
+              <input
+                className="input"
+                placeholder="https://payment.dianrp.com"
+                value={form.base_url}
+                onChange={(e) => setForm({ ...form, base_url: e.target.value })}
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">API key</span>
+              <SecretInput
+                placeholder={q.data?.configured ? "API key baru (opsional)" : "API key (drp_live_…)"}
+                value={form.api_key}
+                onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+                autoComplete="off"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Webhook secret</span>
+              <SecretInput
+                placeholder={q.data?.configured ? "Webhook secret baru (opsional)" : "Webhook secret"}
+                value={form.webhook_secret}
+                onChange={(e) => setForm({ ...form, webhook_secret: e.target.value })}
+                autoComplete="off"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Webhook URL (isi di dashboard DRP Payment)</span>
+              <div className="flex gap-2">
+                <input className="input min-w-0 flex-1 font-mono text-xs" readOnly value={webhookURL} />
+                <IconButton label="Salin webhook URL" onClick={() => void copyWebhook()}>
+                  <IconCopy />
+                </IconButton>
+              </div>
+              <span className="text-[11px] text-[var(--muted)]">
+                Tempel URL ini ke field webhook merchant di provider. Pastikan domain publik (bukan localhost) agar callback
+                sampai.
+              </span>
+            </label>
           </ProviderBlock>
           <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
             {save.isPending ? "Menyimpan..." : "Simpan"}

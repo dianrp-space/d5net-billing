@@ -4,9 +4,10 @@ import ReactECharts from "echarts-for-react";
 import { api, apiDownload, getToken } from "./api";
 import { useAppDialog } from "./confirm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconTrash, IconWrench } from "./icons";
+import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconQrCode, IconTrash, IconWrench } from "./icons";
 import { ListToolbar, matchesQuery } from "./ListToolbar";
 import { toastError, toastSuccess } from "./swal";
+import { QrisPayDialog, type QrisIntent } from "./QrisPayDialog";
 import {
   Button,
   Card,
@@ -1273,9 +1274,33 @@ export function InvoiceActions({
     onError: (e: Error) => void toastError(e.message || "Gagal bayar"),
   });
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [qrisOpen, setQrisOpen] = useState(false);
+  const [qris, setQris] = useState<QrisIntent | null>(null);
+
+  const qrisPay = useMutation({
+    mutationFn: () =>
+      api<QrisIntent>(`/api/invoices/${id}/checkout`, {
+        method: "POST",
+        body: JSON.stringify({ provider: "drp" }),
+      }),
+    onSuccess: (data) => {
+      setQris(data);
+      setQrisOpen(true);
+    },
+    onError: (e: Error) => void toastError(e.message || "Gagal membuat QRIS"),
+  });
 
   return (
     <span className="flex flex-wrap items-center gap-1.5">
+      {unpaid && (
+        <IconButton
+          label="Bayar QRIS"
+          disabled={qrisPay.isPending}
+          onClick={() => qrisPay.mutate()}
+        >
+          <IconQrCode />
+        </IconButton>
+      )}
       {unpaid && (
         <IconButton
           label="Bayar manual"
@@ -1305,6 +1330,18 @@ export function InvoiceActions({
       >
         <IconDownload />
       </IconButton>
+      <QrisPayDialog
+        open={qrisOpen}
+        invoiceNumber={invoiceNumber}
+        intent={qris}
+        pollPath={`/api/invoices/${id}/payment-intent`}
+        cancelPath={`/api/invoices/${id}/payment-intent/cancel`}
+        onClose={() => setQrisOpen(false)}
+        onPaid={() => {
+          void toastSuccess("Pembayaran QRIS diterima");
+          onDone?.();
+        }}
+      />
     </span>
   );
 }

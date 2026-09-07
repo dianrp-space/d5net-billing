@@ -894,3 +894,53 @@ input, select, textarea, button { font: inherit; }
   background: var(--offline-bg);
   color: var(--offline-fg);
 }
+
+.qris-frame {
+  position: relative;
+  display: inline-flex;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 0.5rem;
+}
+.qris-frame img {
+  position: relative;
+  z-index: 1;
+  display: block;
+  height: 14rem;
+  width: 14rem;
+}
+.qris-frame.is-live::before,
+.qris-frame.is-live::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: calc(var(--radius) + 8px);
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  animation: qris-pulse 2.4s ease-out infinite;
+}
+.qris-frame.is-live::after {
+  animation-delay: 1.2s;
+}
+@keyframes qris-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  70% {
+    transform: scale(1.1);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.1);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qris-frame.is-live::before,
+  .qris-frame.is-live::after {
+    animation: none;
+    opacity: 0.35;
+  }
+}

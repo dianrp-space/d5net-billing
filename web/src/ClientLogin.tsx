@@ -15,8 +15,10 @@ export type ClientPortalData = {
     customer_code?: string;
   }[];
   invoices?: {
+    id: string;
     invoice_number: string;
     total_amount: number;
+    paid_amount?: number;
     status: string;
     due_date?: string;
     customer_name?: string;
@@ -34,6 +36,7 @@ export type ClientPortalData = {
   wallet_balance?: number;
   tenant_slug?: string;
   tenant_name?: string;
+  portal_token?: string;
 };
 
 type PublicTenant = {

@@ -23,28 +23,31 @@ const (
 )
 
 type paymentIntegrationStored struct {
-	MidtransServerKey  string `json:"midtrans_server_key"`
-	XenditSecretKey    string `json:"xendit_secret_key"`
-	TripayPrivateKey   string `json:"tripay_private_key"`
-	TripayMerchantCode string `json:"tripay_merchant_code"`
-	MidtransEnabled    bool   `json:"midtrans_enabled"`
-	XenditEnabled      bool   `json:"xendit_enabled"`
-	TripayEnabled      bool   `json:"tripay_enabled"`
+	APIKey        string `json:"api_key"`
+	WebhookSecret string `json:"webhook_secret"`
+	BaseURL       string `json:"base_url"`
+	Enabled       bool   `json:"enabled"`
 }
 
 type paymentIntegrationView struct {
-	MidtransConfigured bool   `json:"midtrans_configured"`
-	XenditConfigured   bool   `json:"xendit_configured"`
-	TripayConfigured   bool   `json:"tripay_configured"`
-	MidtransEnabled    bool   `json:"midtrans_enabled"`
-	XenditEnabled      bool   `json:"xendit_enabled"`
-	TripayEnabled      bool   `json:"tripay_enabled"`
-	TripayMerchantCode string `json:"tripay_merchant_code"`
-	// Empty on GET; send new value on PUT (blank = keep existing)
-	MidtransServerKey string `json:"midtrans_server_key,omitempty"`
-	XenditSecretKey   string `json:"xendit_secret_key,omitempty"`
-	TripayPrivateKey  string `json:"tripay_private_key,omitempty"`
-	WebhookBaseHint   string `json:"webhook_base_hint"`
+	Configured      bool   `json:"configured"`
+	Enabled         bool   `json:"enabled"`
+	BaseURL         string `json:"base_url"`
+	Method          string `json:"method"`
+	Provider        string `json:"provider"`
+	EnvFallback     bool   `json:"env_fallback"`
+	APIKey          string `json:"api_key,omitempty"`
+	WebhookSecret   string `json:"webhook_secret,omitempty"`
+	WebhookPath     string `json:"webhook_path"`
+	WebhookURL      string `json:"webhook_url"`
+	WebhookBaseHint string `json:"webhook_base_hint"`
+}
+
+type paymentIntegrationPut struct {
+	Enabled       bool   `json:"enabled"`
+	BaseURL       string `json:"base_url,omitempty"`
+	APIKey        string `json:"api_key,omitempty"`
+	WebhookSecret string `json:"webhook_secret,omitempty"`
 }
 
 type messagingIntegrationStored struct {
@@ -71,7 +74,11 @@ func registerIntegrations(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-payment-integration", Method: http.MethodGet, Path: "/api/integrations/payment",
 		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body paymentIntegrationView }, error) {
+	}, func(ctx context.Context, input *struct {
+		Host            string `header:"Host"`
+		XForwardedHost  string `header:"X-Forwarded-Host"`
+		XForwardedProto string `header:"X-Forwarded-Proto"`
+	}) (*struct{ Body paymentIntegrationView }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
@@ -80,14 +87,17 @@ func registerIntegrations(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body paymentIntegrationView }{Body: paymentView(stored)}, nil
+		return &struct{ Body paymentIntegrationView }{Body: paymentView(ctx, d, tid, stored, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
 		OperationID: "put-payment-integration", Method: http.MethodPut, Path: "/api/integrations/payment",
 		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		Body paymentIntegrationView
+		Host            string `header:"Host"`
+		XForwardedHost  string `header:"X-Forwarded-Host"`
+		XForwardedProto string `header:"X-Forwarded-Proto"`
+		Body            paymentIntegrationPut
 	}) (*struct{ Body paymentIntegrationView }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
@@ -97,35 +107,28 @@ func registerIntegrations(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		cur.MidtransEnabled = input.Body.MidtransEnabled
-		cur.XenditEnabled = input.Body.XenditEnabled
-		cur.TripayEnabled = input.Body.TripayEnabled
-		cur.TripayMerchantCode = strings.TrimSpace(input.Body.TripayMerchantCode)
-		if v := strings.TrimSpace(input.Body.MidtransServerKey); v != "" {
-			enc, err := d.Encryptor.EncryptString(v)
-			if err != nil {
-				return nil, httpx.Internal(err)
-			}
-			cur.MidtransServerKey = enc
+		cur.Enabled = input.Body.Enabled
+		if v := strings.TrimSpace(input.Body.BaseURL); v != "" {
+			cur.BaseURL = strings.TrimRight(v, "/")
 		}
-		if v := strings.TrimSpace(input.Body.XenditSecretKey); v != "" {
+		if v := strings.TrimSpace(input.Body.APIKey); v != "" {
 			enc, err := d.Encryptor.EncryptString(v)
 			if err != nil {
 				return nil, httpx.Internal(err)
 			}
-			cur.XenditSecretKey = enc
+			cur.APIKey = enc
 		}
-		if v := strings.TrimSpace(input.Body.TripayPrivateKey); v != "" {
+		if v := strings.TrimSpace(input.Body.WebhookSecret); v != "" {
 			enc, err := d.Encryptor.EncryptString(v)
 			if err != nil {
 				return nil, httpx.Internal(err)
 			}
-			cur.TripayPrivateKey = enc
+			cur.WebhookSecret = enc
 		}
 		if err := d.Store.UpsertSettingJSON(ctx, tid, settingPayment, cur); err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body paymentIntegrationView }{Body: paymentView(cur)}, nil
+		return &struct{ Body paymentIntegrationView }{Body: paymentView(ctx, d, tid, cur, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -250,13 +253,13 @@ func registerIntegrations(api huma.API, d *Deps) {
 }
 
 type waStatusView struct {
-	Enabled      bool   `json:"enabled"`
-	Connected    bool   `json:"connected"`
-	LoggedIn     bool   `json:"logged_in"`
-	JID          string `json:"jid,omitempty"`
-	Phone        string `json:"phone,omitempty"`
-	QRCode       string `json:"qr_code,omitempty"`
-	QREvent      string `json:"qr_event,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	Connected     bool   `json:"connected"`
+	LoggedIn      bool   `json:"logged_in"`
+	JID           string `json:"jid,omitempty"`
+	Phone         string `json:"phone,omitempty"`
+	QRCode        string `json:"qr_code,omitempty"`
+	QREvent       string `json:"qr_event,omitempty"`
 	QRImageBase64 string `json:"qr_image_base64,omitempty"`
 }
 
@@ -299,16 +302,73 @@ func loadMessagingIntegration(ctx context.Context, d *Deps, tid xid.ID) (messagi
 	return s, err
 }
 
-func paymentView(s paymentIntegrationStored) paymentIntegrationView {
+func paymentWebhookPath() string {
+	return "/api/webhooks/payment/" + payment.ProviderDRP
+}
+
+func publicOrigin(proto, forwardedHost, host string) string {
+	h := strings.TrimSpace(forwardedHost)
+	if h == "" {
+		h = strings.TrimSpace(host)
+	}
+	if i := strings.IndexByte(h, ','); i >= 0 {
+		h = strings.TrimSpace(h[:i])
+	}
+	if h == "" {
+		return ""
+	}
+	p := strings.ToLower(strings.TrimSpace(proto))
+	if i := strings.IndexByte(p, ','); i >= 0 {
+		p = strings.TrimSpace(p[:i])
+	}
+	if p != "http" && p != "https" {
+		if strings.Contains(h, "localhost") || strings.HasPrefix(h, "127.") || strings.HasPrefix(h, "192.168.") {
+			p = "http"
+		} else {
+			p = "https"
+		}
+	}
+	return p + "://" + h
+}
+
+func paymentWebhookURL(ctx context.Context, d *Deps, tid xid.ID, proto, forwardedHost, host string) string {
+	path := paymentWebhookPath()
+	if net, err := d.Store.GetIsolirNetworkSettings(ctx, tid); err == nil {
+		if base := strings.TrimRight(strings.TrimSpace(net.PortalBaseURL), "/"); base != "" {
+			return base + path
+		}
+	}
+	if origin := publicOrigin(proto, forwardedHost, host); origin != "" {
+		return origin + path
+	}
+	return path
+}
+
+func paymentView(ctx context.Context, d *Deps, tid xid.ID, s paymentIntegrationStored, proto, forwardedHost, host string) paymentIntegrationView {
+	envKey := ""
+	if d != nil && d.Config != nil {
+		envKey = strings.TrimSpace(d.Config.DRPPaymentAPIKey)
+	}
+	envFallback := s.APIKey == "" && envKey != ""
+	base := strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
+	if base == "" && d != nil && d.Config != nil {
+		base = strings.TrimRight(strings.TrimSpace(d.Config.DRPPaymentBaseURL), "/")
+	}
+	if base == "" {
+		base = payment.DefaultDRPBaseURL
+	}
+	hint := paymentWebhookPath()
+	webhookURL := paymentWebhookURL(ctx, d, tid, proto, forwardedHost, host)
 	return paymentIntegrationView{
-		MidtransConfigured: s.MidtransServerKey != "",
-		XenditConfigured:   s.XenditSecretKey != "",
-		TripayConfigured:   s.TripayPrivateKey != "",
-		MidtransEnabled:    s.MidtransEnabled,
-		XenditEnabled:      s.XenditEnabled,
-		TripayEnabled:      s.TripayEnabled,
-		TripayMerchantCode: s.TripayMerchantCode,
-		WebhookBaseHint:    "/api/webhooks/payment/{midtrans|xendit|tripay}",
+		Configured:      s.APIKey != "" || envKey != "",
+		Enabled:         s.Enabled,
+		BaseURL:         base,
+		Method:          "qris",
+		Provider:        payment.ProviderDRP,
+		EnvFallback:     envFallback,
+		WebhookPath:     hint,
+		WebhookURL:      webhookURL,
+		WebhookBaseHint: webhookURL,
 	}
 }
 
@@ -334,45 +394,57 @@ func decryptSecret(d *Deps, enc string) string {
 	return plain
 }
 
-// resolvePaymentProvider prefers tenant integration keys, then falls back to env registry.
-func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name string) (payment.Provider, error) {
+func normalizePaymentProviderName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		name = "manual"
-	}
-	if name == "manual" {
-		return d.Payments.Get("manual")
-	}
-	cfg, _ := loadPaymentIntegration(ctx, d, tenantID)
 	switch name {
-	case "midtrans":
-		key := decryptSecret(d, cfg.MidtransServerKey)
-		if key != "" {
-			if !cfg.MidtransEnabled {
-				return nil, httpx.BadRequest("midtrans belum diaktifkan di Integrasi")
-			}
-			return &payment.MidtransProvider{ServerKey: key}, nil
-		}
-		return d.Payments.Get("midtrans")
-	case "xendit":
-		key := decryptSecret(d, cfg.XenditSecretKey)
-		if key != "" {
-			if !cfg.XenditEnabled {
-				return nil, httpx.BadRequest("xendit belum diaktifkan di Integrasi")
-			}
-			return &payment.XenditProvider{SecretKey: key}, nil
-		}
-		return d.Payments.Get("xendit")
-	case "tripay":
-		key := decryptSecret(d, cfg.TripayPrivateKey)
-		if key != "" {
-			if !cfg.TripayEnabled {
-				return nil, httpx.BadRequest("tripay belum diaktifkan di Integrasi")
-			}
-			return &payment.TripayProvider{PrivateKey: key, MerchantCode: cfg.TripayMerchantCode}, nil
-		}
-		return d.Payments.Get("tripay")
+	case "", "qris", "drp_payment", "drp-payment", "drppayment":
+		return payment.ProviderDRP
 	default:
+		return name
+	}
+}
+
+func drpCredentials(d *Deps, cfg paymentIntegrationStored) (baseURL, apiKey, webhookSecret string) {
+	apiKey = decryptSecret(d, cfg.APIKey)
+	webhookSecret = decryptSecret(d, cfg.WebhookSecret)
+	baseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	if d != nil && d.Config != nil {
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(d.Config.DRPPaymentAPIKey)
+		}
+		if webhookSecret == "" {
+			webhookSecret = d.Config.DRPPaymentWebhookSecret
+		}
+		if baseURL == "" {
+			baseURL = strings.TrimRight(strings.TrimSpace(d.Config.DRPPaymentBaseURL), "/")
+		}
+	}
+	if baseURL == "" {
+		baseURL = payment.DefaultDRPBaseURL
+	}
+	return baseURL, apiKey, webhookSecret
+}
+
+// resolvePaymentProvider prefers tenant integration keys, then falls back to env.
+func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name string) (payment.Provider, error) {
+	name = normalizePaymentProviderName(name)
+	if name == payment.ProviderManual {
+		return d.Payments.Get(payment.ProviderManual)
+	}
+	if name != payment.ProviderDRP {
 		return nil, fmt.Errorf("unknown payment provider: %s", name)
 	}
+	cfg, _ := loadPaymentIntegration(ctx, d, tenantID)
+	hasTenantCfg := cfg.APIKey != "" || cfg.WebhookSecret != "" || cfg.BaseURL != "" || cfg.Enabled
+	if hasTenantCfg && !cfg.Enabled {
+		return nil, httpx.BadRequest("DRP Payment belum diaktifkan di Integrasi")
+	}
+	baseURL, apiKey, webhookSecret := drpCredentials(d, cfg)
+	if apiKey == "" {
+		if d.Payments != nil && d.Payments.Has(payment.ProviderDRP) {
+			return d.Payments.Get(payment.ProviderDRP)
+		}
+		return nil, httpx.BadRequest("DRP Payment belum dikonfigurasi")
+	}
+	return payment.NewDRPProvider(baseURL, apiKey, webhookSecret), nil
 }

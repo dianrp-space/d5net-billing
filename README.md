@@ -118,7 +118,7 @@ Catatan aaPanel:
 
 Di menu **Integrasi**:
 
-- **Payment Gateway** — Midtrans / Xendit / Tripay (kredensial per tenant)
+- **Payment Gateway** — DRP Payment (QRIS), kredensial per tenant atau env `DRP_PAYMENT_*`
 - **Messaging Gateway** — tab **WhatsApp** (pairing QR via [whatsmeow](https://github.com/tulir/whatsmeow), ke pelanggan) dan tab **Telegram** (bot token + chat ID **ops tenant** saja)
 - **Backup / Restore** — tenant: export/import JSON data tenant; platform/owner: `pg_dump` / `psql` penuh (dir `DB_BACKUP_DIR`)
 

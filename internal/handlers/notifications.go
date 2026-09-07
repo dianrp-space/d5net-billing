@@ -80,13 +80,13 @@ func registerNotifications(api huma.API, d *Deps) {
 		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			Channel      string   `json:"channel"`
-			Audience     string   `json:"audience"` // overdue | active | custom
-			Recipients   []string `json:"recipients,omitempty"`
-			Subject      string   `json:"subject,omitempty"`
-			Body         string   `json:"body"`
-			TemplateEvent string  `json:"template_event,omitempty"`
-			DelaySeconds int      `json:"delay_seconds"`
+			Channel       string   `json:"channel"`
+			Audience      string   `json:"audience"` // overdue | active | custom
+			Recipients    []string `json:"recipients,omitempty"`
+			Subject       string   `json:"subject,omitempty"`
+			Body          string   `json:"body"`
+			TemplateEvent string   `json:"template_event,omitempty"`
+			DelaySeconds  int      `json:"delay_seconds"`
 		}
 	}) (*struct {
 		Body struct {

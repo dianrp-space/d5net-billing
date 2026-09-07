@@ -27,10 +27,30 @@ func TestParseWebhookEventIdempotent(t *testing.T) {
 	}
 }
 
-func TestHMAC512UsesSHA512(t *testing.T) {
-	got := hmacSHA512("secret", []byte("body"))
-	if len(got) != 128 {
-		t.Fatalf("sha512 hex should be 128 chars, got %d", len(got))
+func TestParseDRPWebhookEvent(t *testing.T) {
+	body := map[string]any{
+		"referenceId":   "drp-abc",
+		"transactionId": "tx-9",
+		"status":        "PAID",
+		"amount":        float64(25000),
+		"totalAmount":   float64(25017),
+	}
+	ev, err := ParseWebhookEvent("drp", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.ExternalID != "drp-abc" || ev.Reference != "tx-9" || ev.Amount != 25000 {
+		t.Fatalf("%+v", ev)
+	}
+	if !WebhookIsPaid(ev.Status) {
+		t.Fatal(ev.Status)
+	}
+}
+
+func TestHMAC256HexLength(t *testing.T) {
+	got := hmacSHA256("secret", []byte("body"))
+	if len(got) != 64 {
+		t.Fatalf("sha256 hex should be 64 chars, got %d", len(got))
 	}
 }
 

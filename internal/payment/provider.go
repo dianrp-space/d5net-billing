@@ -4,13 +4,17 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/dianrp/drp-billing/internal/xid"
 )
+
+const ProviderDRP = "drp"
+const ProviderManual = "manual"
 
 type IntentRequest struct {
 	TenantID   xid.ID
@@ -21,10 +25,17 @@ type IntentRequest struct {
 }
 
 type IntentResult struct {
-	ExternalID  string
-	CheckoutURL string
-	QRString    string
-	Status      string
+	ExternalID    string
+	TransactionID string
+	CheckoutURL   string
+	QRString      string
+	QRImageBase64 string
+	Status        string
+	ExpiresAt     *time.Time
+	Amount        int64
+	PayableAmount int64
+	UniqueDigit   int64
+	Fee           int64
 }
 
 type WebhookEvent struct {
@@ -41,14 +52,25 @@ type Provider interface {
 	VerifyWebhook(ctx context.Context, headers map[string]string, body []byte) (*WebhookEvent, error)
 }
 
+// StatusChecker is implemented by providers that can poll remote payment status.
+type StatusChecker interface {
+	CheckStatus(ctx context.Context, referenceID string) (*IntentResult, error)
+}
+
+// Canceller is implemented by providers that can void a pending intent.
+type Canceller interface {
+	Cancel(ctx context.Context, referenceID string) error
+}
+
 type ManualProvider struct{}
 
-func (m *ManualProvider) Name() string { return "manual" }
+func (m *ManualProvider) Name() string { return ProviderManual }
 
 func (m *ManualProvider) CreateIntent(ctx context.Context, req IntentRequest) (*IntentResult, error) {
 	return &IntentResult{
 		ExternalID: fmt.Sprintf("MAN-%s-%s", req.TenantID, req.InvoiceID),
 		Status:     "pending",
+		Amount:     req.Amount,
 	}, nil
 }
 
@@ -56,102 +78,23 @@ func (m *ManualProvider) VerifyWebhook(ctx context.Context, headers map[string]s
 	return nil, fmt.Errorf("manual provider has no webhook")
 }
 
-type MidtransProvider struct {
-	ServerKey string
-	IsProd    bool
-}
-
-func (p *MidtransProvider) Name() string { return "midtrans" }
-
-func (p *MidtransProvider) CreateIntent(ctx context.Context, req IntentRequest) (*IntentResult, error) {
-	extID := fmt.Sprintf("MT-%s-%s", req.TenantID, req.InvoiceID)
-	return &IntentResult{
-		ExternalID:  extID,
-		CheckoutURL: fmt.Sprintf("https://app.midtrans.com/snap/v1/transactions/%s", extID),
-		Status:      "pending",
-	}, nil
-}
-
-func (p *MidtransProvider) VerifyWebhook(ctx context.Context, headers map[string]string, body []byte) (*WebhookEvent, error) {
-	sig := headerGet(headers, "X-Signature")
-	expected := hmacSHA512(p.ServerKey, body)
-	if sig != expected {
-		return nil, fmt.Errorf("invalid midtrans signature")
-	}
-	return parseWebhookBody("midtrans", body)
-}
-
-type XenditProvider struct {
-	SecretKey string
-}
-
-func (p *XenditProvider) Name() string { return "xendit" }
-
-func (p *XenditProvider) CreateIntent(ctx context.Context, req IntentRequest) (*IntentResult, error) {
-	extID := fmt.Sprintf("XD-%s-%s", req.TenantID, req.InvoiceID)
-	return &IntentResult{
-		ExternalID:  extID,
-		CheckoutURL: fmt.Sprintf("https://checkout.xendit.co/web/%s", extID),
-		Status:      "pending",
-	}, nil
-}
-
-func (p *XenditProvider) VerifyWebhook(ctx context.Context, headers map[string]string, body []byte) (*WebhookEvent, error) {
-	token := headerGet(headers, "X-CALLBACK-TOKEN")
-	if token != p.SecretKey {
-		return nil, fmt.Errorf("invalid xendit token")
-	}
-	return parseWebhookBody("xendit", body)
-}
-
-type TripayProvider struct {
-	PrivateKey   string
-	MerchantCode string
-}
-
-func (p *TripayProvider) Name() string { return "tripay" }
-
-func (p *TripayProvider) CreateIntent(ctx context.Context, req IntentRequest) (*IntentResult, error) {
-	extID := fmt.Sprintf("TP-%s-%s", req.TenantID, req.InvoiceID)
-	return &IntentResult{
-		ExternalID:  extID,
-		CheckoutURL: fmt.Sprintf("https://tripay.co.id/checkout/%s", extID),
-		Status:      "pending",
-	}, nil
-}
-
-func (p *TripayProvider) VerifyWebhook(ctx context.Context, headers map[string]string, body []byte) (*WebhookEvent, error) {
-	sig := headerGet(headers, "X-Callback-Signature")
-	expected := hmacSHA256(p.PrivateKey, body)
-	if sig != expected {
-		return nil, fmt.Errorf("invalid tripay signature")
-	}
-	return parseWebhookBody("tripay", body)
-}
-
 type Registry struct {
 	providers map[string]Provider
 }
 
-// NewRegistry registers Manual always, and Midtrans/Xendit/Tripay when their keys are non-empty.
-func NewRegistry(midtransKey, xenditKey, tripayKey string) *Registry {
+// NewRegistry always registers Manual. DRP Payment is registered when apiKey is non-empty.
+func NewRegistry(drpAPIKey, drpWebhookSecret, drpBaseURL string) *Registry {
 	r := &Registry{providers: make(map[string]Provider)}
 	r.Register(&ManualProvider{})
-	if midtransKey != "" {
-		r.Register(&MidtransProvider{ServerKey: midtransKey})
-	}
-	if xenditKey != "" {
-		r.Register(&XenditProvider{SecretKey: xenditKey})
-	}
-	if tripayKey != "" {
-		r.Register(&TripayProvider{PrivateKey: tripayKey})
+	if strings.TrimSpace(drpAPIKey) != "" {
+		r.Register(NewDRPProvider(drpBaseURL, drpAPIKey, drpWebhookSecret))
 	}
 	return r
 }
 
 // NewRegistryFromEnv is an alias for NewRegistry using gateway keys from config/env.
-func NewRegistryFromEnv(midtransKey, xenditKey, tripayKey string) *Registry {
-	return NewRegistry(midtransKey, xenditKey, tripayKey)
+func NewRegistryFromEnv(drpAPIKey, drpWebhookSecret, drpBaseURL string) *Registry {
+	return NewRegistry(drpAPIKey, drpWebhookSecret, drpBaseURL)
 }
 
 func (r *Registry) Register(p Provider) {
@@ -188,7 +131,6 @@ func headerGet(headers map[string]string, key string) string {
 	if v, ok := headers[key]; ok && v != "" {
 		return v
 	}
-	// case-insensitive fallback
 	for k, v := range headers {
 		if equalFoldASCII(k, key) {
 			return v
@@ -222,8 +164,11 @@ func hmacSHA256(key string, data []byte) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-func hmacSHA512(key string, data []byte) string {
-	m := hmac.New(sha512.New, []byte(key))
-	m.Write(data)
-	return hex.EncodeToString(m.Sum(nil))
+func bearerToken(headers map[string]string) string {
+	raw := headerGet(headers, "Authorization")
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(strings.ToLower(raw), "bearer ") {
+		return strings.TrimSpace(raw[7:])
+	}
+	return raw
 }

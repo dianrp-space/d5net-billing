@@ -103,8 +103,10 @@ export async function api<T>(
   const doFetch = async () => {
     const headers = new Headers(init.headers);
     if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    const token = platform ? getPlatformToken() : getToken();
-    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (!headers.has("Authorization")) {
+      const token = platform ? getPlatformToken() : getToken();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+    }
     return fetch(path, { ...init, headers, credentials: "include" });
   };
 

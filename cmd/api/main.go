@@ -69,7 +69,7 @@ func main() {
 
 	billingEngine := billing.New(st)
 	notifySvc := notify.NewService(st).WithDecryptor(encryptor.DecryptString).WithWhatsApp(waMgr)
-	payments := payment.NewRegistryFromEnv(cfg.MidtransServerKey, cfg.XenditSecretKey, cfg.TripayPrivateKey)
+	payments := payment.NewRegistryFromEnv(cfg.DRPPaymentAPIKey, cfg.DRPPaymentWebhookSecret, cfg.DRPPaymentBaseURL)
 	provReg := provisioner.NewRegistry(st, encryptor)
 
 	srv := httpx.NewServer(cfg.CORSOrigins, tenant.Middleware(tokens), requireAPIAuth)

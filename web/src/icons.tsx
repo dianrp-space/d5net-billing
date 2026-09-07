@@ -297,6 +297,19 @@ export function IconBanknote(props: IconProps) {
   );
 }
 
+export function IconQrCode(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <path d="M14 14h3v3" />
+      <path d="M21 14v7h-7" />
+      <path d="M14 21h3" />
+    </svg>
+  );
+}
+
 export function IconUpload(props: IconProps) {
   return (
     <svg {...base(props)}>
@@ -432,6 +445,15 @@ export function IconShieldCheck(props: IconProps) {
     <svg {...base(props)}>
       <path d="M12 3 5 6v6c0 5 3.5 7.5 7 9 3.5-1.5 7-4 7-9V6Z" />
       <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}
+
+export function IconCopy(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="8" y="8" width="12" height="12" rx="2" />
+      <path d="M4 16V6a2 2 0 0 1 2-2h10" />
     </svg>
   );
 }

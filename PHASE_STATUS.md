@@ -8,7 +8,7 @@ Semua fase **sudah diisi implementasi yang bisa dijalankan** (bukan lagi kerangk
 | UI shell | **siap pakai** | Tailwind v4 + **shadcn/ui (Radix)** (`button`/`input`/`dialog`/`alert-dialog`/`select`/`table`/…), `AppDialogProvider` (confirm/alert ganti `window.confirm`), tema NeedMCP `natural-tone`, wrapper `web/src/ui.tsx` |
 | 2 RouterOS | **siap pakai** | CRUD+AES+test, PPP/hotspot/DHCP/queue, circuit+dial cache, audit, **IP Pool** API+UI (CRUD + assignment, relasi router) |
 | 3 Billing | **siap pakai** | prorata, denda, resume saat bayar, isolir+address-list, PDF, portal tagihan+riwayat, usage API |
-| 4 Payment/notif | **siap pakai** | Manual+Midtrans/Xendit/Tripay (HMAC SHA-512), webhook bayar→resume+journal, template DB, dunning H-7..H+3 idempotent |
+| 4 Payment/notif | **siap pakai** | Manual + DRP Payment QRIS (HMAC/JWT webhook), webhook bayar→resume+journal, template DB, dunning H-7..H+3 idempotent |
 | 5 Monitoring | **siap pakai** | poller resource CPU/mem, session, alert ODP, SSE `?tenant_id=`, panel alert dashboard |
 | 6 Operasional | **siap pakai** | voucher+QR, tiket, WO+check-in, ODP+peta OSM, lead pipeline, portal teknisi |
 | 7 Akunting | **siap pakai** | COA seed, journal on pay, expense, P&L, cashflow, churn, CSV/XLSX, reseller, email laporan tgl 1 jam 8 |

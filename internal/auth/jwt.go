@@ -89,3 +89,25 @@ func (s *TokenService) ParseToken(tokenStr string) (*Claims, error) {
 	}
 	return claims, nil
 }
+
+func (s *TokenService) CreatePortalToken(tenantID uuid.UUID, phone string) (string, error) {
+	ttl := s.accessTTL
+	if ttl < 8*time.Hour {
+		ttl = 8 * time.Hour
+	}
+	exp := time.Now().Add(ttl)
+	claims := Claims{
+		TenantID: tenantID.String(),
+		Email:    phone,
+		Role:     "portal",
+		Type:     "portal",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(exp),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   phone,
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString(s.secret)
+	return signed, err
+}

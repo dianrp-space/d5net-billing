@@ -13,30 +13,30 @@ import (
 )
 
 type Lead struct {
-	ID            xid.ID     `json:"id"`
-	TenantID      xid.ID     `json:"tenant_id"`
-	FullName      string     `json:"full_name"`
-	Phone         string     `json:"phone"`
-	Email         *string    `json:"email,omitempty"`
-	Address       *string    `json:"address,omitempty"`
-	Latitude      *float64   `json:"latitude,omitempty"`
-	Longitude     *float64   `json:"longitude,omitempty"`
-	ODPID         *xid.ID    `json:"odp_id,omitempty"`
-	ODPCode       string     `json:"odp_code,omitempty"`
-	ODPName       string     `json:"odp_name,omitempty"`
-	Status        string     `json:"status"`
-	Notes         *string    `json:"notes,omitempty"`
-	IdentityType  *string    `json:"identity_type,omitempty"`
-	IdentityNumber *string   `json:"identity_number,omitempty"`
-	ResellerID    *xid.ID    `json:"reseller_id,omitempty"`
-	ResellerName  string     `json:"reseller_name,omitempty"`
-	SalesUserID     *xid.ID    `json:"sales_user_id,omitempty"`
-	SalesUserName   string     `json:"sales_user_name,omitempty"`
-	AssignedTo      *xid.ID    `json:"assigned_to,omitempty"`
-	AssignedToName  string     `json:"assigned_to_name,omitempty"`
-	CustomerID      *xid.ID    `json:"customer_id,omitempty"`
-	ConvertedAt     *time.Time `json:"converted_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID             xid.ID     `json:"id"`
+	TenantID       xid.ID     `json:"tenant_id"`
+	FullName       string     `json:"full_name"`
+	Phone          string     `json:"phone"`
+	Email          *string    `json:"email,omitempty"`
+	Address        *string    `json:"address,omitempty"`
+	Latitude       *float64   `json:"latitude,omitempty"`
+	Longitude      *float64   `json:"longitude,omitempty"`
+	ODPID          *xid.ID    `json:"odp_id,omitempty"`
+	ODPCode        string     `json:"odp_code,omitempty"`
+	ODPName        string     `json:"odp_name,omitempty"`
+	Status         string     `json:"status"`
+	Notes          *string    `json:"notes,omitempty"`
+	IdentityType   *string    `json:"identity_type,omitempty"`
+	IdentityNumber *string    `json:"identity_number,omitempty"`
+	ResellerID     *xid.ID    `json:"reseller_id,omitempty"`
+	ResellerName   string     `json:"reseller_name,omitempty"`
+	SalesUserID    *xid.ID    `json:"sales_user_id,omitempty"`
+	SalesUserName  string     `json:"sales_user_name,omitempty"`
+	AssignedTo     *xid.ID    `json:"assigned_to,omitempty"`
+	AssignedToName string     `json:"assigned_to_name,omitempty"`
+	CustomerID     *xid.ID    `json:"customer_id,omitempty"`
+	ConvertedAt    *time.Time `json:"converted_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 var leadStatuses = map[string]bool{
@@ -563,35 +563,143 @@ func (s *Store) ListAlerts(ctx context.Context, tenantID xid.ID, limit int) ([]A
 }
 
 type PaymentIntent struct {
-	ID          xid.ID    `json:"id"`
-	TenantID    xid.ID    `json:"tenant_id"`
-	CustomerID  xid.ID    `json:"customer_id"`
-	InvoiceID   *xid.ID   `json:"invoice_id,omitempty"`
-	Provider    string    `json:"provider"`
-	ExternalID  string    `json:"external_id"`
-	Amount      int64     `json:"amount"`
-	Status      string    `json:"status"`
-	CheckoutURL string    `json:"checkout_url,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            xid.ID         `json:"id"`
+	TenantID      xid.ID         `json:"tenant_id"`
+	CustomerID    xid.ID         `json:"customer_id"`
+	InvoiceID     *xid.ID        `json:"invoice_id,omitempty"`
+	Provider      string         `json:"provider"`
+	ExternalID    string         `json:"external_id"`
+	Amount        int64          `json:"amount"`
+	Status        string         `json:"status"`
+	CheckoutURL   string         `json:"checkout_url,omitempty"`
+	ExpiresAt     *time.Time     `json:"expires_at,omitempty"`
+	QRString      string         `json:"qr_string,omitempty"`
+	QRImageBase64 string         `json:"qr_image_base64,omitempty"`
+	PayableAmount int64          `json:"payable_amount,omitempty"`
+	UniqueDigit   int64          `json:"unique_digit,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
-func (s *Store) InsertPaymentIntent(ctx context.Context, tenantID xid.ID, customerID xid.ID, invoiceID *xid.ID, provider, externalID string, amount int64, status, checkoutURL string) (*PaymentIntent, error) {
-	if status == "" {
-		status = "pending"
+func hydratePaymentIntentQR(pi *PaymentIntent) {
+	if pi == nil || pi.Metadata == nil {
+		return
 	}
+	if s, ok := pi.Metadata["qr_string"].(string); ok {
+		pi.QRString = s
+	}
+	if s, ok := pi.Metadata["qr_image_base64"].(string); ok {
+		pi.QRImageBase64 = s
+	}
+	if n := jsonNumber(pi.Metadata["payable_amount"]); n != 0 {
+		pi.PayableAmount = n
+	}
+	if n := jsonNumber(pi.Metadata["unique_digit"]); n != 0 {
+		pi.UniqueDigit = n
+	}
+}
+
+func jsonNumber(v any) int64 {
+	switch t := v.(type) {
+	case int64:
+		return t
+	case int:
+		return int64(t)
+	case float64:
+		return int64(t)
+	case json.Number:
+		n, _ := t.Int64()
+		return n
+	}
+	return 0
+}
+
+func scanPaymentIntent(row interface {
+	Scan(dest ...any) error
+}) (*PaymentIntent, error) {
 	var pi PaymentIntent
-	err := s.Pool.QueryRow(ctx, `
-		INSERT INTO payment_intents (tenant_id, customer_id, invoice_id, provider, external_id, amount, status, checkout_url)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,'')) RETURNING id, tenant_id, customer_id, invoice_id, provider,
-			COALESCE(external_id,''), amount, status, COALESCE(checkout_url,''), created_at, updated_at
-	`, tenantID, customerID, invoiceID, provider, externalID, amount, status, checkoutURL).
-		Scan(&pi.ID, &pi.TenantID, &pi.CustomerID, &pi.InvoiceID, &pi.Provider, &pi.ExternalID,
-			&pi.Amount, &pi.Status, &pi.CheckoutURL, &pi.CreatedAt, &pi.UpdatedAt)
+	var meta []byte
+	err := row.Scan(&pi.ID, &pi.TenantID, &pi.CustomerID, &pi.InvoiceID, &pi.Provider, &pi.ExternalID,
+		&pi.Amount, &pi.Status, &pi.CheckoutURL, &pi.ExpiresAt, &meta, &pi.CreatedAt, &pi.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
+	if len(meta) > 0 {
+		_ = json.Unmarshal(meta, &pi.Metadata)
+	}
+	hydratePaymentIntentQR(&pi)
 	return &pi, nil
+}
+
+func paymentIntentSelectCols() string {
+	return `id, tenant_id, customer_id, invoice_id, provider, COALESCE(external_id,''), amount, status,
+		COALESCE(checkout_url,''), expires_at, COALESCE(metadata,'{}'::jsonb), created_at, updated_at`
+}
+
+func (s *Store) InsertPaymentIntent(ctx context.Context, pi *PaymentIntent) (*PaymentIntent, error) {
+	if pi.Status == "" {
+		pi.Status = "pending"
+	}
+	pi.Status = strings.ToLower(strings.TrimSpace(pi.Status))
+	if pi.Metadata == nil {
+		pi.Metadata = map[string]any{}
+	}
+	if pi.QRString != "" {
+		pi.Metadata["qr_string"] = pi.QRString
+	}
+	if pi.QRImageBase64 != "" {
+		pi.Metadata["qr_image_base64"] = pi.QRImageBase64
+	}
+	if pi.PayableAmount != 0 {
+		pi.Metadata["payable_amount"] = pi.PayableAmount
+	}
+	if pi.UniqueDigit != 0 {
+		pi.Metadata["unique_digit"] = pi.UniqueDigit
+	}
+	meta, err := json.Marshal(pi.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	row := s.Pool.QueryRow(ctx, `
+		INSERT INTO payment_intents (tenant_id, customer_id, invoice_id, provider, external_id, amount, status, checkout_url, expires_at, metadata)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),$9,$10)
+		RETURNING `+paymentIntentSelectCols(),
+		pi.TenantID, pi.CustomerID, pi.InvoiceID, pi.Provider, pi.ExternalID, pi.Amount, pi.Status, pi.CheckoutURL, pi.ExpiresAt, meta)
+	out, err := scanPaymentIntent(row)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) GetLatestPaymentIntentForInvoice(ctx context.Context, tenantID, invoiceID xid.ID, provider string) (*PaymentIntent, error) {
+	row := s.Pool.QueryRow(ctx, `
+		SELECT `+paymentIntentSelectCols()+`
+		FROM payment_intents
+		WHERE tenant_id=$1 AND invoice_id=$2 AND provider=$3
+		ORDER BY created_at DESC LIMIT 1
+	`, tenantID, invoiceID, provider)
+	pi, err := scanPaymentIntent(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return pi, err
+}
+
+func (s *Store) GetLatestPendingPaymentIntent(ctx context.Context, tenantID, invoiceID xid.ID, provider string) (*PaymentIntent, error) {
+	row := s.Pool.QueryRow(ctx, `
+		SELECT `+paymentIntentSelectCols()+`
+		FROM payment_intents
+		WHERE tenant_id=$1 AND invoice_id=$2 AND provider=$3 AND status='pending'
+		  AND (expires_at IS NULL OR expires_at > NOW())
+		ORDER BY created_at DESC LIMIT 1
+	`, tenantID, invoiceID, provider)
+	pi, err := scanPaymentIntent(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return pi, err
 }
 
 // ClaimJob inserts a unique job_runs row; returns true if this caller claimed the job.

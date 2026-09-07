@@ -16,7 +16,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/dianrp/drp-billing/internal/httpx"
 	"github.com/dianrp/drp-billing/internal/invoice"
-	"github.com/dianrp/drp-billing/internal/payment"
 	"github.com/dianrp/drp-billing/internal/provision"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/xid"
@@ -691,9 +690,9 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			TenantID: tid, FullName: fullName, Phone: phone,
 			Email: emptyToNil(input.Body.Email), Address: emptyToNil(input.Body.Address),
 			Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
-			IdentityType: normalizeIdentityType(input.Body.IdentityType),
+			IdentityType:   normalizeIdentityType(input.Body.IdentityType),
 			IdentityNumber: emptyToNil(input.Body.IdentityNumber),
-			ODPID: input.Body.ODPID, Status: status, Notes: emptyToNil(input.Body.Notes),
+			ODPID:          input.Body.ODPID, Status: status, Notes: emptyToNil(input.Body.Notes),
 			ResellerID: rID, SalesUserID: sID, AssignedTo: input.Body.AssignedTo,
 		}
 		if err := d.Store.CreateLead(ctx, &l); err != nil {
@@ -746,9 +745,9 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			ID: input.ID, TenantID: tid, FullName: fullName, Phone: phone,
 			Email: emptyToNil(input.Body.Email), Address: emptyToNil(input.Body.Address),
 			Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
-			IdentityType: normalizeIdentityType(input.Body.IdentityType),
+			IdentityType:   normalizeIdentityType(input.Body.IdentityType),
 			IdentityNumber: emptyToNil(input.Body.IdentityNumber),
-			ODPID: input.Body.ODPID, Status: status, Notes: emptyToNil(input.Body.Notes),
+			ODPID:          input.Body.ODPID, Status: status, Notes: emptyToNil(input.Body.Notes),
 			ResellerID: rID, SalesUserID: sID, AssignedTo: input.Body.AssignedTo,
 		}
 		if err := d.Store.UpdateLead(ctx, l); err != nil {
@@ -1394,28 +1393,51 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.NotFound("invoice not found")
 		}
-		providerName := input.Body.Provider
-		if providerName == "" {
-			providerName = "manual"
-		}
-		prov, err := resolvePaymentProvider(ctx, d, tid, providerName)
+		pi, err := checkoutInvoice(ctx, d, tid, inv, input.Body.Provider, input.Body.ReturnURL)
 		if err != nil {
-			return nil, httpx.BadRequest(err.Error())
+			return nil, err
 		}
-		amount := inv.TotalAmount - inv.PaidAmount
-		if amount < 0 {
-			amount = 0
-		}
-		res, err := prov.CreateIntent(ctx, payment.IntentRequest{
-			TenantID: tid, CustomerID: inv.CustomerID, InvoiceID: inv.ID,
-			Amount: amount, ReturnURL: input.Body.ReturnURL,
-		})
+		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "invoice-payment-intent", Method: http.MethodGet, Path: "/api/invoices/{id}/payment-intent",
+		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body store.PaymentIntent }, error) {
+		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
-			return nil, httpx.Internal(err)
+			return nil, err
 		}
-		pi, err := d.Store.InsertPaymentIntent(ctx, tid, inv.CustomerID, &inv.ID, providerName, res.ExternalID, amount, res.Status, res.CheckoutURL)
+		inv, _, err := d.Store.GetInvoice(ctx, tid, input.ID)
 		if err != nil {
-			return nil, httpx.Internal(err)
+			return nil, httpx.NotFound("invoice not found")
+		}
+		pi, err := latestInvoicePaymentIntent(ctx, d, tid, inv)
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "invoice-payment-intent-cancel", Method: http.MethodPost, Path: "/api/invoices/{id}/payment-intent/cancel",
+		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body store.PaymentIntent }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		inv, _, err := d.Store.GetInvoice(ctx, tid, input.ID)
+		if err != nil {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		pi, err := cancelInvoicePaymentIntent(ctx, d, tid, inv)
+		if err != nil {
+			return nil, err
 		}
 		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
 	})

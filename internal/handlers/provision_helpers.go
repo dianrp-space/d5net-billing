@@ -392,6 +392,10 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 	if amount <= 0 {
 		amount = pi.Amount
 	}
+	if invRemaining := pi.Amount; invRemaining > 0 && amount > invRemaining {
+		// Unique-digit QRIS may be a few hundred rupiah above the invoice remainder.
+		amount = invRemaining
+	}
 
 	var invoiceID *xid.ID
 	var inv *store.Invoice
@@ -418,7 +422,7 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 	if err := d.Store.RecordPayment(ctx, p); err != nil {
 		return err
 	}
-	_ = d.Store.UpdatePaymentIntentStatus(ctx, event.ExternalID, "paid")
+	_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, "paid")
 
 	if inv != nil && inv.SubscriptionID != nil {
 		stillDue, err := d.Store.SubscriptionHasPastDueUnpaid(ctx, pi.TenantID, *inv.SubscriptionID)
