@@ -121,6 +121,10 @@ func Unauthorized(msg string) error {
 	return huma.Error401Unauthorized(msg)
 }
 
+func Forbidden(msg string) error {
+	return huma.Error403Forbidden(msg)
+}
+
 func BadRequest(msg string) error {
 	return huma.Error400BadRequest(msg)
 }

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import { LayoutGrid, List } from "lucide-react";
+import { api, apiUpload } from "./api";
 import {
   AttributionSelects,
   CommissionBasisSelect,
@@ -20,7 +21,8 @@ import {
   KanbanOverlay,
   type KanbanCommitMeta,
 } from "./components/ui/kanban";
-import { IconPencil, IconTrash, IconUserCheck } from "./icons";
+import { IconImage, IconPencil, IconTrash, IconUserCheck, IconWrench } from "./icons";
+import { canDispatchOps, type MePermissions } from "./permissions";
 import { toastError, toastSuccess } from "./swal";
 import {
   Button,
@@ -28,12 +30,14 @@ import {
   IconButton,
   Input,
   Label,
+  SearchableSelect,
   Section,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Table,
 } from "./ui";
 
 type LeadRow = {
@@ -51,8 +55,20 @@ type LeadRow = {
   reseller_name?: string;
   sales_user_id?: string | null;
   sales_user_name?: string;
+  assigned_to?: string | null;
+  assigned_to_name?: string;
   customer_id?: string | null;
   created_at?: string;
+};
+
+type LeadComment = {
+  id: string;
+  lead_id: string;
+  user_id?: string | null;
+  user_name?: string;
+  message: string;
+  image_urls: string[];
+  created_at: string;
 };
 
 type ClusterOpt = { id: string; name: string; code: string };
@@ -66,6 +82,7 @@ type LeadForm = {
   notes: string;
   reseller_id: string;
   sales_user_id: string;
+  assigned_to: string;
 };
 
 const emptyForm: LeadForm = {
@@ -77,18 +94,25 @@ const emptyForm: LeadForm = {
   notes: "",
   reseller_id: "",
   sales_user_id: "",
+  assigned_to: "",
 };
 
 const COLUMNS: { id: string; label: string; hint?: string }[] = [
   { id: "new", label: "Baru" },
-  { id: "contacted", label: "Dihubungi" },
+  { id: "contacted", label: "Dihubungi", hint: "Assign teknisi" },
   { id: "survey", label: "Survey" },
-  { id: "qualified", label: "Siap pasang" },
+  { id: "qualified", label: "Proses pasang" },
   { id: "converted", label: "Converted", hint: "Drop untuk convert" },
   { id: "lost", label: "Lost" },
 ];
 
 const COLUMN_IDS = COLUMNS.map((c) => c.id);
+
+const ASSIGN_STATUSES = new Set(["contacted", "survey", "qualified"]);
+
+function needsAssignee(status: string) {
+  return ASSIGN_STATUSES.has(status);
+}
 
 function emptyBoard(): Record<string, LeadRow[]> {
   return Object.fromEntries(COLUMN_IDS.map((id) => [id, []]));
@@ -109,19 +133,49 @@ function attributionLabel(l: LeadRow) {
   return "";
 }
 
+function formatWhen(iso?: string | null) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("id-ID");
+  } catch {
+    return iso;
+  }
+}
+
+function statusLabel(status: string) {
+  return COLUMNS.find((c) => c.id === status)?.label || status;
+}
+
+const LEADS_VIEW_KEY = "drp_leads_view";
+
 function LeadCardBody({
   lead,
   overlay,
   actions,
+  onOpen,
 }: {
   lead: LeadRow;
   overlay?: boolean;
   actions?: ReactNode;
+  onOpen?: () => void;
 }) {
   const attr = attributionLabel(lead);
   return (
     <Card
-      className={`shadow-none ${
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      onClick={onOpen}
+      onKeyDown={
+        onOpen
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpen();
+              }
+            }
+          : undefined
+      }
+      className={`shadow-none ${onOpen ? "cursor-pointer" : ""} ${
         overlay
           ? "rotate-1 scale-[1.02] shadow-[var(--shadow-md)] ring-1 ring-[var(--accent)]"
           : lead.status !== "converted"
@@ -136,6 +190,9 @@ function LeadCardBody({
       <CardContent className="space-y-2 p-3 pt-1">
         {lead.address ? <p className="line-clamp-2 text-xs text-[var(--muted)]">{lead.address}</p> : null}
         {attr ? <Badge variant="default">{attr}</Badge> : null}
+        {lead.assigned_to_name ? (
+          <Badge variant="outline">Teknisi: {lead.assigned_to_name}</Badge>
+        ) : null}
         {actions ? (
           <div
             className="flex flex-wrap items-center gap-1"
@@ -154,6 +211,12 @@ export function LeadsPage() {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
 
+  const meQ = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api<MePermissions & { user_id: string }>("/api/me"),
+  });
+  const canDispatch = canDispatchOps(meQ.data?.permissions);
+
   const q = useQuery({
     queryKey: ["leads", "kanban"],
     queryFn: () => api<{ data: LeadRow[]; total: number }>("/api/leads?limit=200&offset=0"),
@@ -161,14 +224,17 @@ export function LeadsPage() {
   const clustersQ = useQuery({
     queryKey: ["clusters"],
     queryFn: () => api<ClusterOpt[]>("/api/clusters"),
+    enabled: canDispatch,
   });
   const resellersQ = useQuery({
     queryKey: ["resellers"],
     queryFn: () => api<ResellerOpt[]>("/api/resellers"),
+    enabled: canDispatch,
   });
   const usersQ = useQuery({
     queryKey: ["tenant-users"],
-    queryFn: () => api<StaffOpt[]>("/api/settings/users"),
+    queryFn: () => api<StaffOpt[]>("/api/users/options"),
+    enabled: canDispatch,
   });
 
   const [columns, setColumns] = useState<Record<string, LeadRow[]>>(emptyBoard);
@@ -181,15 +247,63 @@ export function LeadsPage() {
   const [convertReseller, setConvertReseller] = useState("");
   const [convertStaff, setConvertStaff] = useState("");
   const [convertBasis, setConvertBasis] = useState("new_customer_flat");
+  const [createInstallTicket, setCreateInstallTicket] = useState(true);
+  const [installAssignee, setInstallAssignee] = useState("");
+  const [assignLead, setAssignLead] = useState<LeadRow | null>(null);
+  const [assignUser, setAssignUser] = useState("");
+  const [assignTargetStatus, setAssignTargetStatus] = useState("contacted");
+  const [view, setView] = useState<"kanban" | "list">(() => {
+    try {
+      const v = localStorage.getItem(LEADS_VIEW_KEY);
+      return v === "list" ? "list" : "kanban";
+    } catch {
+      return "kanban";
+    }
+  });
+  const [listStatus, setListStatus] = useState("");
+  const [detail, setDetail] = useState<LeadRow | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photoRef = useRef<HTMLInputElement>(null);
+
+  function setViewMode(next: "kanban" | "list") {
+    setView(next);
+    try {
+      localStorage.setItem(LEADS_VIEW_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
 
   const clusters = Array.isArray(clustersQ.data) ? clustersQ.data : [];
   const resellers = Array.isArray(resellersQ.data) ? resellersQ.data : [];
   const users = Array.isArray(usersQ.data) ? usersQ.data : [];
+  const assignCandidates = (() => {
+    const active = users.filter((u) => u.is_active);
+    const techs = active.filter((u) => u.role_slug === "teknisi");
+    return techs.length > 0 ? techs : active;
+  })();
   const list = q.data?.data ?? [];
+  const filteredList = listStatus ? list.filter((l) => l.status === listStatus) : list;
+
+  const commentsQ = useQuery({
+    queryKey: ["lead-comments", detail?.id],
+    queryFn: () => api<LeadComment[]>(`/api/leads/${detail!.id}/comments`),
+    enabled: Boolean(detail?.id),
+  });
+  const comments = Array.isArray(commentsQ.data) ? commentsQ.data : [];
 
   useEffect(() => {
     setColumns(boardFromList(list));
   }, [list]);
+
+  useEffect(() => {
+    if (!detail) {
+      setCommentText("");
+      setPendingImages([]);
+    }
+  }, [detail]);
 
   const leadById = useMemo(() => {
     const map = new Map<string, LeadRow>();
@@ -198,6 +312,12 @@ export function LeadsPage() {
     }
     return map;
   }, [columns]);
+
+  function openDetail(l: LeadRow) {
+    setDetail(l);
+    setCommentText("");
+    setPendingImages([]);
+  }
 
   function openCreate() {
     setEditId(null);
@@ -217,6 +337,7 @@ export function LeadsPage() {
       notes: l.notes || "",
       reseller_id: l.reseller_id || "",
       sales_user_id: l.sales_user_id || "",
+      assigned_to: l.assigned_to || "",
     });
     setFormErr("");
     setOpen(true);
@@ -227,16 +348,41 @@ export function LeadsPage() {
     setFormErr("");
     setForm(emptyForm);
   }
+  function openAssign(l: LeadRow, targetStatus = "contacted") {
+    setAssignLead(l);
+    setAssignUser(l.assigned_to || "");
+    setAssignTargetStatus(targetStatus);
+  }
+  function closeAssign() {
+    setAssignLead(null);
+    setAssignUser("");
+    setAssignTargetStatus("contacted");
+  }
   function openConvert(l: LeadRow) {
     setConvertLead(l);
     setConvertCluster("");
     setConvertReseller(l.reseller_id || "");
     setConvertStaff(l.sales_user_id || "");
     setConvertBasis("new_customer_flat");
+    setCreateInstallTicket(true);
+    setInstallAssignee(l.assigned_to || "");
+  }
+
+  function resetConvertForm() {
+    setConvertLead(null);
+    setConvertCluster("");
+    setConvertReseller("");
+    setConvertStaff("");
+    setConvertBasis("new_customer_flat");
+    setCreateInstallTicket(true);
+    setInstallAssignee("");
   }
 
   const save = useMutation({
     mutationFn: () => {
+      if (needsAssignee(form.status) && !form.assigned_to) {
+        throw new Error("Pilih teknisi mulai status dihubungi");
+      }
       const body = {
         full_name: form.full_name.trim(),
         phone: form.phone.trim(),
@@ -246,6 +392,7 @@ export function LeadsPage() {
         notes: form.notes.trim() || undefined,
         reseller_id: form.reseller_id || undefined,
         sales_user_id: form.sales_user_id || undefined,
+        assigned_to: needsAssignee(form.status) ? form.assigned_to || undefined : undefined,
       };
       if (editId) return api(`/api/leads/${editId}`, { method: "PUT", body: JSON.stringify(body) });
       return api("/api/leads", { method: "POST", body: JSON.stringify(body) });
@@ -272,10 +419,15 @@ export function LeadsPage() {
   });
 
   const moveStatus = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      api(`/api/leads/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    mutationFn: ({ id, status, assigned_to }: { id: string; status: string; assigned_to?: string }) =>
+      api(`/api/leads/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, assigned_to: assigned_to || undefined }),
+      }),
     onSuccess: () => {
+      closeAssign();
       qc.invalidateQueries({ queryKey: ["leads"] });
+      void toastSuccess("Status lead diperbarui");
     },
     onError: (e: Error) => {
       qc.invalidateQueries({ queryKey: ["leads"] });
@@ -283,31 +435,106 @@ export function LeadsPage() {
     },
   });
 
-  const convert = useMutation({
-    mutationFn: () =>
-      api<{ customer: { id: string; customer_code: string }; lead: LeadRow }>(`/api/leads/${convertLead!.id}/convert`, {
-        method: "POST",
-        body: JSON.stringify({
-          cluster_id: convertCluster || undefined,
-          reseller_id: convertReseller || undefined,
-          sales_user_id: convertStaff || undefined,
-          commission_basis: convertBasis || undefined,
-        }),
+  const reassign = useMutation({
+    mutationFn: ({ id, assigned_to }: { id: string; assigned_to: string }) =>
+      api(`/api/leads/${id}/assign`, {
+        method: "PATCH",
+        body: JSON.stringify({ assigned_to }),
       }),
+    onSuccess: () => {
+      closeAssign();
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      void toastSuccess("Teknisi di-assign");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const convert = useMutation({
+    mutationFn: async () => {
+      const lead = convertLead!;
+      const res = await api<{ customer: { id: string; customer_code: string }; lead: LeadRow }>(
+        `/api/leads/${lead.id}/convert`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            cluster_id: convertCluster || undefined,
+            reseller_id: convertReseller || undefined,
+            sales_user_id: convertStaff || undefined,
+            commission_basis: convertBasis || undefined,
+          }),
+        },
+      );
+      if (createInstallTicket) {
+        const descParts = [lead.address ? `Alamat: ${lead.address}` : "", lead.notes ? `Catatan lead: ${lead.notes}` : ""].filter(
+          Boolean,
+        );
+        const ticket = await api<{ id: string }>("/api/tickets", {
+          method: "POST",
+          body: JSON.stringify({
+            customer_id: res.customer.id,
+            subject: `Instalasi: ${lead.full_name}`,
+            description: descParts.join("\n") || undefined,
+            category: "installation",
+            priority: "normal",
+          }),
+        });
+        if (installAssignee) {
+          await api(`/api/tickets/${ticket.id}/assign`, {
+            method: "PATCH",
+            body: JSON.stringify({ assigned_to: installAssignee }),
+          });
+        }
+      }
+      return { ...res, ticketCreated: createInstallTicket, ticketAssigned: Boolean(installAssignee) };
+    },
     onSuccess: (res) => {
-      setConvertLead(null);
-      setConvertCluster("");
-      setConvertReseller("");
-      setConvertStaff("");
-      setConvertBasis("new_customer_flat");
+      resetConvertForm();
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["customers"] });
       qc.invalidateQueries({ queryKey: ["commissions"] });
       qc.invalidateQueries({ queryKey: ["resellers"] });
-      void toastSuccess(`Dikonversi ke pelanggan ${res.customer.customer_code}`);
+      qc.invalidateQueries({ queryKey: ["tickets"] });
+      const extra = res.ticketCreated
+        ? res.ticketAssigned
+          ? " · tiket instalasi dibuat & di-assign"
+          : " · tiket instalasi dibuat"
+        : "";
+      void toastSuccess(`Dikonversi ke pelanggan ${res.customer.customer_code}${extra}`);
     },
     onError: (e: Error) => void toastError(e.message),
   });
+
+  const sendComment = useMutation({
+    mutationFn: () =>
+      api<LeadComment>(`/api/leads/${detail!.id}/comments`, {
+        method: "POST",
+        body: JSON.stringify({
+          message: commentText.trim(),
+          image_urls: pendingImages.length ? pendingImages : undefined,
+        }),
+      }),
+    onSuccess: () => {
+      setCommentText("");
+      setPendingImages([]);
+      qc.invalidateQueries({ queryKey: ["lead-comments", detail?.id] });
+      void toastSuccess("Komentar dikirim");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  async function onPickPhoto(file: File) {
+    if (!detail) return;
+    setPhotoBusy(true);
+    try {
+      const res = await apiUpload<{ url: string }>(`/api/leads/${detail.id}/comments/photos`, file);
+      setPendingImages((prev) => [...prev, res.url]);
+      void toastSuccess("Gambar siap dilampirkan");
+    } catch (e) {
+      void toastError(e instanceof Error ? e.message : "Upload gagal");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
 
   function onValueCommit(next: Record<string, LeadRow[]>, meta: KanbanCommitMeta<LeadRow>) {
     const lead = next[meta.overContainer]?.[meta.overIndex];
@@ -319,6 +546,10 @@ export function LeadsPage() {
       // reorder dalam kolom — tidak perlu persist urutan ke API
       return;
     }
+    if (!canDispatch) {
+      setColumns(meta.previousValue);
+      return;
+    }
     if (meta.overContainer === "converted") {
       setColumns(meta.previousValue);
       openConvert(lead);
@@ -326,6 +557,20 @@ export function LeadsPage() {
     }
     if (lead.status === "converted") {
       setColumns(meta.previousValue);
+      return;
+    }
+    if (meta.overContainer === "qualified" || meta.overContainer === "survey" || meta.overContainer === "contacted") {
+      if (!lead.assigned_to) {
+        setColumns(meta.previousValue);
+        openAssign(lead, meta.overContainer);
+        return;
+      }
+      setColumns(
+        Object.fromEntries(
+          Object.entries(next).map(([k, rows]) => [k, rows.map((r) => (r.id === lead.id ? { ...r, status: k } : r))]),
+        ),
+      );
+      moveStatus.mutate({ id: lead.id, status: meta.overContainer, assigned_to: lead.assigned_to });
       return;
     }
     // optimistic board already applied; sync status
@@ -341,16 +586,114 @@ export function LeadsPage() {
     <Section
       title="Lead / pipeline"
       actions={
-        <Button type="button" onClick={openCreate}>
-          + Tambah
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center rounded-md border border-[var(--border)] p-0.5">
+            <IconButton
+              label="Tampilan kanban"
+              className={view === "kanban" ? "bg-[var(--panel-muted)]" : undefined}
+              onClick={() => setViewMode("kanban")}
+            >
+              <LayoutGrid className="size-4" />
+            </IconButton>
+            <IconButton
+              label="Tampilan daftar"
+              className={view === "list" ? "bg-[var(--panel-muted)]" : undefined}
+              onClick={() => setViewMode("list")}
+            >
+              <List className="size-4" />
+            </IconButton>
+          </div>
+          {canDispatch ? (
+            <Button type="button" onClick={openCreate}>
+              + Tambah
+            </Button>
+          ) : null}
+        </div>
       }
     >
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Kanban dengan dynamic overlay: seret kartu antar kolom. Drop ke <strong>Converted</strong> membuka form
-        konversi.
+        {!canDispatch
+          ? "Lead yang di-assign ke Anda (dari dihubungi / survey / proses pasang). Buka detail untuk komentar & foto."
+          : view === "kanban"
+            ? "Kanban: seret ke Dihubungi untuk assign teknisi. Drop ke Converted membuka form konversi."
+            : "Daftar lead: assign teknisi mulai status dihubungi, komentar & lampiran gambar."}
       </p>
 
+      {view === "list" ? (
+        <div className="space-y-4">
+          <div className="min-w-[180px] max-w-xs">
+            <Label className="mb-1.5 block">Status</Label>
+            <Select value={listStatus || "__all__"} onValueChange={(v) => setListStatus(v === "__all__" ? "" : v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">Semua</SelectItem>
+                {COLUMNS.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Table
+            columns={["Nama", "Telepon", "Status", "Teknisi", "Atribusi", "Dibuat", "Aksi"]}
+            onRowClick={(i) => openDetail(filteredList[i])}
+            rows={filteredList.map((l) => [
+              <div key={`${l.id}-n`}>
+                <p className="font-medium">{l.full_name}</p>
+                {l.address ? <p className="line-clamp-1 text-xs text-[var(--muted)]">{l.address}</p> : null}
+              </div>,
+              l.phone,
+              <Badge key={`${l.id}-s`} variant="outline">
+                {statusLabel(l.status)}
+              </Badge>,
+              l.assigned_to_name || "—",
+              attributionLabel(l) || "—",
+              formatWhen(l.created_at),
+              <span key={`${l.id}-a`} className="flex flex-wrap items-center gap-1.5">
+                {canDispatch && needsAssignee(l.status) ? (
+                  <IconButton label="Assign teknisi" onClick={() => openAssign(l, l.status)}>
+                    <IconWrench />
+                  </IconButton>
+                ) : null}
+                {canDispatch && l.status !== "converted" ? (
+                  <>
+                    <IconButton label="Edit" onClick={() => openEdit(l)}>
+                      <IconPencil />
+                    </IconButton>
+                    <IconButton label="Convert ke pelanggan" onClick={() => openConvert(l)}>
+                      <IconUserCheck />
+                    </IconButton>
+                    <IconButton
+                      label="Hapus"
+                      danger
+                      onClick={() => {
+                        void confirm({
+                          title: "Hapus lead?",
+                          description: `Hapus ${l.full_name}?`,
+                          confirmLabel: "Hapus",
+                          danger: true,
+                        }).then((ok) => {
+                          if (ok) remove.mutate(l.id);
+                        });
+                      }}
+                    >
+                      <IconTrash />
+                    </IconButton>
+                  </>
+                ) : (
+                  <span className="text-xs text-[var(--muted)]">Klik baris untuk detail</span>
+                )}
+              </span>,
+            ])}
+          />
+          {filteredList.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">Tidak ada lead{listStatus ? " dengan status ini" : ""}.</p>
+          ) : null}
+        </div>
+      ) : (
       <Kanban
         value={columns}
         onValueChange={setColumns}
@@ -371,38 +714,46 @@ export function LeadsPage() {
               </KanbanColumnHeader>
               <KanbanColumnContent>
                 {(columns[col.id] ?? []).map((l) => {
-                  const locked = l.status === "converted";
+                  const locked = l.status === "converted" || !canDispatch;
                   return (
                     <KanbanItem key={l.id} value={l.id} disabled={locked}>
                       <LeadCardBody
                         lead={l}
+                        onOpen={() => openDetail(l)}
                         actions={
                           <>
-                            {!locked && l.status !== "lost" ? (
+                            {canDispatch && needsAssignee(l.status) ? (
+                              <IconButton label="Assign teknisi" onClick={() => openAssign(l, l.status)}>
+                                <IconWrench />
+                              </IconButton>
+                            ) : null}
+                            {canDispatch && !locked && l.status !== "lost" ? (
                               <IconButton label="Convert ke pelanggan" onClick={() => openConvert(l)}>
                                 <IconUserCheck />
                               </IconButton>
                             ) : null}
-                            {!locked ? (
+                            {canDispatch && l.status !== "converted" ? (
                               <IconButton label="Edit lead" onClick={() => openEdit(l)}>
                                 <IconPencil />
                               </IconButton>
                             ) : null}
-                            <IconButton
-                              label="Hapus lead"
-                              danger
-                              onClick={async () => {
-                                const ok = await confirm({
-                                  title: "Hapus lead",
-                                  description: `Hapus lead "${l.full_name}"?`,
-                                  confirmLabel: "Hapus",
-                                });
-                                if (!ok) return;
-                                remove.mutate(l.id);
-                              }}
-                            >
-                              <IconTrash />
-                            </IconButton>
+                            {canDispatch ? (
+                              <IconButton
+                                label="Hapus lead"
+                                danger
+                                onClick={async () => {
+                                  const ok = await confirm({
+                                    title: "Hapus lead",
+                                    description: `Hapus lead "${l.full_name}"?`,
+                                    confirmLabel: "Hapus",
+                                  });
+                                  if (!ok) return;
+                                  remove.mutate(l.id);
+                                }}
+                              >
+                                <IconTrash />
+                              </IconButton>
+                            ) : null}
                           </>
                         }
                       />
@@ -430,6 +781,140 @@ export function LeadsPage() {
           }}
         </KanbanOverlay>
       </Kanban>
+      )}
+
+      <FormDialog
+        open={Boolean(detail)}
+        wide
+        title={detail ? `Lead: ${detail.full_name}` : "Detail lead"}
+        onClose={() => setDetail(null)}
+      >
+        {detail ? (
+          <div className="grid gap-4">
+            <div className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel-muted)]/40 p-3 text-sm sm:grid-cols-2">
+              <p>
+                <span className="text-[var(--muted)]">Status:</span> {statusLabel(detail.status)}
+              </p>
+              <p>
+                <span className="text-[var(--muted)]">Teknisi:</span> {detail.assigned_to_name || "—"}
+              </p>
+              <p>
+                <span className="text-[var(--muted)]">Telepon:</span> {detail.phone}
+              </p>
+              <p>
+                <span className="text-[var(--muted)]">Email:</span> {detail.email || "—"}
+              </p>
+              <p>
+                <span className="text-[var(--muted)]">Atribusi:</span> {attributionLabel(detail) || "—"}
+              </p>
+              <p className="sm:col-span-2">
+                <span className="text-[var(--muted)]">Alamat:</span> {detail.address || "—"}
+              </p>
+              {detail.notes ? (
+                <p className="sm:col-span-2">
+                  <span className="text-[var(--muted)]">Catatan:</span> {detail.notes}
+                </p>
+              ) : null}
+            </div>
+
+            <div>
+              <h4 className="mb-2 text-sm font-semibold">Komentar tim</h4>
+              <div className="mb-3 max-h-56 space-y-3 overflow-y-auto">
+                {commentsQ.isLoading ? (
+                  <p className="text-sm text-[var(--muted)]">Memuat…</p>
+                ) : comments.length === 0 ? (
+                  <p className="text-sm text-[var(--muted)]">Belum ada komentar.</p>
+                ) : (
+                  comments.map((c) => (
+                    <div key={c.id} className="rounded-md border border-[var(--border)] p-2 text-sm">
+                      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium">{c.user_name || "Tim"}</span>
+                        <span className="text-[10px] text-[var(--muted)]">{formatWhen(c.created_at)}</span>
+                      </div>
+                      {c.message ? <p className="whitespace-pre-wrap">{c.message}</p> : null}
+                      {(c.image_urls?.length ?? 0) > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {c.image_urls.map((url) => (
+                            <a
+                              key={url}
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block overflow-hidden rounded border border-[var(--border)]"
+                            >
+                              <img src={url} alt="" className="h-20 w-20 object-cover" />
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {pendingImages.length > 0 ? (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {pendingImages.map((url) => (
+                    <div key={url} className="relative">
+                      <img src={url} alt="" className="h-16 w-16 rounded border border-[var(--border)] object-cover" />
+                      <button
+                        type="button"
+                        className="absolute -right-1 -top-1 rounded-full bg-[var(--danger)] px-1 text-[10px] text-white"
+                        title="Hapus lampiran"
+                        aria-label="Hapus lampiran"
+                        onClick={() => setPendingImages((prev) => prev.filter((u) => u !== url))}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[200px] flex-1">
+                  <Input
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    placeholder="Tulis komentar…"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (commentText.trim() || pendingImages.length) sendComment.mutate();
+                      }
+                    }}
+                  />
+                </div>
+                <IconButton
+                  label="Lampirkan gambar"
+                  disabled={photoBusy}
+                  onClick={() => photoRef.current?.click()}
+                >
+                  <IconImage />
+                </IconButton>
+                <input
+                  ref={photoRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) void onPickPhoto(file);
+                  }}
+                />
+                <Button
+                  type="button"
+                  disabled={sendComment.isPending || (!commentText.trim() && pendingImages.length === 0)}
+                  onClick={() => sendComment.mutate()}
+                >
+                  {sendComment.isPending ? "Mengirim…" : "Kirim"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </FormDialog>
 
       <FormDialog open={open} wide title={editId ? "Edit lead" : "Tambah lead"} onClose={closeForm}>
         <form
@@ -456,7 +941,16 @@ export function LeadsPage() {
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
           />
-          <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+          <Select
+            value={form.status}
+            onValueChange={(v) =>
+              setForm({
+                ...form,
+                status: v,
+                assigned_to: needsAssignee(v) ? form.assigned_to : "",
+              })
+            }
+          >
             <SelectTrigger>
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -468,6 +962,23 @@ export function LeadsPage() {
               ))}
             </SelectContent>
           </Select>
+          {needsAssignee(form.status) ? (
+            <div>
+              <Label className="mb-1.5 block">Teknisi (wajib)</Label>
+              <SearchableSelect
+                required
+                placeholder="Pilih teknisi…"
+                searchPlaceholder="Cari nama teknisi…"
+                value={form.assigned_to}
+                onValueChange={(v) => setForm({ ...form, assigned_to: v })}
+                options={assignCandidates.map((u) => ({
+                  value: u.user_id,
+                  label: `${u.full_name || u.email}${u.role_slug ? ` · ${u.role_slug}` : ""}`,
+                  keywords: `${u.full_name || ""} ${u.email || ""} ${u.role_slug || ""}`,
+                }))}
+              />
+            </div>
+          ) : null}
           <Input
             className="sm:col-span-2"
             placeholder="Alamat"
@@ -503,13 +1014,7 @@ export function LeadsPage() {
         open={Boolean(convertLead)}
         wide
         title="Convert ke pelanggan"
-        onClose={() => {
-          setConvertLead(null);
-          setConvertCluster("");
-          setConvertReseller("");
-          setConvertStaff("");
-          setConvertBasis("new_customer_flat");
-        }}
+        onClose={resetConvertForm}
       >
         <form
           className="grid gap-4 sm:grid-cols-2"
@@ -562,21 +1067,103 @@ export function LeadsPage() {
 
           <CommissionBasisSelect value={convertBasis} onChange={setConvertBasis} />
 
+          <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--border)] p-3 sm:col-span-2">
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={createInstallTicket}
+                onChange={(e) => setCreateInstallTicket(e.target.checked)}
+              />
+              <span>
+                <span className="font-medium">Buat tiket instalasi</span>
+                <span className="block text-xs text-[var(--muted)]">
+                  Setelah convert, buat tiket kategori Instalasi untuk jadwal pemasangan (bisa di-assign ke teknisi).
+                </span>
+              </span>
+            </label>
+            {createInstallTicket ? (
+              <div>
+                <Label className="mb-1.5 block">Assign teknisi (opsional)</Label>
+                <SearchableSelect
+                  allowClear
+                  clearLabel="— Belum di-assign —"
+                  placeholder="Teknisi"
+                  searchPlaceholder="Cari teknisi…"
+                  value={installAssignee}
+                  onValueChange={setInstallAssignee}
+                  options={assignCandidates.map((u) => ({
+                    value: u.user_id,
+                    label: `${u.full_name}${u.role_slug ? ` · ${u.role_slug}` : ""}`,
+                    keywords: `${u.full_name} ${u.role_slug || ""}`,
+                  }))}
+                />
+              </div>
+            ) : null}
+          </div>
+
           <div className="flex flex-wrap gap-2 border-t border-[var(--border)] pt-3 sm:col-span-2">
             <Button type="submit" disabled={convert.isPending}>
               {convert.isPending ? "Mengonversi…" : "Convert"}
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setConvertLead(null);
-                setConvertCluster("");
-                setConvertReseller("");
-                setConvertStaff("");
-                setConvertBasis("new_customer_flat");
-              }}
-            >
+            <Button type="button" variant="secondary" onClick={resetConvertForm}>
+              Batal
+            </Button>
+          </div>
+        </form>
+      </FormDialog>
+
+      <FormDialog
+        open={Boolean(assignLead)}
+        title={
+          assignLead && needsAssignee(assignLead.status) && assignLead.status === assignTargetStatus
+            ? "Assign teknisi"
+            : `${statusLabel(assignTargetStatus)} — assign teknisi`
+        }
+        onClose={closeAssign}
+      >
+        <form
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!assignLead || !assignUser) {
+              void toastError("Pilih teknisi");
+              return;
+            }
+            if (needsAssignee(assignLead.status) && assignLead.status === assignTargetStatus) {
+              reassign.mutate({ id: assignLead.id, assigned_to: assignUser });
+            } else {
+              moveStatus.mutate({ id: assignLead.id, status: assignTargetStatus, assigned_to: assignUser });
+            }
+          }}
+        >
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel-muted)]/50 p-3">
+            <p className="text-sm font-semibold">{assignLead?.full_name}</p>
+            <p className="text-sm text-[var(--muted)]">{assignLead?.phone}</p>
+          </div>
+          <div>
+            <Label className="mb-1.5 block">Teknisi</Label>
+            <SearchableSelect
+              required
+              placeholder="Pilih teknisi…"
+              searchPlaceholder="Cari teknisi…"
+              value={assignUser}
+              onValueChange={setAssignUser}
+              options={assignCandidates.map((u) => ({
+                value: u.user_id,
+                label: `${u.full_name || u.email}${u.role_slug ? ` · ${u.role_slug}` : ""}`,
+                keywords: `${u.full_name || ""} ${u.email || ""} ${u.role_slug || ""}`,
+              }))}
+            />
+            <p className="mt-1.5 text-xs text-[var(--muted)]">
+              Assign wajib mulai Dihubungi. Hanya teknisi yang di-assign yang melihat lead ini.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={moveStatus.isPending || reassign.isPending || !assignUser}>
+              {moveStatus.isPending || reassign.isPending ? "Menyimpan…" : "Simpan"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={closeAssign}>
               Batal
             </Button>
           </div>

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -51,6 +52,9 @@ func RegisterAll(api huma.API, d *Deps) {
 	registerPlatform(api, d)
 	registerPlatformBranding(api, d)
 	registerSettings(api, d)
+	registerIsolirSettings(api, d)
+	registerPublicIsolir(api, d)
+	registerNotifications(api, d)
 	registerIntegrations(api, d)
 	registerDBBackup(api, d)
 	registerCustomers(api, d)
@@ -304,6 +308,72 @@ func registerAuth(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "me", Method: http.MethodGet, Path: "/api/me",
+		Summary: "Current user + role permissions for this tenant", Tags: []string{"Auth"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Body struct {
+			UserID      xid.ID   `json:"user_id"`
+			Email       string   `json:"email"`
+			FullName    string   `json:"full_name"`
+			RoleSlug    string   `json:"role_slug"`
+			RoleName    string   `json:"role_name"`
+			Permissions []string `json:"permissions"`
+			TenantID    xid.ID   `json:"tenant_id"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		uid := userIDFromCtx(ctx)
+		if xid.IsNil(uid) {
+			return nil, httpx.Unauthorized("unauthorized")
+		}
+		user, err := d.Store.GetUserByID(ctx, uid)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.Unauthorized("unauthorized")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		roleSlug := roleSlugFromCtx(ctx)
+		roleName := roleSlug
+		perms := []string{}
+		if roleSlug != "" {
+			role, rerr := d.Store.GetRoleBySlug(ctx, tid, roleSlug)
+			if rerr == nil && role != nil {
+				roleName = role.Name
+				if role.Permissions != nil {
+					perms = role.Permissions
+				}
+			}
+		}
+		return &struct {
+			Body struct {
+				UserID      xid.ID   `json:"user_id"`
+				Email       string   `json:"email"`
+				FullName    string   `json:"full_name"`
+				RoleSlug    string   `json:"role_slug"`
+				RoleName    string   `json:"role_name"`
+				Permissions []string `json:"permissions"`
+				TenantID    xid.ID   `json:"tenant_id"`
+			}
+		}{Body: struct {
+			UserID      xid.ID   `json:"user_id"`
+			Email       string   `json:"email"`
+			FullName    string   `json:"full_name"`
+			RoleSlug    string   `json:"role_slug"`
+			RoleName    string   `json:"role_name"`
+			Permissions []string `json:"permissions"`
+			TenantID    xid.ID   `json:"tenant_id"`
+		}{
+			UserID: uid, Email: user.Email, FullName: user.FullName,
+			RoleSlug: roleSlug, RoleName: roleName, Permissions: perms, TenantID: tid,
+		}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "register-tenant", Method: http.MethodPost, Path: "/api/auth/register",
 		Summary: "Deprecated: use POST /api/platform/tenants", Tags: []string{"Auth"},
 		Deprecated: true,
@@ -336,6 +406,124 @@ func tenantIDFromCtx(ctx context.Context) (xid.ID, error) {
 		return xid.Nil(), huma.Error401Unauthorized("unauthorized")
 	}
 	return t.ID, nil
+}
+
+func roleSlugFromCtx(ctx context.Context) string {
+	t, ok := tenant.FromContext(ctx)
+	if !ok {
+		return ""
+	}
+	return t.Role
+}
+
+func userIDFromCtx(ctx context.Context) xid.ID {
+	t, ok := tenant.FromContext(ctx)
+	if !ok {
+		return xid.Nil()
+	}
+	return t.UserID
+}
+
+func rolePermissionsFromCtx(ctx context.Context, d *Deps) ([]string, error) {
+	tid, err := tenantIDFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	slug := roleSlugFromCtx(ctx)
+	if slug == "" {
+		return []string{}, nil
+	}
+	role, err := d.Store.GetRoleBySlug(ctx, tid, slug)
+	if err != nil {
+		if slug == "admin" {
+			return []string{"*"}, nil
+		}
+		return []string{}, nil
+	}
+	if role.Permissions == nil {
+		return []string{}, nil
+	}
+	return role.Permissions, nil
+}
+
+func requireDispatchOps(ctx context.Context, d *Deps) error {
+	perms, err := rolePermissionsFromCtx(ctx, d)
+	if err != nil {
+		return err
+	}
+	if store.CanDispatchOps(perms) {
+		return nil
+	}
+	if roleSlugFromCtx(ctx) == "admin" {
+		return nil
+	}
+	return httpx.Forbidden("hanya admin/dispatcher yang boleh membuat atau assign")
+}
+
+func isFieldOps(ctx context.Context, d *Deps) bool {
+	perms, err := rolePermissionsFromCtx(ctx, d)
+	if err != nil {
+		return false
+	}
+	if roleSlugFromCtx(ctx) == "teknisi" && !store.CanDispatchOps(perms) {
+		return true
+	}
+	return store.IsFieldOpsRole(perms)
+}
+
+func enforceTicketAssigned(ctx context.Context, d *Deps, t *store.Ticket) error {
+	if !isFieldOps(ctx, d) {
+		return nil
+	}
+	uid := userIDFromCtx(ctx)
+	if t.AssignedTo == nil || xid.IsNil(*t.AssignedTo) || *t.AssignedTo != uid {
+		return httpx.Forbidden("tiket ini tidak di-assign ke Anda")
+	}
+	return nil
+}
+
+func fieldOpsTechnicianFilter(ctx context.Context, d *Deps, tid xid.ID) (mineOnly bool, techID *xid.ID, err error) {
+	if !isFieldOps(ctx, d) {
+		return false, nil, nil
+	}
+	uid := userIDFromCtx(ctx)
+	if xid.IsNil(uid) {
+		return true, nil, httpx.Forbidden("unauthorized")
+	}
+	tech, err := d.Store.GetTechnicianByUserID(ctx, tid, uid)
+	if errors.Is(err, store.ErrNotFound) {
+		return true, nil, nil
+	}
+	if err != nil {
+		return true, nil, httpx.Internal(err)
+	}
+	id := tech.ID
+	return true, &id, nil
+}
+
+func enforceLeadAssigned(ctx context.Context, d *Deps, lead *store.Lead) error {
+	if !isFieldOps(ctx, d) {
+		return nil
+	}
+	uid := userIDFromCtx(ctx)
+	if lead.AssignedTo == nil || xid.IsNil(*lead.AssignedTo) || *lead.AssignedTo != uid {
+		return httpx.Forbidden("lead ini tidak di-assign ke Anda")
+	}
+	return nil
+}
+
+func enforceWorkOrderAssigned(ctx context.Context, d *Deps, tid xid.ID, wo *store.WorkOrder) error {
+	mineOnly, techID, err := fieldOpsTechnicianFilter(ctx, d, tid)
+	if err != nil {
+		return err
+	}
+	if !mineOnly {
+		return nil
+	}
+	if techID == nil || wo.TechnicianID == nil || xid.IsNil(*wo.TechnicianID) || *wo.TechnicianID != *techID {
+		return httpx.Forbidden("work order ini tidak di-assign ke Anda")
+	}
+	return nil
 }
 
 // optionalQueryID parses an optional UUID query string (Huma rejects *xid.ID on query params).
@@ -791,19 +979,21 @@ func registerPlans(api huma.API, d *Deps) {
 		Tags: []string{"Plans"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			Name          string  `json:"name"`
-			Code          string  `json:"code"`
-			ServiceType   string  `json:"service_type"`
-			Price         int64   `json:"price"`
-			BillingCycle  string  `json:"billing_cycle,omitempty"`
-			DownloadMbps  int     `json:"download_mbps,omitempty"`
-			UploadMbps    int     `json:"upload_mbps,omitempty"`
-			QuotaGB       *int    `json:"quota_gb,omitempty"`
-			ProfileName   *string `json:"profile_name,omitempty"`
-			IsolirProfile *string `json:"isolir_profile,omitempty"`
-			GraceDays     *int    `json:"grace_days,omitempty"`
+			Name          string   `json:"name"`
+			Code          string   `json:"code"`
+			ServiceType   string   `json:"service_type"`
+			Price         int64    `json:"price"`
+			BillingCycle  string   `json:"billing_cycle,omitempty"`
+			DownloadMbps  int      `json:"download_mbps,omitempty"`
+			UploadMbps    int      `json:"upload_mbps,omitempty"`
+			QuotaGB       *int     `json:"quota_gb,omitempty"`
+			LimitUptime   *string  `json:"limit_uptime,omitempty"`
+			SharedUsers   *int     `json:"shared_users,omitempty"`
+			ProfileName   *string  `json:"profile_name,omitempty"`
+			IsolirProfile *string  `json:"isolir_profile,omitempty"`
+			GraceDays     *int     `json:"grace_days,omitempty"`
 			TaxPercent    *float64 `json:"tax_percent,omitempty"`
-			IsActive      *bool   `json:"is_active,omitempty"`
+			IsActive      *bool    `json:"is_active,omitempty"`
 		}
 	}) (*struct{ Body store.Plan }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -826,8 +1016,23 @@ func registerPlans(api huma.API, d *Deps) {
 		p := store.Plan{
 			TenantID: tid, Name: name, Code: code, ServiceType: svc, Price: input.Body.Price,
 			BillingCycle: cycle, DownloadMbps: input.Body.DownloadMbps, UploadMbps: input.Body.UploadMbps,
-			QuotaGB: input.Body.QuotaGB, ProfileName: input.Body.ProfileName, IsolirProfile: input.Body.IsolirProfile,
+			QuotaGB: input.Body.QuotaGB, LimitUptime: input.Body.LimitUptime, SharedUsers: input.Body.SharedUsers,
+			ProfileName: input.Body.ProfileName, IsolirProfile: input.Body.IsolirProfile,
 			IsActive: true,
+		}
+		if p.LimitUptime != nil {
+			u := strings.TrimSpace(*p.LimitUptime)
+			if u == "" {
+				p.LimitUptime = nil
+			} else {
+				p.LimitUptime = &u
+			}
+		}
+		if p.SharedUsers != nil && *p.SharedUsers <= 0 {
+			p.SharedUsers = nil
+		}
+		if p.QuotaGB != nil && *p.QuotaGB <= 0 {
+			p.QuotaGB = nil
 		}
 		if input.Body.GraceDays != nil {
 			p.GraceDays = *input.Body.GraceDays
@@ -861,6 +1066,8 @@ func registerPlans(api huma.API, d *Deps) {
 			DownloadMbps  int      `json:"download_mbps,omitempty"`
 			UploadMbps    int      `json:"upload_mbps,omitempty"`
 			QuotaGB       *int     `json:"quota_gb,omitempty"`
+			LimitUptime   *string  `json:"limit_uptime,omitempty"`
+			SharedUsers   *int     `json:"shared_users,omitempty"`
 			ProfileName   *string  `json:"profile_name,omitempty"`
 			IsolirProfile *string  `json:"isolir_profile,omitempty"`
 			GraceDays     *int     `json:"grace_days,omitempty"`
@@ -894,6 +1101,22 @@ func registerPlans(api huma.API, d *Deps) {
 		existing.DownloadMbps = input.Body.DownloadMbps
 		existing.UploadMbps = input.Body.UploadMbps
 		existing.QuotaGB = input.Body.QuotaGB
+		if existing.QuotaGB != nil && *existing.QuotaGB <= 0 {
+			existing.QuotaGB = nil
+		}
+		existing.LimitUptime = input.Body.LimitUptime
+		if existing.LimitUptime != nil {
+			u := strings.TrimSpace(*existing.LimitUptime)
+			if u == "" {
+				existing.LimitUptime = nil
+			} else {
+				existing.LimitUptime = &u
+			}
+		}
+		existing.SharedUsers = input.Body.SharedUsers
+		if existing.SharedUsers != nil && *existing.SharedUsers <= 0 {
+			existing.SharedUsers = nil
+		}
 		if input.Body.ProfileName != nil {
 			pn := strings.TrimSpace(*input.Body.ProfileName)
 			if pn == "" {
@@ -974,11 +1197,12 @@ func registerPlanOffers(api huma.API, d *Deps) {
 		Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			PlanID    xid.ID `json:"plan_id"`
-			ClusterID xid.ID `json:"cluster_id"`
-			Price     int64  `json:"price"`
-			IsActive  *bool  `json:"is_active,omitempty"`
-			Sync      bool   `json:"sync_profiles,omitempty"`
+			PlanID    xid.ID  `json:"plan_id"`
+			ClusterID xid.ID  `json:"cluster_id"`
+			Price     int64   `json:"price"`
+			IPPoolID  *xid.ID `json:"ip_pool_id,omitempty"`
+			IsActive  *bool   `json:"is_active,omitempty"`
+			Sync      bool    `json:"sync_profiles,omitempty"`
 		}
 	}) (*struct{ Body store.PlanClusterOffer }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -998,13 +1222,39 @@ func registerPlanOffers(api huma.API, d *Deps) {
 		} else if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		if input.Body.IPPoolID != nil {
+			pool, err := d.Store.GetIPPool(ctx, tid, *input.Body.IPPoolID)
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.BadRequest("ip pool tidak ditemukan")
+			}
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			if pool.RouterID == nil {
+				return nil, httpx.BadRequest("ip pool belum terhubung ke router")
+			}
+			routers, err := d.Store.ListRoutersByCluster(ctx, tid, input.Body.ClusterID)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			ok := false
+			for _, r := range routers {
+				if r.ID == *pool.RouterID {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				return nil, httpx.BadRequest("ip pool harus dari router di cluster yang sama")
+			}
+		}
 		active := true
 		if input.Body.IsActive != nil {
 			active = *input.Body.IsActive
 		}
 		o := &store.PlanClusterOffer{
 			TenantID: tid, PlanID: input.Body.PlanID, ClusterID: input.Body.ClusterID,
-			Price: input.Body.Price, IsActive: active,
+			Price: input.Body.Price, IsActive: active, IPPoolID: input.Body.IPPoolID,
 		}
 		if err := d.Store.UpsertPlanOffer(ctx, o); err != nil {
 			return nil, httpx.Internal(err)
@@ -1025,9 +1275,10 @@ func registerPlanOffers(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			Price    int64 `json:"price"`
-			IsActive bool  `json:"is_active"`
-			Sync     bool  `json:"sync_profiles,omitempty"`
+			Price    int64   `json:"price"`
+			IsActive bool    `json:"is_active"`
+			IPPoolID *xid.ID `json:"ip_pool_id"`
+			Sync     bool    `json:"sync_profiles,omitempty"`
 		}
 	}) (*struct{ Body store.PlanClusterOffer }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -1044,8 +1295,35 @@ func registerPlanOffers(api huma.API, d *Deps) {
 		if input.Body.Price < 0 {
 			return nil, httpx.BadRequest("price must be >= 0")
 		}
+		if input.Body.IPPoolID != nil {
+			pool, err := d.Store.GetIPPool(ctx, tid, *input.Body.IPPoolID)
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.BadRequest("ip pool tidak ditemukan")
+			}
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			if pool.RouterID == nil {
+				return nil, httpx.BadRequest("ip pool belum terhubung ke router")
+			}
+			routers, err := d.Store.ListRoutersByCluster(ctx, tid, o.ClusterID)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			ok := false
+			for _, r := range routers {
+				if r.ID == *pool.RouterID {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				return nil, httpx.BadRequest("ip pool harus dari router di cluster yang sama")
+			}
+		}
 		o.Price = input.Body.Price
 		o.IsActive = input.Body.IsActive
+		o.IPPoolID = input.Body.IPPoolID
 		if err := d.Store.UpdatePlanOffer(ctx, o); err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -1157,13 +1435,7 @@ func syncPlanProfileToCluster(ctx context.Context, d *Deps, tid xid.ID, o *store
 			results = append(results, row)
 			continue
 		}
-		poolName := ""
-		if p, err := d.Store.GetFirstIPPoolForRouter(ctx, tid, r.ID); err == nil && p != nil {
-			poolName = p.Name
-			if ensurerPool, ok := prov.(provision.IPPoolEnsurer); ok {
-				_ = ensurerPool.EnsureIPPool(ctx, tid, r.ID, p.Name, p.Network, p.Gateway)
-			}
-		}
+		poolName := ensureProfileIPPool(ctx, d, tid, r.ID, o.IPPoolID)
 		if err := ensurer.EnsureBandwidthProfile(ctx, tid, r.ID, profile, o.DownloadMbps, o.UploadMbps, o.ServiceType, poolName, o.Price); err != nil {
 			row["status"] = "failed"
 			row["message"] = err.Error()
@@ -1576,8 +1848,20 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		OperationID: "activate-subscription", Method: http.MethodPost, Path: "/api/subscriptions/{id}/activate",
 		Tags: []string{"Subscriptions"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		ID xid.ID `path:"id"`
-	}) (*struct{ Body map[string]string }, error) {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			StartedAt  *time.Time `json:"started_at,omitempty"`
+			NextBillAt *time.Time `json:"next_bill_at,omitempty"`
+			Prorate    *bool      `json:"prorate,omitempty"`
+		}
+	}) (*struct {
+		Body struct {
+			Status       string `json:"status"`
+			ProrateDays  int    `json:"prorate_days,omitempty"`
+			PeriodDays   int    `json:"period_days,omitempty"`
+			InvoiceTotal int64  `json:"invoice_total,omitempty"`
+		}
+	}, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
@@ -1615,7 +1899,20 @@ func registerSubscriptions(api huma.API, d *Deps) {
 						DownloadMbps: plan.DownloadMbps, UploadMbps: plan.UploadMbps,
 						Comment: ownershipComment(ctx, d, tid, sub.CustomerCode, sub.CustomerName),
 					}
+					if sub.ServiceType == "hotspot" {
+						applyPlanHotspotLimits(spec, plan)
+					}
 					applyIPAMToSpec(ctx, d, sub, spec)
+					preferred := resolveOfferIPPoolID(ctx, d, tid, plan.ID, clusterIDForSubscription(ctx, d, sub))
+					if p := resolveIPPoolForRouter(ctx, d, tid, *sub.RouterID, preferred); p != nil {
+						_ = syncIPPoolToRouter(ctx, d, p)
+						if spec.IPAddress == "" {
+							spec.AddressPool = p.Name
+							if p.Gateway != nil {
+								spec.LocalAddress = strings.TrimSpace(*p.Gateway)
+							}
+						}
+					}
 					if ensurer, ok := prov.(provision.ProfileEnsurer); ok && profile != "" {
 						price := plan.Price
 						if cust, err := d.Store.GetCustomer(ctx, tid, sub.CustomerID); err == nil && cust != nil {
@@ -1625,27 +1922,214 @@ func registerSubscriptions(api huma.API, d *Deps) {
 						}
 						_ = ensurer.EnsureBandwidthProfile(ctx, tid, *sub.RouterID, profile, plan.DownloadMbps, plan.UploadMbps, sub.ServiceType, spec.AddressPool, price)
 					}
-					if pool, err := d.Store.GetFirstIPPoolForRouter(ctx, tid, *sub.RouterID); err == nil && pool != nil {
-						_ = syncIPPoolToRouter(ctx, d, pool)
-					}
 					_ = prov.Apply(ctx, spec)
 				}
 			}
 		}
+
 		now := time.Now()
-		nextBill := d.Billing.NextBillDate(now, plan.BillingCycle)
+		start := now
+		if input.Body.StartedAt != nil && !input.Body.StartedAt.IsZero() {
+			start = input.Body.StartedAt.In(now.Location())
+		}
+		// Normalize to local noon to avoid timezone day-shift when only a date is sent.
+		start = time.Date(start.Year(), start.Month(), start.Day(), 12, 0, 0, 0, now.Location())
+
+		useProrate := true
+		if input.Body.Prorate != nil {
+			useProrate = *input.Body.Prorate
+		}
+
+		var nextBill time.Time
+		if useProrate && input.Body.NextBillAt != nil && !input.Body.NextBillAt.IsZero() {
+			nb := input.Body.NextBillAt.In(now.Location())
+			nextBill = time.Date(nb.Year(), nb.Month(), nb.Day(), 12, 0, 0, 0, now.Location())
+			if !nextBill.After(start) {
+				return nil, httpx.BadRequest("tanggal tagihan berikutnya harus setelah tanggal mulai")
+			}
+		} else {
+			nextBill = d.Billing.NextBillDate(start, plan.BillingCycle)
+		}
+
 		_, _ = d.Store.Pool.Exec(ctx, `
 			UPDATE subscriptions SET status='active', started_at=$3, next_bill_at=$4, updated_at=NOW()
 			WHERE tenant_id=$1 AND id=$2
-		`, tid, input.ID, now, nextBill)
-		// Refresh local copy for first (possibly prorated) invoice.
+		`, tid, input.ID, start, nextBill)
 		sub.Status = "active"
-		sub.StartedAt = &now
+		sub.StartedAt = &start
 		sub.NextBillAt = &nextBill
-		if _, err := d.Billing.GenerateInvoiceForSubscription(ctx, tid, input.ID); err != nil {
+
+		inv, err := d.Billing.GenerateInvoiceForSubscription(ctx, tid, input.ID)
+		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body map[string]string }{Body: map[string]string{"status": "active"}}, nil
+
+		cycleDays := 30
+		switch plan.BillingCycle {
+		case "daily":
+			cycleDays = 1
+		case "weekly":
+			cycleDays = 7
+		case "yearly":
+			cycleDays = 365
+		}
+		prorateDays := 0
+		if useProrate {
+			prorateDays = int(math.Ceil(nextBill.Sub(start).Hours() / 24))
+			if prorateDays < 1 {
+				prorateDays = 1
+			}
+			if prorateDays > cycleDays {
+				prorateDays = cycleDays
+			}
+			if prorateDays >= cycleDays {
+				prorateDays = 0
+			}
+		}
+		out := &struct {
+			Body struct {
+				Status       string `json:"status"`
+				ProrateDays  int    `json:"prorate_days,omitempty"`
+				PeriodDays   int    `json:"period_days,omitempty"`
+				InvoiceTotal int64  `json:"invoice_total,omitempty"`
+			}
+		}{}
+		out.Body.Status = "active"
+		if prorateDays > 0 {
+			out.Body.ProrateDays = prorateDays
+			out.Body.PeriodDays = cycleDays
+		}
+		if inv != nil {
+			out.Body.InvoiceTotal = inv.TotalAmount
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "preview-change-plan", Method: http.MethodPost, Path: "/api/subscriptions/{id}/change-plan/preview",
+		Tags: []string{"Subscriptions"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			PlanID xid.ID `json:"plan_id"`
+		}
+	}) (*struct{ Body billing.PlanChangeQuote }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if xid.IsNil(input.Body.PlanID) {
+			return nil, httpx.BadRequest("plan_id wajib")
+		}
+		sub, err := d.Store.GetSubscription(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("subscription not found")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		cust, err := d.Store.GetCustomer(ctx, tid, sub.CustomerID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if cust.ClusterID != nil {
+			offer, err := d.Store.GetPlanOfferByPlanCluster(ctx, tid, input.Body.PlanID, *cust.ClusterID)
+			if errors.Is(err, store.ErrNotFound) || (err == nil && !offer.IsActive) {
+				return nil, httpx.BadRequest("paket belum ditawarkan di cluster pelanggan")
+			}
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+		}
+		q, _, _, _, err := d.Billing.QuotePlanChange(ctx, tid, input.ID, input.Body.PlanID, time.Now())
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound(err.Error())
+			}
+			return nil, httpx.BadRequest(err.Error())
+		}
+		return &struct{ Body billing.PlanChangeQuote }{Body: *q}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "change-subscription-plan", Method: http.MethodPost, Path: "/api/subscriptions/{id}/change-plan",
+		Tags: []string{"Subscriptions"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			PlanID xid.ID `json:"plan_id"`
+		}
+	}) (*struct {
+		Body struct {
+			Quote   billing.PlanChangeQuote `json:"quote"`
+			Invoice *store.Invoice          `json:"invoice,omitempty"`
+			Status  string                  `json:"status"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if xid.IsNil(input.Body.PlanID) {
+			return nil, httpx.BadRequest("plan_id wajib")
+		}
+		sub, err := d.Store.GetSubscription(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("subscription not found")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		cust, err := d.Store.GetCustomer(ctx, tid, sub.CustomerID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if cust.ClusterID != nil {
+			offer, err := d.Store.GetPlanOfferByPlanCluster(ctx, tid, input.Body.PlanID, *cust.ClusterID)
+			if errors.Is(err, store.ErrNotFound) || (err == nil && !offer.IsActive) {
+				return nil, httpx.BadRequest("paket belum ditawarkan di cluster pelanggan")
+			}
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+		}
+		oldUsername := sub.Username
+		oldRouterID := sub.RouterID
+
+		q, inv, err := d.Billing.ApplyPlanChange(ctx, tid, input.ID, input.Body.PlanID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound(err.Error())
+			}
+			return nil, httpx.BadRequest(err.Error())
+		}
+
+		outSub, err := d.Store.GetSubscription(ctx, tid, input.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		newPlan, err := d.Store.GetPlan(ctx, tid, input.Body.PlanID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		outSub.CustomerName = cust.FullName
+		outSub.CustomerCode = cust.CustomerCode
+		outSub.PlanName = newPlan.Name
+		if err := syncSubscriptionToRouter(ctx, d, outSub, newPlan, oldUsername, oldRouterID); err != nil {
+			slog.Warn("change-plan: sync router failed", "err", err, "subscription_id", input.ID)
+		}
+
+		return &struct {
+			Body struct {
+				Quote   billing.PlanChangeQuote `json:"quote"`
+				Invoice *store.Invoice          `json:"invoice,omitempty"`
+				Status  string                  `json:"status"`
+			}
+		}{Body: struct {
+			Quote   billing.PlanChangeQuote `json:"quote"`
+			Invoice *store.Invoice          `json:"invoice,omitempty"`
+			Status  string                  `json:"status"`
+		}{Quote: *q, Invoice: inv, Status: outSub.Status}}, nil
 	})
 }
 
@@ -1946,8 +2430,11 @@ func registerInvoices(api huma.API, d *Deps) {
 			_ = d.Notify.SendPaymentConfirmation(ctx, tid, cust.Phone, inv.InvoiceNumber, amount)
 		}
 		if inv.SubscriptionID != nil {
-			_ = d.Store.UpdateSubscriptionStatus(ctx, tid, *inv.SubscriptionID, "active")
-			resumeSubscription(ctx, d, tid, *inv.SubscriptionID)
+			stillDue, err := d.Store.SubscriptionHasPastDueUnpaid(ctx, tid, *inv.SubscriptionID)
+			if err == nil && !stillDue {
+				_ = d.Store.UpdateSubscriptionStatus(ctx, tid, *inv.SubscriptionID, "active")
+				resumeSubscription(ctx, d, tid, *inv.SubscriptionID)
+			}
 		}
 		return &struct{ Body store.Payment }{Body: *p}, nil
 	})
@@ -1971,7 +2458,12 @@ func registerTickets(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, total, err := d.Store.ListTickets(ctx, tid, input.Status, input.Limit, input.Offset)
+		var assignedTo *xid.ID
+		if isFieldOps(ctx, d) {
+			uid := userIDFromCtx(ctx)
+			assignedTo = &uid
+		}
+		list, total, err := d.Store.ListTickets(ctx, tid, input.Status, assignedTo, input.Limit, input.Offset)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -2001,6 +2493,9 @@ func registerTickets(api huma.API, d *Deps) {
 			Priority    string  `json:"priority"`
 		}
 	}) (*struct{ Body store.Ticket }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
@@ -2051,6 +2546,9 @@ func registerTickets(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		if err := enforceTicketAssigned(ctx, d, t); err != nil {
+			return nil, err
+		}
 		return &struct{ Body store.Ticket }{Body: *t}, nil
 	})
 
@@ -2065,6 +2563,16 @@ func registerTickets(api huma.API, d *Deps) {
 	}) (*struct{ Body store.Ticket }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
+			return nil, err
+		}
+		cur, err := d.Store.GetTicket(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("tiket tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := enforceTicketAssigned(ctx, d, cur); err != nil {
 			return nil, err
 		}
 		if err := d.Store.UpdateTicketStatus(ctx, tid, input.ID, input.Body.Status); err != nil {
@@ -2089,6 +2597,9 @@ func registerTickets(api huma.API, d *Deps) {
 			AssignedTo *xid.ID `json:"assigned_to,omitempty"`
 		}
 	}) (*struct{ Body store.Ticket }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
@@ -2123,10 +2634,15 @@ func registerTickets(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := d.Store.GetTicket(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
+		cur, err := d.Store.GetTicket(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, httpx.NotFound("tiket tidak ditemukan")
-		} else if err != nil {
+		}
+		if err != nil {
 			return nil, httpx.Internal(err)
+		}
+		if err := enforceTicketAssigned(ctx, d, cur); err != nil {
+			return nil, err
 		}
 		list, err := d.Store.ListTicketMessages(ctx, tid, input.ID)
 		if err != nil {
@@ -2144,24 +2660,30 @@ func registerTickets(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			Message string `json:"message"`
+			Message   string   `json:"message"`
+			ImageURLs []string `json:"image_urls,omitempty"`
 		}
 	}) (*struct{ Body store.TicketMessage }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := d.Store.GetTicket(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
+		cur, err := d.Store.GetTicket(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, httpx.NotFound("tiket tidak ditemukan")
-		} else if err != nil {
+		}
+		if err != nil {
 			return nil, httpx.Internal(err)
+		}
+		if err := enforceTicketAssigned(ctx, d, cur); err != nil {
+			return nil, err
 		}
 		var senderID *xid.ID
 		if info, ok := tenant.FromContext(ctx); ok && !xid.IsNil(info.UserID) {
 			uid := info.UserID
 			senderID = &uid
 		}
-		m, err := d.Store.AddTicketMessage(ctx, tid, input.ID, "staff", senderID, input.Body.Message)
+		m, err := d.Store.AddTicketMessage(ctx, tid, input.ID, "staff", senderID, input.Body.Message, input.Body.ImageURLs)
 		if err != nil {
 			return nil, httpx.BadRequest(err.Error())
 		}
@@ -3056,7 +3578,13 @@ func registerDashboard(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		stats, err := d.Store.DashboardStats(ctx, tid)
+		var stats map[string]any
+		if isFieldOps(ctx, d) {
+			uid := userIDFromCtx(ctx)
+			stats, err = d.Store.FieldOpsDashboardStats(ctx, tid, uid)
+		} else {
+			stats, err = d.Store.DashboardStats(ctx, tid)
+		}
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -3371,24 +3899,256 @@ func registerWebhooks(api huma.API, d *Deps) {
 
 func registerVouchers(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
+		OperationID: "list-voucher-batches", Method: http.MethodGet, Path: "/api/vouchers/batches",
+		Tags: []string{"Vouchers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body []store.VoucherBatch }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListVoucherBatches(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.VoucherBatch{}
+		}
+		return &struct{ Body []store.VoucherBatch }{Body: list}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-voucher-batch", Method: http.MethodGet, Path: "/api/vouchers/batches/{id}",
+		Tags: []string{"Vouchers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body store.VoucherBatch }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		b, err := d.Store.GetVoucherBatch(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("batch tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.VoucherBatch }{Body: *b}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-batch-vouchers", Method: http.MethodGet, Path: "/api/vouchers/batches/{id}/codes",
+		Tags: []string{"Vouchers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID     xid.ID `path:"id"`
+		Status string `query:"status"`
+	}) (*struct{ Body []store.Voucher }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListVouchersByBatch(ctx, tid, input.ID, input.Status)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("batch tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.Voucher{}
+		}
+		return &struct{ Body []store.Voucher }{Body: list}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "create-voucher-batch", Method: http.MethodPost, Path: "/api/vouchers/batches",
 		Tags: []string{"Vouchers"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			Name   string   `json:"name"`
-			PlanID *xid.ID  `json:"plan_id, omitempty"`
-			Price  int64    `json:"price"`
-			Codes  []string `json:"codes"`
+			Name      string     `json:"name"`
+			PlanID    *xid.ID    `json:"plan_id,omitempty"`
+			RouterID  *xid.ID    `json:"router_id,omitempty"`
+			Price     int64      `json:"price"`
+			Quantity  int        `json:"quantity,omitempty"`
+			Prefix    string     `json:"prefix,omitempty"`
+			ExpiresAt *time.Time `json:"expires_at,omitempty"`
+			Codes     []string   `json:"codes,omitempty"`
+			SkipSync  bool       `json:"skip_sync,omitempty"`
 		}
 	}) (*struct{ Body store.VoucherBatch }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		b := &store.VoucherBatch{TenantID: tid, PlanID: input.Body.PlanID, Name: input.Body.Name, Price: input.Body.Price}
-		if err := d.Store.CreateVoucherBatch(ctx, b, input.Body.Codes); err != nil {
+		name := strings.TrimSpace(input.Body.Name)
+		if name == "" {
+			return nil, httpx.BadRequest("nama batch wajib")
+		}
+		if input.Body.Price < 0 {
+			return nil, httpx.BadRequest("harga tidak valid")
+		}
+		if input.Body.RouterID == nil {
+			return nil, httpx.BadRequest("router wajib dipilih untuk sync hotspot")
+		}
+		if _, err := d.Store.GetRouter(ctx, tid, *input.Body.RouterID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.BadRequest("router tidak ditemukan")
+			}
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body store.VoucherBatch }{Body: *b}, nil
+		if input.Body.PlanID != nil {
+			plan, err := d.Store.GetPlan(ctx, tid, *input.Body.PlanID)
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					return nil, httpx.BadRequest("paket tidak ditemukan")
+				}
+				return nil, httpx.Internal(err)
+			}
+			if plan.ServiceType != "" && plan.ServiceType != "hotspot" {
+				return nil, httpx.BadRequest("paket harus bertipe hotspot")
+			}
+		}
+		codes := input.Body.Codes
+		b := &store.VoucherBatch{
+			TenantID: tid, PlanID: input.Body.PlanID, RouterID: input.Body.RouterID, Name: name,
+			Price: input.Body.Price, Quantity: input.Body.Quantity, ExpiresAt: input.Body.ExpiresAt,
+			SyncStatus: "pending",
+		}
+		var errCreate error
+		if len(codes) == 0 {
+			qty := input.Body.Quantity
+			if qty <= 0 {
+				qty = 10
+			}
+			if qty > 5000 {
+				return nil, httpx.BadRequest("maksimal 5000 kode per batch")
+			}
+			b.Quantity = qty
+			prefix := strings.TrimSpace(input.Body.Prefix)
+			if prefix == "" {
+				prefix = "VCH"
+			}
+			errCreate = d.Store.CreateVoucherBatchWithPrefix(ctx, b, prefix)
+		} else {
+			errCreate = d.Store.CreateVoucherBatch(ctx, b, codes)
+		}
+		if errCreate != nil {
+			return nil, httpx.BadRequest(errCreate.Error())
+		}
+		out, _ := d.Store.GetVoucherBatch(ctx, tid, b.ID)
+		if out == nil {
+			out = b
+		}
+		if !input.Body.SkipSync {
+			synced, syncErr := syncVoucherBatchToRouter(ctx, d, out)
+			if synced != nil {
+				out = synced
+			} else if syncErr != nil {
+				slog.Warn("voucher batch sync", "batch_id", b.ID, "err", syncErr)
+			}
+		}
+		return &struct{ Body store.VoucherBatch }{Body: *out}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "sync-voucher-batch", Method: http.MethodPost, Path: "/api/vouchers/batches/{id}/sync",
+		Tags: []string{"Vouchers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body store.VoucherBatch }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		b, err := d.Store.GetVoucherBatch(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("batch tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if b.RouterID == nil {
+			return nil, httpx.BadRequest("batch belum punya router")
+		}
+		out, err := syncVoucherBatchToRouter(ctx, d, b)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if out == nil {
+			out = b
+		}
+		return &struct{ Body store.VoucherBatch }{Body: *out}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-voucher-batch", Method: http.MethodDelete, Path: "/api/vouchers/batches/{id}",
+		Tags: []string{"Vouchers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		b, err := d.Store.GetVoucherBatch(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("batch tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		removeVoucherBatchFromRouter(ctx, d, b)
+		if err := d.Store.DeleteVoucherBatch(ctx, tid, input.ID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound("batch tidak ditemukan")
+			}
+			return nil, httpx.Internal(err)
+		}
+		return &struct{}{}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "export-voucher-batch-csv", Method: http.MethodGet, Path: "/api/vouchers/batches/{id}/export.csv",
+		Tags: []string{"Vouchers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct {
+		ContentType        string `header:"Content-Type"`
+		ContentDisposition string `header:"Content-Disposition"`
+		Body               string
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListVouchersByBatch(ctx, tid, input.ID, "")
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("batch tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := "code,status,used_by,used_at,expires_at\n"
+		for _, v := range list {
+			usedAt := ""
+			if v.UsedAt != nil {
+				usedAt = v.UsedAt.Format(time.RFC3339)
+			}
+			exp := ""
+			if v.ExpiresAt != nil {
+				exp = v.ExpiresAt.Format(time.RFC3339)
+			}
+			out += fmt.Sprintf("%s,%s,%s,%s,%s\n", v.Code, v.Status, v.UsedName, usedAt, exp)
+		}
+		return &struct {
+			ContentType        string `header:"Content-Type"`
+			ContentDisposition string `header:"Content-Disposition"`
+			Body               string
+		}{
+			ContentType:        "text/csv",
+			ContentDisposition: fmt.Sprintf(`attachment; filename="vouchers-%s.csv"`, input.ID.String()),
+			Body:               out,
+		}, nil
 	})
 }
+

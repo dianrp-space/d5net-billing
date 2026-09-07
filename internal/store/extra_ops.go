@@ -28,15 +28,27 @@ type Lead struct {
 	Notes         *string    `json:"notes,omitempty"`
 	ResellerID    *xid.ID    `json:"reseller_id,omitempty"`
 	ResellerName  string     `json:"reseller_name,omitempty"`
-	SalesUserID   *xid.ID    `json:"sales_user_id,omitempty"`
-	SalesUserName string     `json:"sales_user_name,omitempty"`
-	CustomerID    *xid.ID    `json:"customer_id,omitempty"`
-	ConvertedAt   *time.Time `json:"converted_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	SalesUserID     *xid.ID    `json:"sales_user_id,omitempty"`
+	SalesUserName   string     `json:"sales_user_name,omitempty"`
+	AssignedTo      *xid.ID    `json:"assigned_to,omitempty"`
+	AssignedToName  string     `json:"assigned_to_name,omitempty"`
+	CustomerID      *xid.ID    `json:"customer_id,omitempty"`
+	ConvertedAt     *time.Time `json:"converted_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 var leadStatuses = map[string]bool{
 	"new": true, "contacted": true, "survey": true, "qualified": true, "converted": true, "lost": true,
+}
+
+// LeadStatusNeedsAssignee: dihubungi → proses pasang harus punya teknisi.
+func LeadStatusNeedsAssignee(status string) bool {
+	switch NormalizeLeadStatus(status) {
+	case "contacted", "survey", "qualified":
+		return true
+	default:
+		return false
+	}
 }
 
 func NormalizeLeadStatus(s string) string {
@@ -55,11 +67,16 @@ func (s *Store) CreateLead(ctx context.Context, l *Lead) error {
 	if !leadStatuses[l.Status] {
 		l.Status = "new"
 	}
+	if !LeadStatusNeedsAssignee(l.Status) {
+		l.AssignedTo = nil
+	} else if l.AssignedTo == nil || xid.IsNil(*l.AssignedTo) {
+		return fmt.Errorf("teknisi wajib di-assign mulai status dihubungi")
+	}
 	l.ResellerID, l.SalesUserID = NormalizeAttribution(l.ResellerID, l.SalesUserID)
 	return s.Pool.QueryRow(ctx, `
-		INSERT INTO leads (tenant_id, full_name, phone, email, address, latitude, longitude, odp_id, status, notes, reseller_id, sales_user_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, created_at
-	`, l.TenantID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.ResellerID, l.SalesUserID).
+		INSERT INTO leads (tenant_id, full_name, phone, email, address, latitude, longitude, odp_id, status, notes, reseller_id, sales_user_id, assigned_to)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, created_at
+	`, l.TenantID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.ResellerID, l.SalesUserID, l.AssignedTo).
 		Scan(&l.ID, &l.CreatedAt)
 }
 
@@ -69,7 +86,7 @@ func scanLead(row pgx.Row) (*Lead, error) {
 		&l.ID, &l.TenantID, &l.FullName, &l.Phone, &l.Email, &l.Address,
 		&l.Latitude, &l.Longitude, &l.ODPID, &l.ODPCode, &l.ODPName,
 		&l.Status, &l.Notes, &l.ResellerID, &l.ResellerName, &l.SalesUserID, &l.SalesUserName,
-		&l.CustomerID, &l.ConvertedAt, &l.CreatedAt,
+		&l.AssignedTo, &l.AssignedToName, &l.CustomerID, &l.ConvertedAt, &l.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -84,22 +101,28 @@ const leadSelect = `
 	SELECT l.id, l.tenant_id, l.full_name, l.phone, l.email, l.address, l.latitude, l.longitude,
 	       l.odp_id, COALESCE(o.code, ''), COALESCE(o.name, ''),
 	       l.status, l.notes, l.reseller_id, COALESCE(r.name, ''), l.sales_user_id, COALESCE(u.full_name, ''),
+	       l.assigned_to, COALESCE(ua.full_name, ''),
 	       l.customer_id, l.converted_at, l.created_at
 	FROM leads l
 	LEFT JOIN odps o ON o.id = l.odp_id
 	LEFT JOIN resellers r ON r.id = l.reseller_id
 	LEFT JOIN users u ON u.id = l.sales_user_id
+	LEFT JOIN users ua ON ua.id = l.assigned_to
 `
 
-func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, status string, limit, offset int) ([]Lead, int64, error) {
+func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, status string, assignedTo *xid.ID, limit, offset int) ([]Lead, int64, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	where := `WHERE l.tenant_id=$1`
 	args := []any{tenantID}
 	if st := NormalizeLeadStatus(status); status != "" && leadStatuses[st] {
-		where += ` AND l.status=$2`
 		args = append(args, st)
+		where += fmt.Sprintf(` AND l.status=$%d`, len(args))
+	}
+	if assignedTo != nil && !xid.IsNil(*assignedTo) {
+		args = append(args, *assignedTo)
+		where += fmt.Sprintf(` AND l.assigned_to=$%d`, len(args))
 	}
 	var total int64
 	countQ := `SELECT COUNT(*) FROM leads l ` + where
@@ -122,7 +145,7 @@ func (s *Store) ListLeads(ctx context.Context, tenantID xid.ID, status string, l
 			&l.ID, &l.TenantID, &l.FullName, &l.Phone, &l.Email, &l.Address,
 			&l.Latitude, &l.Longitude, &l.ODPID, &l.ODPCode, &l.ODPName,
 			&l.Status, &l.Notes, &l.ResellerID, &l.ResellerName, &l.SalesUserID, &l.SalesUserName,
-			&l.CustomerID, &l.ConvertedAt, &l.CreatedAt,
+			&l.AssignedTo, &l.AssignedToName, &l.CustomerID, &l.ConvertedAt, &l.CreatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -137,17 +160,96 @@ func (s *Store) GetLead(ctx context.Context, tenantID, id xid.ID) (*Lead, error)
 	`, tenantID, id))
 }
 
+type LeadComment struct {
+	ID          xid.ID    `json:"id"`
+	LeadID      xid.ID    `json:"lead_id"`
+	UserID      *xid.ID   `json:"user_id,omitempty"`
+	UserName    string    `json:"user_name,omitempty"`
+	Message     string    `json:"message"`
+	ImageURLs   []string  `json:"image_urls"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (s *Store) ListLeadComments(ctx context.Context, tenantID, leadID xid.ID) ([]LeadComment, error) {
+	if _, err := s.GetLead(ctx, tenantID, leadID); err != nil {
+		return nil, err
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT c.id, c.lead_id, c.user_id, COALESCE(u.full_name, ''), c.message,
+		       COALESCE(c.image_urls, '[]'::jsonb), c.created_at
+		FROM lead_comments c
+		LEFT JOIN users u ON u.id = c.user_id
+		WHERE c.tenant_id=$1 AND c.lead_id=$2
+		ORDER BY c.created_at ASC
+	`, tenantID, leadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []LeadComment
+	for rows.Next() {
+		var c LeadComment
+		var raw []byte
+		if err := rows.Scan(&c.ID, &c.LeadID, &c.UserID, &c.UserName, &c.Message, &raw, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		c.ImageURLs = []string{}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &c.ImageURLs)
+		}
+		list = append(list, c)
+	}
+	return list, rows.Err()
+}
+
+func (s *Store) AddLeadComment(ctx context.Context, tenantID, leadID xid.ID, userID *xid.ID, message string, imageURLs []string) (*LeadComment, error) {
+	if _, err := s.GetLead(ctx, tenantID, leadID); err != nil {
+		return nil, err
+	}
+	message = strings.TrimSpace(message)
+	if imageURLs == nil {
+		imageURLs = []string{}
+	}
+	if message == "" && len(imageURLs) == 0 {
+		return nil, fmt.Errorf("pesan atau gambar wajib")
+	}
+	raw, _ := json.Marshal(imageURLs)
+	var c LeadComment
+	err := s.Pool.QueryRow(ctx, `
+		INSERT INTO lead_comments (tenant_id, lead_id, user_id, message, image_urls)
+		VALUES ($1,$2,$3,$4,$5::jsonb)
+		RETURNING id, lead_id, user_id, message, COALESCE(image_urls, '[]'::jsonb), created_at
+	`, tenantID, leadID, userID, message, raw).Scan(&c.ID, &c.LeadID, &c.UserID, &c.Message, &raw, &c.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	c.ImageURLs = []string{}
+	_ = json.Unmarshal(raw, &c.ImageURLs)
+	if userID != nil {
+		_ = s.Pool.QueryRow(ctx, `SELECT COALESCE(full_name,'') FROM users WHERE id=$1`, *userID).Scan(&c.UserName)
+	}
+	return &c, nil
+}
+
 func (s *Store) UpdateLead(ctx context.Context, l *Lead) error {
 	l.Status = NormalizeLeadStatus(l.Status)
 	if !leadStatuses[l.Status] {
 		return fmt.Errorf("status lead tidak valid")
 	}
+	if LeadStatusNeedsAssignee(l.Status) {
+		if l.AssignedTo == nil || xid.IsNil(*l.AssignedTo) {
+			return fmt.Errorf("teknisi wajib di-assign mulai status dihubungi")
+		}
+	} else {
+		l.AssignedTo = nil
+	}
 	l.ResellerID, l.SalesUserID = NormalizeAttribution(l.ResellerID, l.SalesUserID)
 	tag, err := s.Pool.Exec(ctx, `
 		UPDATE leads SET full_name=$3, phone=$4, email=$5, address=$6, latitude=$7, longitude=$8,
-		                 odp_id=$9, status=$10, notes=$11, reseller_id=$12, sales_user_id=$13, updated_at=NOW()
+		                 odp_id=$9, status=$10, notes=$11, reseller_id=$12, sales_user_id=$13,
+		                 assigned_to=$14, updated_at=NOW()
 		WHERE tenant_id=$1 AND id=$2 AND status <> 'converted'
-	`, l.TenantID, l.ID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.ResellerID, l.SalesUserID)
+	`, l.TenantID, l.ID, l.FullName, l.Phone, l.Email, l.Address, l.Latitude, l.Longitude, l.ODPID, l.Status, l.Notes, l.ResellerID, l.SalesUserID, l.AssignedTo)
 	if err != nil {
 		return err
 	}
@@ -158,15 +260,50 @@ func (s *Store) UpdateLead(ctx context.Context, l *Lead) error {
 }
 
 // UpdateLeadStatus moves a non-converted lead between pipeline columns (kanban).
-func (s *Store) UpdateLeadStatus(ctx context.Context, tenantID, id xid.ID, status string) error {
+// Status dihubungi / survey / proses pasang requires assignedTo.
+// Status baru / lost clears assignment.
+func (s *Store) UpdateLeadStatus(ctx context.Context, tenantID, id xid.ID, status string, assignedTo *xid.ID) error {
 	status = NormalizeLeadStatus(status)
 	if !leadStatuses[status] || status == "converted" {
 		return fmt.Errorf("status lead tidak valid")
 	}
+	if LeadStatusNeedsAssignee(status) {
+		if assignedTo == nil || xid.IsNil(*assignedTo) {
+			cur, err := s.GetLead(ctx, tenantID, id)
+			if err != nil {
+				return err
+			}
+			if cur.AssignedTo != nil && !xid.IsNil(*cur.AssignedTo) {
+				assignedTo = cur.AssignedTo
+			} else {
+				return fmt.Errorf("teknisi wajib di-assign mulai status dihubungi")
+			}
+		}
+	} else {
+		assignedTo = nil
+	}
 	tag, err := s.Pool.Exec(ctx, `
-		UPDATE leads SET status=$3, updated_at=NOW()
+		UPDATE leads SET status=$3, assigned_to=$4, updated_at=NOW()
 		WHERE tenant_id=$1 AND id=$2 AND status <> 'converted'
-	`, tenantID, id, status)
+	`, tenantID, id, status, assignedTo)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// AssignLead sets the technician user for a lead from dihubungi through proses pasang.
+func (s *Store) AssignLead(ctx context.Context, tenantID, id xid.ID, assignedTo *xid.ID) error {
+	if assignedTo == nil || xid.IsNil(*assignedTo) {
+		return fmt.Errorf("teknisi wajib")
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE leads SET assigned_to=$3, updated_at=NOW()
+		WHERE tenant_id=$1 AND id=$2 AND status IN ('contacted','survey','qualified')
+	`, tenantID, id, assignedTo)
 	if err != nil {
 		return err
 	}

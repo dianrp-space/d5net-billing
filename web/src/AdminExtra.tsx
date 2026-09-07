@@ -14,6 +14,7 @@ import {
   Input,
   Label,
   formatRp,
+  SearchableSelect,
   Section,
   Select,
   SelectContent,
@@ -24,7 +25,7 @@ import {
 } from "./ui";
 
 export type ResellerOpt = { id: string; name: string; phone?: string | null; balance?: number; commission_percent?: number; is_active?: boolean };
-export type StaffOpt = { user_id: string; full_name: string; email: string; is_active: boolean };
+export type StaffOpt = { user_id: string; full_name: string; email: string; is_active: boolean; role_slug?: string };
 
 /** Pilih Reseller ATAU Staff/Tim (saling eksklusif). */
 export function AttributionSelects({
@@ -232,7 +233,7 @@ export function IPAMPage() {
   });
   const customersQ = useQuery({
     queryKey: ["customers"],
-    queryFn: () => api<{ data: CustomerOpt[] }>("/api/customers?limit=200"),
+    queryFn: () => api<{ data: CustomerOpt[] }>("/api/customers?limit=500"),
     enabled: Boolean(assignPool),
   });
   const assignmentsQ = useQuery({
@@ -368,7 +369,9 @@ export function IPAMPage() {
       }
     >
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Pool CIDR untuk alamat IP pelanggan. Pool terhubung ke <strong>router</strong> (MikroTik), bukan ke paket. Paket hanya mengatur bandwidth/profile.
+        Pool CIDR untuk alamat IP pelanggan / hotspot. Pool terhubung ke <strong>router</strong> (MikroTik), bukan ke paket.
+        Paket mengatur bandwidth/profile; voucher hotspot memakai <strong>pool pertama</strong> di router yang sama sebagai{" "}
+        <code className="text-xs">address-pool</code> profil hotspot (IP dinamis, bukan per-kode).
       </p>
 
       <Table
@@ -418,7 +421,7 @@ export function IPAMPage() {
             <Label htmlFor="pool-name">Nama pool</Label>
             <Input
               id="pool-name"
-              placeholder="mis. PPPoE-Pool-A"
+              placeholder="mis. Hotspot-Pool / PPPoE-Pool-A"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               required
@@ -445,22 +448,19 @@ export function IPAMPage() {
           </div>
           <div className="grid gap-1.5 sm:col-span-2">
             <Label>Router terkait</Label>
-            <Select
-              value={form.router_id || "__none__"}
-              onValueChange={(v) => setForm({ ...form, router_id: v === "__none__" ? "" : v })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Pilih router" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">— Tanpa router —</SelectItem>
-                {routers.map((r) => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              allowClear
+              clearLabel="— Tanpa router —"
+              placeholder="Pilih router"
+              searchPlaceholder="Cari router…"
+              value={form.router_id}
+              onValueChange={(v) => setForm({ ...form, router_id: v })}
+              options={routers.map((r) => ({
+                value: r.id,
+                label: r.name,
+                keywords: r.name,
+              }))}
+            />
           </div>
           <div className="grid gap-1.5 sm:col-span-2">
             <Label htmlFor="pool-dns">DNS (pisahkan koma)</Label>
@@ -510,22 +510,19 @@ export function IPAMPage() {
             onChange={(e) => setAssignForm({ ...assignForm, ip_address: e.target.value })}
             required
           />
-          <Select
-            value={assignForm.customer_id || "__none__"}
-            onValueChange={(v) => setAssignForm({ ...assignForm, customer_id: v === "__none__" ? "" : v })}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Pelanggan (opsional)" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— Tanpa pelanggan —</SelectItem>
-              {customers.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.full_name} ({c.customer_code})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            allowClear
+            clearLabel="— Tanpa pelanggan —"
+            placeholder="Pelanggan (opsional)"
+            searchPlaceholder="Cari nama / kode…"
+            value={assignForm.customer_id}
+            onValueChange={(v) => setAssignForm({ ...assignForm, customer_id: v })}
+            options={customers.map((c) => ({
+              value: c.id,
+              label: `${c.full_name} (${c.customer_code})`,
+              keywords: `${c.full_name} ${c.customer_code}`,
+            }))}
+          />
           <Input
             placeholder="MAC (opsional)"
             value={assignForm.mac_address}
@@ -1226,46 +1223,6 @@ export function ResellersPage() {
           </div>
         </form>
       </FormDialog>
-    </Section>
-  );
-}
-
-export function TechPage() {
-  const [subject, setSubject] = useState("Instalasi");
-  const mut = useMutation({
-    mutationFn: () => api("/api/work-orders", { method: "POST", body: JSON.stringify({ type: "installation", notes: subject }) }),
-  });
-  const checkin = useMutation({
-    mutationFn: (id: string) =>
-      api(`/api/work-orders/${id}/check-in`, {
-        method: "POST",
-        body: JSON.stringify({ lat: -6.2, lng: 106.8 }),
-      }),
-  });
-  return (
-    <Section title="Portal teknisi">
-      <p className="mb-3 text-sm text-[var(--muted)]">Buat work order dan check-in GPS (koordinat contoh; browser geolocation bisa ditambahkan). Upload foto via endpoint terpisah.</p>
-      <form
-        className="mb-3 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          mut.mutate();
-        }}
-      >
-        <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
-        <button className="btn">Buat WO</button>
-      </form>
-      <button
-        className="btn-ghost"
-        type="button"
-        onClick={() => {
-          const id = window.prompt("UUID work order untuk check-in");
-          if (id) checkin.mutate(id.trim());
-        }}
-      >
-        Check-in WO
-      </button>
-      {mut.isSuccess && <p className="mt-2 text-sm text-[var(--ok)]">Work order dibuat.</p>}
     </Section>
   );
 }

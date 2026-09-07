@@ -468,3 +468,24 @@ func RoleHasPermission(perms []string, need string) bool {
 	}
 	return false
 }
+
+// CanDispatchOps: admin/dispatcher may create & assign tickets/WO.
+// Field technicians (ops/tickets/tech without broader admin perms) cannot.
+func CanDispatchOps(perms []string) bool {
+	if RoleHasPermission(perms, "*") ||
+		RoleHasPermission(perms, "settings") ||
+		RoleHasPermission(perms, "customers") ||
+		RoleHasPermission(perms, "billing") {
+		return true
+	}
+	return false
+}
+
+func IsFieldOpsRole(perms []string) bool {
+	if CanDispatchOps(perms) {
+		return false
+	}
+	return RoleHasPermission(perms, "ops") ||
+		RoleHasPermission(perms, "tickets") ||
+		RoleHasPermission(perms, "tech")
+}

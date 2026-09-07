@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/xid"
 )
 
@@ -23,6 +24,10 @@ type ServiceSpec struct {
 	Comment        string
 	DownloadMbps   int // optional; when >0 Apply may set simple queue
 	UploadMbps     int // optional; paired with DownloadMbps for max-limit
+	// Hotspot limits (RouterOS /ip/hotspot/user)
+	LimitBytesTotal int64  // from plan quota_gb
+	LimitUptime     string // e.g. "1d", "12h"
+	SharedUsers     int    // concurrent logins; 0 = omit
 }
 
 type Session struct {
@@ -67,6 +72,11 @@ type ProfileEnsurer interface {
 type IPPoolEnsurer interface {
 	EnsureIPPool(ctx context.Context, tenantID, routerID xid.ID, name, network string, gateway *string) error
 	RemoveIPPool(ctx context.Context, tenantID, routerID xid.ID, name string) error
+}
+
+// IsolirEnsurer syncs isolir pool, profile, and redirect firewall/NAT rules.
+type IsolirEnsurer interface {
+	EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.ID, cfg store.IsolirNetworkSettings, tenantSlug string) error
 }
 
 type Factory func(provisionerType string) (Provisioner, error)

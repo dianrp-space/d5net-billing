@@ -131,6 +131,34 @@ func CommentTag(appName, customerCode, customerName string) string {
 	}
 }
 
+const IsolirCommentPrefix = "ISOLIR "
+
+// WithIsolirComment prefixes an existing secret comment with "ISOLIR " (idempotent).
+func WithIsolirComment(comment string) string {
+	c := strings.TrimSpace(comment)
+	if c == "" {
+		return strings.TrimSpace(IsolirCommentPrefix)
+	}
+	upper := strings.ToUpper(c)
+	if strings.HasPrefix(upper, "ISOLIR ") || upper == "ISOLIR" {
+		return c
+	}
+	return IsolirCommentPrefix + c
+}
+
+// WithoutIsolirComment strips a leading "ISOLIR " prefix from a secret comment.
+func WithoutIsolirComment(comment string) string {
+	c := strings.TrimSpace(comment)
+	upper := strings.ToUpper(c)
+	if strings.HasPrefix(upper, "ISOLIR ") {
+		return strings.TrimSpace(c[len("ISOLIR "):])
+	}
+	if upper == "ISOLIR" {
+		return ""
+	}
+	return c
+}
+
 func sanitizeCommentPart(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "\n", " ")

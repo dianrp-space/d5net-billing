@@ -1,9 +1,22 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import { LayoutGrid, List } from "lucide-react";
+import { api, apiUpload } from "./api";
 import { useAppDialog } from "./confirm";
 import { Badge } from "./components/ui/badge";
-import { IconCheck, IconEye, IconPencil, IconUserCheck } from "./icons";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import {
+  Kanban,
+  KanbanBoard,
+  KanbanColumn,
+  KanbanColumnContent,
+  KanbanColumnHeader,
+  KanbanItem,
+  KanbanOverlay,
+  type KanbanCommitMeta,
+} from "./components/ui/kanban";
+import { IconCheck, IconImage, IconPencil, IconUserCheck } from "./icons";
+import { canDispatchOps, type MePermissions } from "./permissions";
 import { toastError, toastSuccess } from "./swal";
 import {
   Button,
@@ -11,6 +24,7 @@ import {
   IconButton,
   Input,
   Label,
+  SearchableSelect,
   Section,
   Select,
   SelectContent,
@@ -40,6 +54,7 @@ type TicketMessage = {
   sender_type: string;
   sender_name?: string;
   message: string;
+  image_urls?: string[];
   created_at: string;
 };
 
@@ -47,12 +62,16 @@ type CustomerOpt = { id: string; full_name: string; customer_code: string };
 
 type StaffOpt = { user_id: string; full_name: string; is_active: boolean };
 
-const statusLabels: Record<string, string> = {
-  open: "Open",
-  in_progress: "Proses",
-  resolved: "Resolved",
-  closed: "Closed",
-};
+const COLUMNS: { id: string; label: string }[] = [
+  { id: "open", label: "Open" },
+  { id: "in_progress", label: "Proses" },
+  { id: "resolved", label: "Resolved" },
+  { id: "closed", label: "Closed" },
+];
+
+const COLUMN_IDS = COLUMNS.map((c) => c.id);
+
+const statusLabels: Record<string, string> = Object.fromEntries(COLUMNS.map((c) => [c.id, c.label]));
 
 const priorityLabels: Record<string, string> = {
   low: "Rendah",
@@ -77,6 +96,21 @@ const emptyForm = {
   customer_id: "",
 };
 
+const TICKETS_VIEW_KEY = "drp_tickets_view";
+
+function emptyBoard(): Record<string, TicketRow[]> {
+  return Object.fromEntries(COLUMN_IDS.map((id) => [id, []]));
+}
+
+function boardFromList(list: TicketRow[]): Record<string, TicketRow[]> {
+  const board = emptyBoard();
+  for (const t of list) {
+    const st = COLUMN_IDS.includes(t.status) ? t.status : "open";
+    board[st].push(t);
+  }
+  return board;
+}
+
 function formatWhen(iso?: string | null) {
   if (!iso) return "—";
   try {
@@ -98,6 +132,66 @@ function statusVariant(s: string): "default" | "danger" | "outline" | "success" 
   return "outline";
 }
 
+function TicketCardBody({
+  ticket,
+  overlay,
+  actions,
+  onOpen,
+}: {
+  ticket: TicketRow;
+  overlay?: boolean;
+  actions?: ReactNode;
+  onOpen?: () => void;
+}) {
+  return (
+    <Card
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      onClick={onOpen}
+      onKeyDown={
+        onOpen
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpen();
+              }
+            }
+          : undefined
+      }
+      className={`shadow-none ${onOpen ? "cursor-pointer" : ""} ${
+        overlay
+          ? "rotate-1 scale-[1.02] shadow-[var(--shadow-md)] ring-1 ring-[var(--accent)]"
+          : "hover:border-[var(--accent)]/40"
+      }`}
+    >
+      <CardHeader className="space-y-1 p-3 pb-1">
+        <CardTitle className="text-sm leading-snug">{ticket.subject}</CardTitle>
+        <p className="text-xs text-[var(--muted)]">{ticket.customer_name || "Tanpa pelanggan"}</p>
+      </CardHeader>
+      <CardContent className="space-y-2 p-3 pt-1">
+        <div className="flex flex-wrap gap-1">
+          <Badge variant={priorityVariant(ticket.priority)}>
+            {priorityLabels[ticket.priority] || ticket.priority}
+          </Badge>
+          <Badge variant="outline">{categoryLabels[ticket.category] || ticket.category}</Badge>
+        </div>
+        {ticket.assignee_name ? (
+          <p className="text-[10px] text-[var(--muted)]">Teknisi: {ticket.assignee_name}</p>
+        ) : null}
+        {actions ? (
+          <div
+            className="flex flex-wrap items-center gap-1"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {actions}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function TicketsPage() {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
@@ -111,21 +205,56 @@ export function TicketsPage() {
   const [msg, setMsg] = useState("");
   const [assignOpen, setAssignOpen] = useState<TicketRow | null>(null);
   const [assignUser, setAssignUser] = useState("");
+  const [columns, setColumns] = useState<Record<string, TicketRow[]>>(emptyBoard);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photoRef = useRef<HTMLInputElement>(null);
+  const [view, setView] = useState<"kanban" | "list">(() => {
+    try {
+      const v = localStorage.getItem(TICKETS_VIEW_KEY);
+      return v === "list" ? "list" : "kanban";
+    } catch {
+      return "kanban";
+    }
+  });
 
-  const q = useQuery({
-    queryKey: ["tickets", status, page],
+  function setViewMode(next: "kanban" | "list") {
+    setView(next);
+    try {
+      localStorage.setItem(TICKETS_VIEW_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const meQ = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api<MePermissions & { user_id: string }>("/api/me"),
+  });
+  const canDispatch = canDispatchOps(meQ.data?.permissions);
+
+  const listQ = useQuery({
+    queryKey: ["tickets", "list", status, page],
     queryFn: () =>
       api<{ data: TicketRow[]; total: number }>(
         `/api/tickets?limit=${limit}&offset=${page * limit}${status ? `&status=${encodeURIComponent(status)}` : ""}`,
       ),
+    enabled: view === "list",
+  });
+  const boardQ = useQuery({
+    queryKey: ["tickets", "kanban"],
+    queryFn: () => api<{ data: TicketRow[]; total: number }>("/api/tickets?limit=200&offset=0"),
+    enabled: view === "kanban",
   });
   const customersQ = useQuery({
     queryKey: ["customers"],
-    queryFn: () => api<{ data: CustomerOpt[] }>("/api/customers?limit=100"),
+    queryFn: () => api<{ data: CustomerOpt[] }>("/api/customers?limit=500"),
+    enabled: canDispatch,
   });
   const usersQ = useQuery({
-    queryKey: ["tenant-users"],
-    queryFn: () => api<StaffOpt[]>("/api/settings/users"),
+    queryKey: ["user-options"],
+    queryFn: () => api<StaffOpt[]>("/api/users/options"),
+    enabled: canDispatch,
   });
   const messagesQ = useQuery({
     queryKey: ["ticket-messages", detail?.id],
@@ -135,10 +264,30 @@ export function TicketsPage() {
 
   const customers = customersQ.data?.data ?? [];
   const users = (Array.isArray(usersQ.data) ? usersQ.data : []).filter((u) => u.is_active);
-  const list = q.data?.data ?? [];
-  const total = q.data?.total ?? 0;
+  const list = listQ.data?.data ?? [];
+  const total = listQ.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / limit));
+  const boardList = boardQ.data?.data;
   const messages = Array.isArray(messagesQ.data) ? messagesQ.data : [];
+
+  useEffect(() => {
+    if (view === "kanban") setColumns(boardFromList(boardList ?? []));
+  }, [view, boardList]);
+
+  useEffect(() => {
+    if (!detail) {
+      setMsg("");
+      setPendingImages([]);
+    }
+  }, [detail]);
+
+  const ticketById = useMemo(() => {
+    const map = new Map<string, TicketRow>();
+    for (const col of Object.values(columns)) {
+      for (const t of col) map.set(t.id, t);
+    }
+    return map;
+  }, [columns]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -166,16 +315,19 @@ export function TicketsPage() {
   });
 
   const setStatusMut = useMutation({
-    mutationFn: ({ id, status: st }: { id: string; status: string }) =>
+    mutationFn: ({ id, status: st }: { id: string; status: string; quiet?: boolean }) =>
       api(`/api/tickets/${id}/status`, { method: "PATCH", body: JSON.stringify({ status: st }) }),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["tickets"] });
       if (detail) {
         void api<TicketRow>(`/api/tickets/${detail.id}`).then(setDetail).catch(() => undefined);
       }
-      void toastSuccess("Status diperbarui");
+      if (!vars.quiet) void toastSuccess("Status diperbarui");
     },
-    onError: (e: Error) => void toastError(e.message),
+    onError: (e: Error) => {
+      qc.invalidateQueries({ queryKey: ["tickets"] });
+      void toastError(e.message);
+    },
   });
 
   const assignMut = useMutation({
@@ -197,140 +349,261 @@ export function TicketsPage() {
     mutationFn: () =>
       api(`/api/tickets/${detail!.id}/messages`, {
         method: "POST",
-        body: JSON.stringify({ message: msg.trim() }),
+        body: JSON.stringify({
+          message: msg.trim(),
+          image_urls: pendingImages.length ? pendingImages : undefined,
+        }),
       }),
     onSuccess: () => {
       setMsg("");
+      setPendingImages([]);
       qc.invalidateQueries({ queryKey: ["ticket-messages", detail?.id] });
       void toastSuccess("Pesan terkirim");
     },
     onError: (e: Error) => void toastError(e.message),
   });
 
+  async function onPickPhoto(file: File) {
+    if (!detail) return;
+    setPhotoBusy(true);
+    try {
+      const res = await apiUpload<{ url: string }>(`/api/tickets/${detail.id}/messages/photos`, file);
+      setPendingImages((prev) => [...prev, res.url]);
+      void toastSuccess("Gambar siap dilampirkan");
+    } catch (e) {
+      void toastError(e instanceof Error ? e.message : "Upload gagal");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  function openDetail(t: TicketRow) {
+    setDetail(t);
+    setMsg("");
+    setPendingImages([]);
+  }
+
+  function ticketActions(t: TicketRow) {
+    return (
+      <>
+        {t.status === "open" ? (
+          <IconButton label="Mulai proses" onClick={() => setStatusMut.mutate({ id: t.id, status: "in_progress" })}>
+            <IconPencil />
+          </IconButton>
+        ) : null}
+        {t.status === "open" || t.status === "in_progress" ? (
+          <IconButton
+            label="Resolve"
+            onClick={async () => {
+              const ok = await confirm({
+                title: "Resolve tiket",
+                description: `Tandai "${t.subject}" sebagai resolved?`,
+                confirmLabel: "Resolve",
+              });
+              if (!ok) return;
+              setStatusMut.mutate({ id: t.id, status: "resolved" });
+            }}
+          >
+            <IconCheck />
+          </IconButton>
+        ) : null}
+        {canDispatch ? (
+          <IconButton
+            label="Assign"
+            onClick={() => {
+              setAssignOpen(t);
+              setAssignUser(t.assigned_to || "");
+            }}
+          >
+            <IconUserCheck />
+          </IconButton>
+        ) : null}
+      </>
+    );
+  }
+
+  function onValueCommit(next: Record<string, TicketRow[]>, meta: KanbanCommitMeta<TicketRow>) {
+    const ticket = next[meta.overContainer]?.[meta.overIndex];
+    if (!ticket) {
+      setColumns(meta.previousValue);
+      return;
+    }
+    if (meta.activeContainer === meta.overContainer) {
+      return;
+    }
+    setColumns(
+      Object.fromEntries(
+        Object.entries(next).map(([k, rows]) => [
+          k,
+          rows.map((r) => (r.id === ticket.id ? { ...r, status: k } : r)),
+        ]),
+      ),
+    );
+    setStatusMut.mutate({ id: ticket.id, status: meta.overContainer, quiet: true });
+  }
+
   return (
     <Section
       title="Tiket"
       actions={
-        <Button
-          type="button"
-          onClick={() => {
-            setForm(emptyForm);
-            setFormErr("");
-            setOpen(true);
-          }}
-        >
-          + Tambah
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center rounded-md border border-[var(--border)] p-0.5">
+            <IconButton
+              label="Tampilan kanban"
+              className={view === "kanban" ? "bg-[var(--panel-muted)]" : undefined}
+              onClick={() => setViewMode("kanban")}
+            >
+              <LayoutGrid className="size-4" />
+            </IconButton>
+            <IconButton
+              label="Tampilan daftar"
+              className={view === "list" ? "bg-[var(--panel-muted)]" : undefined}
+              onClick={() => setViewMode("list")}
+            >
+              <List className="size-4" />
+            </IconButton>
+          </div>
+          {canDispatch ? (
+            <Button
+              type="button"
+              onClick={() => {
+                setForm(emptyForm);
+                setFormErr("");
+                setOpen(true);
+              }}
+            >
+              + Tambah
+            </Button>
+          ) : null}
+        </div>
       }
     >
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Tiket support pelanggan: filter status, assign ke tim, ubah status, dan catat balasan.
+        {canDispatch
+          ? view === "kanban"
+            ? "Kanban: seret kartu antar kolom status. Assign ke teknisi, catat balasan di detail."
+            : "Daftar tiket support & instalasi. Filter status, assign teknisi, ubah status, catat balasan."
+          : view === "kanban"
+            ? "Kanban tiket yang di-assign ke Anda. Seret untuk ubah status."
+            : "Tiket yang di-assign ke Anda. Ubah status dan balas pesan."}
       </p>
 
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <div className="min-w-[180px]">
-          <Label className="mb-1.5 block">Status</Label>
-          <Select
-            value={status || "__all__"}
-            onValueChange={(v) => {
-              setStatus(v === "__all__" ? "" : v);
-              setPage(0);
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">Semua</SelectItem>
-              {Object.entries(statusLabels).map(([k, label]) => (
-                <SelectItem key={k} value={k}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <Table
-        columns={["Subjek", "Pelanggan", "Kategori", "Prioritas", "Status", "SLA", "Aksi"]}
-        rows={list.map((t) => [
-          <div key={`${t.id}-sub`} className="max-w-[220px]">
-            <p className="font-medium text-[var(--text)]">{t.subject}</p>
-            <p className="text-xs text-[var(--muted)]">{formatWhen(t.created_at)}</p>
-          </div>,
-          t.customer_name || "—",
-          categoryLabels[t.category] || t.category,
-          <Badge key={`${t.id}-p`} variant={priorityVariant(t.priority)}>
-            {priorityLabels[t.priority] || t.priority}
-          </Badge>,
-          <Badge key={`${t.id}-s`} variant={statusVariant(t.status)}>
-            {statusLabels[t.status] || t.status}
-          </Badge>,
-          formatWhen(t.sla_due_at),
-          <span key={`${t.id}-a`} className="flex flex-wrap items-center gap-1.5">
-            <IconButton
-              label="Detail tiket"
-              onClick={() => {
-                setDetail(t);
-                setMsg("");
-              }}
-            >
-              <IconEye />
-            </IconButton>
-            {t.status === "open" ? (
-              <IconButton label="Mulai proses" onClick={() => setStatusMut.mutate({ id: t.id, status: "in_progress" })}>
-                <IconPencil />
-              </IconButton>
-            ) : null}
-            {t.status === "open" || t.status === "in_progress" ? (
-              <IconButton
-                label="Resolve"
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: "Resolve tiket",
-                    description: `Tandai "${t.subject}" sebagai resolved?`,
-                    confirmLabel: "Resolve",
-                  });
-                  if (!ok) return;
-                  setStatusMut.mutate({ id: t.id, status: "resolved" });
+      {view === "list" ? (
+        <>
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            <div className="min-w-[180px]">
+              <Label className="mb-1.5 block">Status</Label>
+              <Select
+                value={status || "__all__"}
+                onValueChange={(v) => {
+                  setStatus(v === "__all__" ? "" : v);
+                  setPage(0);
                 }}
               >
-                <IconCheck />
-              </IconButton>
-            ) : null}
-            <IconButton
-              label="Assign"
-              onClick={() => {
-                setAssignOpen(t);
-                setAssignUser(t.assigned_to || "");
-              }}
-            >
-              <IconUserCheck />
-            </IconButton>
-          </span>,
-        ])}
-      />
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Semua</SelectItem>
+                  {COLUMNS.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
-      <div className="mt-3 flex items-center justify-between gap-2 text-sm text-[var(--muted)]">
-        <span>
-          Halaman {page + 1} / {pages} · {total} tiket
-        </span>
-        <div className="flex gap-2">
-          <Button type="button" variant="outline" size="sm" disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>
-            Sebelumnya
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={page + 1 >= pages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Berikutnya
-          </Button>
-        </div>
-      </div>
+          <Table
+            columns={["Subjek", "Pelanggan", "Kategori", "Prioritas", "Status", "SLA", "Aksi"]}
+            onRowClick={(i) => openDetail(list[i])}
+            rows={list.map((t) => [
+              <div key={`${t.id}-sub`} className="max-w-[220px]">
+                <p className="font-medium text-[var(--text)]">{t.subject}</p>
+                <p className="text-xs text-[var(--muted)]">{formatWhen(t.created_at)}</p>
+              </div>,
+              t.customer_name || "—",
+              categoryLabels[t.category] || t.category,
+              <Badge key={`${t.id}-p`} variant={priorityVariant(t.priority)}>
+                {priorityLabels[t.priority] || t.priority}
+              </Badge>,
+              <Badge key={`${t.id}-s`} variant={statusVariant(t.status)}>
+                {statusLabels[t.status] || t.status}
+              </Badge>,
+              formatWhen(t.sla_due_at),
+              <span key={`${t.id}-a`} className="flex flex-wrap items-center gap-1.5">
+                {ticketActions(t)}
+              </span>,
+            ])}
+          />
+
+          <div className="mt-3 flex items-center justify-between gap-2 text-sm text-[var(--muted)]">
+            <span>
+              Halaman {page + 1} / {pages} · {total} tiket
+            </span>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>
+                Sebelumnya
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={page + 1 >= pages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Berikutnya
+              </Button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <Kanban
+          value={columns}
+          onValueChange={setColumns}
+          getItemValue={(item) => item.id}
+          onValueCommit={onValueCommit}
+          restoreOnCancel
+          className="min-w-0"
+        >
+          <KanbanBoard>
+            {COLUMNS.map((col) => (
+              <KanbanColumn key={col.id} value={col.id}>
+                <KanbanColumnHeader>
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--text)]">{col.label}</p>
+                  </div>
+                  <Badge variant="outline">{(columns[col.id] ?? []).length}</Badge>
+                </KanbanColumnHeader>
+                <KanbanColumnContent>
+                  {(columns[col.id] ?? []).map((t) => (
+                    <KanbanItem key={t.id} value={t.id}>
+                      <TicketCardBody ticket={t} onOpen={() => openDetail(t)} actions={ticketActions(t)} />
+                    </KanbanItem>
+                  ))}
+                  {(columns[col.id] ?? []).length === 0 ? (
+                    <p className="px-2 py-6 text-center text-xs text-[var(--muted)]">Kosong</p>
+                  ) : null}
+                </KanbanColumnContent>
+              </KanbanColumn>
+            ))}
+          </KanbanBoard>
+
+          <KanbanOverlay>
+            {({ value, variant }) => {
+              if (variant !== "item") return null;
+              const ticket = ticketById.get(String(value));
+              if (!ticket) return null;
+              return (
+                <div className="w-[244px]">
+                  <TicketCardBody ticket={ticket} overlay />
+                </div>
+              );
+            }}
+          </KanbanOverlay>
+        </Kanban>
+      )}
 
       <FormDialog
         open={open}
@@ -397,22 +670,19 @@ export function TicketsPage() {
           </div>
           <div className="sm:col-span-2">
             <Label className="mb-1.5 block">Pelanggan (opsional)</Label>
-            <Select
-              value={form.customer_id || "__none__"}
-              onValueChange={(v) => setForm({ ...form, customer_id: v === "__none__" ? "" : v })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Pelanggan" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">— Tidak terkait —</SelectItem>
-                {customers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.full_name} ({c.customer_code})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              allowClear
+              clearLabel="— Tidak terkait —"
+              placeholder="Pelanggan"
+              searchPlaceholder="Cari nama / kode pelanggan…"
+              value={form.customer_id}
+              onValueChange={(v) => setForm({ ...form, customer_id: v })}
+              options={customers.map((c) => ({
+                value: c.id,
+                label: `${c.full_name} (${c.customer_code})`,
+                keywords: `${c.full_name} ${c.customer_code}`,
+              }))}
+            />
           </div>
           <div className="flex flex-wrap gap-2 sm:col-span-2">
             <Button type="submit" disabled={create.isPending}>
@@ -497,16 +767,49 @@ export function TicketsPage() {
                       <p className="text-xs text-[var(--muted)]">
                         {m.sender_name || m.sender_type} · {formatWhen(m.created_at)}
                       </p>
-                      <p className="mt-1 text-[var(--text)]">{m.message}</p>
+                      {m.message ? <p className="mt-1 whitespace-pre-wrap text-[var(--text)]">{m.message}</p> : null}
+                      {(m.image_urls?.length ?? 0) > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {m.image_urls!.map((url) => (
+                            <a
+                              key={url}
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block overflow-hidden rounded border border-[var(--border)]"
+                            >
+                              <img src={url} alt="" className="h-20 w-20 object-cover" />
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   ))
                 )}
               </div>
+              {pendingImages.length > 0 ? (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {pendingImages.map((url) => (
+                    <div key={url} className="relative">
+                      <img src={url} alt="" className="h-16 w-16 rounded border border-[var(--border)] object-cover" />
+                      <button
+                        type="button"
+                        className="absolute -right-1 -top-1 rounded-full bg-[var(--danger)] px-1 text-[10px] text-white"
+                        title="Hapus lampiran"
+                        aria-label="Hapus lampiran"
+                        onClick={() => setPendingImages((prev) => prev.filter((u) => u !== url))}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <form
-                className="flex flex-wrap gap-2"
+                className="flex flex-wrap items-end gap-2"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (!msg.trim()) return;
+                  if (!msg.trim() && pendingImages.length === 0) return;
                   sendMsg.mutate();
                 }}
               >
@@ -516,7 +819,25 @@ export function TicketsPage() {
                   value={msg}
                   onChange={(e) => setMsg(e.target.value)}
                 />
-                <Button type="submit" disabled={sendMsg.isPending || !msg.trim()}>
+                <IconButton
+                  label="Lampirkan gambar"
+                  disabled={photoBusy}
+                  onClick={() => photoRef.current?.click()}
+                >
+                  <IconImage />
+                </IconButton>
+                <input
+                  ref={photoRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) void onPickPhoto(file);
+                  }}
+                />
+                <Button type="submit" disabled={sendMsg.isPending || (!msg.trim() && pendingImages.length === 0)}>
                   Kirim
                 </Button>
               </form>
@@ -544,20 +865,20 @@ export function TicketsPage() {
           <p className="text-sm text-[var(--muted)]">{assignOpen?.subject}</p>
           <div>
             <Label className="mb-1.5 block">User / tim</Label>
-            <Select value={assignUser || "__me__"} onValueChange={(v) => setAssignUser(v === "__me__" ? "" : v)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__me__">Saya (user login)</SelectItem>
-                {users.map((u) => (
-                  <SelectItem key={u.user_id} value={u.user_id}>
-                    {u.full_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-xs text-[var(--muted)]">Kosongkan pilihan khusus = assign ke akun yang sedang login.</p>
+            <SearchableSelect
+              allowClear
+              clearLabel="Saya (user login)"
+              placeholder="Saya (user login)"
+              searchPlaceholder="Cari nama user…"
+              value={assignUser}
+              onValueChange={setAssignUser}
+              options={users.map((u) => ({
+                value: u.user_id,
+                label: u.full_name,
+                keywords: u.full_name,
+              }))}
+            />
+            <p className="mt-1 text-xs text-[var(--muted)]">Kosongkan = assign ke akun yang sedang login.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={assignMut.isPending}>

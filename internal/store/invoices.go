@@ -308,6 +308,23 @@ func (s *Store) SumOverdueUnpaidForSubscription(ctx context.Context, tenantID xi
 	return sum, err
 }
 
+// SubscriptionHasPastDueUnpaid reports whether the subscription still has unpaid invoices
+// past due_date + plan.grace_days (same rule as auto-isolir).
+func (s *Store) SubscriptionHasPastDueUnpaid(ctx context.Context, tenantID, subscriptionID xid.ID) (bool, error) {
+	var n int
+	err := s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM invoices i
+		JOIN subscriptions s ON s.id = i.subscription_id AND s.tenant_id = i.tenant_id
+		JOIN plans p ON p.id = s.plan_id
+		WHERE i.tenant_id = $1 AND i.subscription_id = $2
+		  AND i.status IN ('issued','partial','overdue')
+		  AND i.total_amount > i.paid_amount
+		  AND (i.due_date::timestamptz + (COALESCE(p.grace_days, 0) || ' days')::interval) < NOW()
+	`, tenantID, subscriptionID).Scan(&n)
+	return n > 0, err
+}
+
 func (s *Store) ListCustomerPayments(ctx context.Context, tenantID xid.ID, customerID xid.ID, limit int) ([]Payment, error) {
 	if limit <= 0 {
 		limit = 20

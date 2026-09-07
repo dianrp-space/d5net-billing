@@ -4,6 +4,7 @@ import { AdminLogin } from "./AdminLogin";
 import { AUTH_EXPIRED_EVENT, clearClientSession, getAdminSlug, getClientSession, getPlatformToken, getToken } from "./api";
 import { ClientHome } from "./ClientHome";
 import { ClientLogin, type ClientPortalData } from "./ClientLogin";
+import { IsolirPortalPage } from "./IsolirPortalPage";
 import { Landing } from "./Landing";
 import { PlatformApp } from "./PlatformApp";
 import { PlatformLogin } from "./PlatformLogin";
@@ -39,6 +40,8 @@ export default function App() {
 
   const adminRoute = parseTenantRoute(p, "admin");
   const clientRoute = parseTenantRoute(p, "client");
+  const isolirMatch = p.match(/^\/isolir\/([^/]+)\/?$/);
+  const isolirSlug = isolirMatch?.[1] || "";
   const adminKey = adminRoute ? `${adminRoute.slug}:${adminRoute.login ? "login" : "app"}` : "";
   const clientKey = clientRoute ? `${clientRoute.slug}:${clientRoute.login ? "login" : "app"}` : "";
   const clientTenantSlug = clientSession?.tenant_slug || "";
@@ -168,9 +171,9 @@ export default function App() {
         slug={adminRoute.slug}
         onSuccess={() => {
           refreshAuth();
-          const last = getLastAdminPage(adminRoute.slug);
-          const section = last && isAdminPage(last) ? last : "dashboard";
-          navigate(`/admin/${adminRoute.slug}/${section}`);
+          // Start at dashboard after login; permission filter will keep allowed menus.
+          // Avoid restoring a last page that triggers settings-only APIs for limited roles.
+          navigate(`/admin/${adminRoute.slug}/dashboard`);
         }}
       />
     );
@@ -194,6 +197,10 @@ export default function App() {
         }}
       />
     );
+  }
+
+  if (isolirSlug) {
+    return <IsolirPortalPage slug={isolirSlug} />;
   }
 
   if (clientRoute?.login) {

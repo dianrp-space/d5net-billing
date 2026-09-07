@@ -20,6 +20,8 @@ type Plan struct {
 	DownloadMbps  int     `json:"download_mbps"`
 	UploadMbps    int     `json:"upload_mbps"`
 	QuotaGB       *int    `json:"quota_gb,omitempty"`
+	LimitUptime   *string `json:"limit_uptime,omitempty"`
+	SharedUsers   *int    `json:"shared_users,omitempty"`
 	ProfileName   *string `json:"profile_name,omitempty"`
 	IsolirProfile *string `json:"isolir_profile,omitempty"`
 	GraceDays     int     `json:"grace_days"`
@@ -33,7 +35,7 @@ func (s *Store) ListPlans(ctx context.Context, tenantID xid.ID) ([]Plan, error) 
 	}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id, tenant_id, name, code, service_type, price, billing_cycle, download_mbps, upload_mbps,
-		       quota_gb, profile_name, isolir_profile, grace_days, tax_percent, is_active
+		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active
 		FROM plans WHERE tenant_id = $1 ORDER BY name
 	`, tenantID)
 	if err != nil {
@@ -44,7 +46,8 @@ func (s *Store) ListPlans(ctx context.Context, tenantID xid.ID) ([]Plan, error) 
 	for rows.Next() {
 		var p Plan
 		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.Code, &p.ServiceType, &p.Price, &p.BillingCycle,
-			&p.DownloadMbps, &p.UploadMbps, &p.QuotaGB, &p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive); err != nil {
+			&p.DownloadMbps, &p.UploadMbps, &p.QuotaGB, &p.LimitUptime, &p.SharedUsers,
+			&p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive); err != nil {
 			return nil, err
 		}
 		list = append(list, p)
@@ -58,12 +61,13 @@ func (s *Store) GetPlan(ctx context.Context, tenantID xid.ID, id xid.ID) (*Plan,
 	}
 	row := s.Pool.QueryRow(ctx, `
 		SELECT id, tenant_id, name, code, service_type, price, billing_cycle, download_mbps, upload_mbps,
-		       quota_gb, profile_name, isolir_profile, grace_days, tax_percent, is_active
+		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active
 		FROM plans WHERE tenant_id = $1 AND id = $2
 	`, tenantID, id)
 	var p Plan
 	err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Code, &p.ServiceType, &p.Price, &p.BillingCycle,
-		&p.DownloadMbps, &p.UploadMbps, &p.QuotaGB, &p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive)
+		&p.DownloadMbps, &p.UploadMbps, &p.QuotaGB, &p.LimitUptime, &p.SharedUsers,
+		&p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -76,10 +80,10 @@ func (s *Store) CreatePlan(ctx context.Context, p *Plan) error {
 	}
 	return s.Pool.QueryRow(ctx, `
 		INSERT INTO plans (tenant_id, name, code, service_type, price, billing_cycle, download_mbps, upload_mbps,
-		                   quota_gb, profile_name, isolir_profile, grace_days, tax_percent, is_active)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id
+		                   quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id
 	`, p.TenantID, p.Name, p.Code, p.ServiceType, p.Price, p.BillingCycle, p.DownloadMbps, p.UploadMbps,
-		p.QuotaGB, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive).Scan(&p.ID)
+		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive).Scan(&p.ID)
 }
 
 func (s *Store) UpdatePlan(ctx context.Context, p *Plan) error {
@@ -88,10 +92,11 @@ func (s *Store) UpdatePlan(ctx context.Context, p *Plan) error {
 	}
 	tag, err := s.Pool.Exec(ctx, `
 		UPDATE plans SET name=$3, service_type=$4, price=$5, billing_cycle=$6, download_mbps=$7, upload_mbps=$8,
-		                 quota_gb=$9, profile_name=$10, isolir_profile=$11, grace_days=$12, tax_percent=$13, is_active=$14, updated_at=NOW()
+		                 quota_gb=$9, limit_uptime=$10, shared_users=$11, profile_name=$12, isolir_profile=$13,
+		                 grace_days=$14, tax_percent=$15, is_active=$16, updated_at=NOW()
 		WHERE tenant_id=$1 AND id=$2
 	`, p.TenantID, p.ID, p.Name, p.ServiceType, p.Price, p.BillingCycle, p.DownloadMbps, p.UploadMbps,
-		p.QuotaGB, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive)
+		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive)
 	if err != nil {
 		return err
 	}
@@ -354,13 +359,24 @@ func (s *Store) ListOverdueSubscriptions(ctx context.Context, tenantID xid.ID, g
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, err
 	}
+	// Isolir when an unpaid invoice is past due_date + plan.grace_days.
+	// (Do not use next_bill_at — billing advances that clock when creating invoices.)
+	_ = graceDays // kept for API compat; grace comes from joined plan
 	rows, err := s.Pool.Query(ctx, `
 		SELECT s.id, s.tenant_id, s.customer_id, s.plan_id, s.router_id, s.username, s.service_type, s.status,
 		       s.started_at, s.expires_at, s.next_bill_at, s.suspended_at, '', ''
 		FROM subscriptions s
 		JOIN plans p ON p.id = s.plan_id
-		WHERE s.tenant_id = $1 AND s.status IN ('active','overdue')
-		  AND s.next_bill_at + (p.grace_days || ' days')::interval < NOW()
+		WHERE s.tenant_id = $1
+		  AND s.status IN ('active','overdue')
+		  AND EXISTS (
+		    SELECT 1 FROM invoices i
+		    WHERE i.tenant_id = s.tenant_id
+		      AND i.subscription_id = s.id
+		      AND i.status IN ('issued','partial','overdue')
+		      AND i.total_amount > i.paid_amount
+		      AND (i.due_date::timestamptz + (COALESCE(p.grace_days, 0) || ' days')::interval) < NOW()
+		  )
 	`, tenantID)
 	if err != nil {
 		return nil, err

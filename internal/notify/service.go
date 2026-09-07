@@ -5,17 +5,19 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/xid"
 )
 
 type Message struct {
-	TenantID  xid.ID
-	Channel   string
-	Recipient string
-	Subject   string
-	Body      string
+	TenantID    xid.ID
+	Channel     string
+	Recipient   string
+	Subject     string
+	Body        string
+	ScheduledAt *time.Time
 }
 
 type Notifier interface {
@@ -58,11 +60,44 @@ func (s *Service) Register(n Notifier) {
 }
 
 func (s *Service) Queue(ctx context.Context, msg Message) error {
+	if msg.ScheduledAt != nil {
+		_, err := s.store.Pool.Exec(ctx, `
+			INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body, scheduled_at)
+			VALUES ($1,$2,$3,$4,$5,$6)
+		`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body, *msg.ScheduledAt)
+		return err
+	}
 	_, err := s.store.Pool.Exec(ctx, `
 		INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body)
 		VALUES ($1,$2,$3,$4,$5)
 	`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body)
 	return err
+}
+
+// QueueBroadcast enqueues many messages with staggered scheduled_at (rate limit).
+func (s *Service) QueueBroadcast(ctx context.Context, tenantID xid.ID, channel, subject, body string, recipients []string, delaySeconds int) (int, error) {
+	if delaySeconds < 1 {
+		delaySeconds = 2
+	}
+	if delaySeconds > 60 {
+		delaySeconds = 60
+	}
+	n := 0
+	base := time.Now()
+	for i, r := range recipients {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		at := base.Add(time.Duration(i*delaySeconds) * time.Second)
+		if err := s.Queue(ctx, Message{
+			TenantID: tenantID, Channel: channel, Recipient: r, Subject: subject, Body: body, ScheduledAt: &at,
+		}); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 func (s *Service) ProcessPending(ctx context.Context, limit int) (int, error) {

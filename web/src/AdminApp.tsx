@@ -27,22 +27,27 @@ import {
 } from "./icons";
 import { useAppDialog } from "./confirm";
 import { swalAlert, toastError, toastSuccess } from "./swal";
-import { Card, formatRp, FormDialog, IconButton, Input, OnlineBadge, Section, SecretInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StatusDialog, Table, Button } from "./ui";
+import { Card, formatRp, FormDialog, IconButton, Input, OnlineBadge, SearchableSelect, Section, SecretInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StatusDialog, Table, Button } from "./ui";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MapPin, PanelLeft, PanelLeftClose, Home } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
-import { AccountingPage, AlertsPanel, AttributionSelects, CommissionBasisSelect, IPAMPage, InvoiceActions, ResellersPage, TechPage } from "./AdminExtra";
+import { AccountingPage, AlertsPanel, AttributionSelects, CommissionBasisSelect, IPAMPage, InvoiceActions, ResellersPage } from "./AdminExtra";
 import { LeadsPage } from "./LeadsKanban";
 import { TicketsPage } from "./TicketsPage";
+import { SLAReportPage } from "./SLAReportPage";
+import { VouchersPage } from "./VouchersPage";
 import { MapODP } from "./FtthMap";
 import { HeaderSearch } from "./HeaderSearch";
 import { getLastOdpCluster, getSidebarOpen, setLastOdpCluster, setSidebarOpen } from "./navPersist";
 import { BrandingSettingsPage, RolesSettingsPage, UsersSettingsPage } from "./SettingsPages";
+import { IsolirTemplatePage } from "./IsolirTemplatePage";
+import { NotificationsPage } from "./NotificationsPage";
 import { MessagingGWPage, PaymentGWPage, WebhooksIntegrationPage } from "./IntegrationPages";
 import { BackupRestorePage } from "./BackupRestorePage";
 import { applyBrandingMeta } from "./branding";
+import { canAccessPage, canDispatchOps, firstAllowedPage, type MePermissions } from "./permissions";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -62,6 +67,7 @@ type Page =
   | "routers"
   | "ipam"
   | "tickets"
+  | "sla-report"
   | "odp"
   | "vouchers"
   | "leads"
@@ -69,6 +75,8 @@ type Page =
   | "resellers"
   | "tech"
   | "branding"
+  | "isolir-template"
+  | "notifications"
   | "roles"
   | "users"
   | "webhooks"
@@ -88,6 +96,7 @@ const ADMIN_PAGES: Page[] = [
   "routers",
   "ipam",
   "tickets",
+  "sla-report",
   "odp",
   "vouchers",
   "leads",
@@ -95,6 +104,8 @@ const ADMIN_PAGES: Page[] = [
   "resellers",
   "tech",
   "branding",
+  "isolir-template",
+  "notifications",
   "roles",
   "users",
   "webhooks",
@@ -138,25 +149,27 @@ const navGroups: NavGroup[] = [
       { id: "vouchers", label: "Voucher", icon: <IconTicket /> },
     ],
   },
-  {
-    label: "Ops",
-    items: [
-      { id: "tickets", label: "Tiket", icon: <IconTicket /> },
-      { id: "tech", label: "Teknisi", icon: <IconMapPin /> },
-    ],
-  },
+      {
+        label: "Ops",
+        items: [
+          { id: "tickets", label: "Tiket", icon: <IconTicket /> },
+          { id: "sla-report", label: "Laporan SLA", icon: <IconChart /> },
+        ],
+      },
   {
     label: "Integrasi",
     items: [
       { id: "webhooks", label: "Webhook", icon: <IconPlug /> },
       { id: "payment-gw", label: "Payment Gateway", icon: <IconReceipt /> },
       { id: "messaging-gw", label: "Messaging Gateway", icon: <IconBell /> },
+      { id: "notifications", label: "Notifikasi", icon: <IconBell /> },
     ],
   },
   {
     label: "Settings",
     items: [
       { id: "branding", label: "Branding", icon: <IconImage /> },
+      { id: "isolir-template", label: "Template Isolir", icon: <IconShield /> },
       { id: "roles", label: "Roles", icon: <IconShield /> },
       { id: "users", label: "Users", icon: <IconSettings /> },
       { id: "backup", label: "Backup / Restore", icon: <IconDownload /> },
@@ -174,13 +187,16 @@ const pageTitles: Record<Page, string> = {
   routers: "Router",
   ipam: "IP Pool",
   tickets: "Tiket",
+  "sla-report": "Laporan SLA",
   odp: "ODP / FTTH",
   vouchers: "Voucher",
   leads: "Lead",
   accounting: "Akunting",
   resellers: "Reseller & Komisi",
-  tech: "Teknisi",
+  tech: "Tiket",
   branding: "Branding",
+  "isolir-template": "Template Isolir",
+  notifications: "Notifikasi",
   roles: "Roles",
   users: "Users",
   webhooks: "Webhook",
@@ -212,11 +228,37 @@ export function AdminApp({
     enabled: Boolean(tenantSlug),
     retry: false,
   });
+  const meQ = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api<MePermissions & { user_id: string; email: string; full_name: string }>("/api/me"),
+  });
+  const perms = meQ.data?.permissions;
+  const visibleGroups = navGroups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((n) => canAccessPage(perms, n.id)),
+    }))
+    .filter((g) => g.items.length > 0);
+
+  useEffect(() => {
+    if (!meQ.data) return;
+    // Legacy /tech URL → tiket
+    if (page === "tech") {
+      onNavigate("tickets");
+      return;
+    }
+    if (!canAccessPage(meQ.data.permissions, page)) {
+      const next = firstAllowedPage(meQ.data.permissions, "dashboard");
+      if (isAdminPage(next) && next !== page) onNavigate(next);
+    }
+  }, [meQ.data, page, onNavigate]);
+
   const appName = branding.data?.app_name || branding.data?.name || tenantSlug || "drp-billing";
   const logoUrl = branding.data?.logo_url;
   const faviconUrl = branding.data?.favicon_url;
   const initial = (appName.trim()[0] || "D").toUpperCase();
   const [sidebarOpen, setSidebarOpenState] = useState(() => getSidebarOpen());
+  const userInitial = ((meQ.data?.full_name || meQ.data?.email || "U").trim()[0] || "U").toUpperCase();
 
   function toggleSidebar() {
     setSidebarOpenState((prev) => {
@@ -250,7 +292,7 @@ export function AdminApp({
         </div>
 
         <nav className="flex-1 px-3 py-2">
-          {navGroups.map((g) => (
+          {visibleGroups.map((g) => (
             <div key={g.label} className="app-nav-group">
               <p className="app-nav-label">{g.label}</p>
               <div className="space-y-0.5">
@@ -274,10 +316,10 @@ export function AdminApp({
 
         <div className="app-sidebar-foot">
           <div className="app-user-chip">
-            <div className="app-user-avatar">AD</div>
+            <div className="app-user-avatar">{userInitial}</div>
             <div className="app-user-meta min-w-0 flex-1">
-              <p className="truncate text-xs font-bold">Admin</p>
-              <p className="truncate text-[10px] text-[var(--muted)]">Tenant operator</p>
+              <p className="truncate text-xs font-bold">{meQ.data?.full_name || "User"}</p>
+              <p className="truncate text-[10px] text-[var(--muted)]">{meQ.data?.role_name || meQ.data?.role_slug || "—"}</p>
             </div>
             <IconButton
               label="Keluar"
@@ -309,7 +351,9 @@ export function AdminApp({
                     <button
                       type="button"
                       className="inline-flex items-center gap-1.5"
-                      onClick={() => onNavigate("dashboard")}
+                      onClick={() => {
+                        if (canAccessPage(perms, "dashboard")) onNavigate("dashboard");
+                      }}
                       title="Dashboard"
                       aria-label="Dashboard"
                     >
@@ -327,8 +371,9 @@ export function AdminApp({
           </div>
           <div className="flex items-center gap-3">
             <HeaderSearch
+              allowedPages={perms}
               onNavigate={(next) => {
-                if (isAdminPage(next)) onNavigate(next);
+                if (isAdminPage(next) && canAccessPage(perms, next)) onNavigate(next);
               }}
             />
             <IconButton label="Notifikasi">
@@ -339,42 +384,67 @@ export function AdminApp({
         </header>
 
         <main className="app-content">
-          {page === "dashboard" && <Dashboard tenantSlug={tenantSlug} />}
-          {page === "customers" && <Customers />}
-          {page === "clusters" && <Clusters />}
-          {page === "plans" && <Plans />}
-          {page === "subscriptions" && <Subscriptions />}
-          {page === "invoices" && <Invoices />}
-          {page === "routers" && <Routers />}
-          {page === "ipam" && <IPAMPage />}
-          {page === "tickets" && <TicketsPage />}
-          {page === "odp" && <ODP tenantSlug={tenantSlug} />}
-          {page === "vouchers" && <Vouchers />}
-          {page === "leads" && <LeadsPage />}
-          {page === "accounting" && <AccountingPage />}
-          {page === "resellers" && <ResellersPage />}
-          {page === "tech" && <TechPage />}
-          {page === "branding" && <BrandingSettingsPage />}
-          {page === "roles" && <RolesSettingsPage />}
-          {page === "users" && <UsersSettingsPage />}
-          {page === "webhooks" && <WebhooksIntegrationPage />}
-          {page === "payment-gw" && <PaymentGWPage />}
-          {page === "messaging-gw" && <MessagingGWPage />}
-          {page === "backup" && <BackupRestorePage />}
+          {meQ.isLoading && <p className="text-sm text-[var(--muted)]">Memuat izin akses…</p>}
+          {meQ.isError && (
+            <p className="text-sm text-[var(--danger)]">Gagal memuat izin role. Coba refresh atau login ulang.</p>
+          )}
+          {meQ.data && canAccessPage(perms, page) && (
+            <>
+              {page === "dashboard" && (
+                <Dashboard
+                  userName={meQ.data?.full_name || meQ.data?.email}
+                  fieldOps={!canDispatchOps(perms)}
+                  onNavigate={onNavigate}
+                />
+              )}
+              {page === "customers" && <Customers />}
+              {page === "clusters" && <Clusters />}
+              {page === "plans" && <Plans />}
+              {page === "subscriptions" && <Subscriptions />}
+              {page === "invoices" && <Invoices />}
+              {page === "routers" && <Routers />}
+              {page === "ipam" && <IPAMPage />}
+              {page === "tickets" && <TicketsPage />}
+              {page === "sla-report" && <SLAReportPage />}
+              {page === "odp" && <ODP tenantSlug={tenantSlug} />}
+              {page === "vouchers" && <VouchersPage />}
+              {page === "leads" && <LeadsPage />}
+              {page === "accounting" && <AccountingPage />}
+              {page === "resellers" && <ResellersPage />}
+              {page === "branding" && <BrandingSettingsPage />}
+              {page === "isolir-template" && <IsolirTemplatePage tenantSlug={tenantSlug} />}
+              {page === "notifications" && <NotificationsPage />}
+              {page === "roles" && <RolesSettingsPage />}
+              {page === "users" && <UsersSettingsPage />}
+              {page === "webhooks" && <WebhooksIntegrationPage />}
+              {page === "payment-gw" && <PaymentGWPage />}
+              {page === "messaging-gw" && <MessagingGWPage />}
+              {page === "backup" && <BackupRestorePage />}
+            </>
+          )}
         </main>
       </div>
     </div>
   );
 }
 
-function Dashboard({ tenantSlug }: { tenantSlug?: string }) {
+function Dashboard({
+  userName,
+  fieldOps,
+  onNavigate,
+}: {
+  userName?: string;
+  fieldOps?: boolean;
+  onNavigate: (p: AdminPage) => void;
+}) {
   const stats = useQuery({
-    queryKey: ["stats"],
-    queryFn: () => api<Record<string, number>>("/api/dashboard/stats"),
+    queryKey: ["stats", fieldOps ? "field" : "admin"],
+    queryFn: () => api<Record<string, number | string>>("/api/dashboard/stats"),
   });
   const chart = useQuery({
     queryKey: ["revenue"],
     queryFn: () => api<{ month: string; revenue: number }[]>("/api/dashboard/revenue-chart?months=6"),
+    enabled: !fieldOps,
   });
   const invoices = useQuery({
     queryKey: ["invoices-recent"],
@@ -382,16 +452,89 @@ function Dashboard({ tenantSlug }: { tenantSlug?: string }) {
       api<{ data: { invoice_number: string; customer_name: string; total_amount: number; status: string }[] }>(
         "/api/invoices?limit=8",
       ),
+    enabled: !fieldOps,
+  });
+  const myTickets = useQuery({
+    queryKey: ["tickets", "dash"],
+    queryFn: () => api<{ data: { id: string; subject: string; status: string; priority: string; customer_name?: string }[] }>("/api/tickets?limit=8&offset=0"),
+    enabled: Boolean(fieldOps),
+  });
+  const myLeads = useQuery({
+    queryKey: ["leads", "dash"],
+    queryFn: () => api<{ data: { id: string; full_name: string; status: string; phone: string }[]; total: number }>("/api/leads?limit=8&offset=0"),
+    enabled: Boolean(fieldOps),
   });
   const s = stats.data ?? {};
   const series = Array.isArray(chart.data) ? chart.data : [];
   const today = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+  const greetName = (userName || "").trim();
+
+  if (fieldOps) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-2xl font-bold tracking-tight">
+            Selamat datang{greetName ? `, ${greetName}` : ""}
+          </h2>
+          <span className="btn-ghost text-sm">{today}</span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card title="Lead di-assign" value={Number(s.leads_assigned ?? 0)} />
+          <Card title="Lead proses pasang" value={Number(s.leads_install ?? 0)} />
+          <Card title="Tiket open" value={Number(s.tickets_open ?? 0)} />
+          <Card title="Tiket proses" value={Number(s.tickets_in_progress ?? 0)} />
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="panel-card overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-6 py-4">
+              <h3 className="eyebrow">Lead saya</h3>
+              <Button type="button" variant="outline" size="sm" onClick={() => onNavigate("leads")}>
+                Lihat semua
+              </Button>
+            </div>
+            <Table
+              columns={["Nama", "Telepon", "Status"]}
+              rows={(myLeads.data?.data ?? []).map((l) => [
+                l.full_name,
+                l.phone,
+                l.status === "qualified"
+                  ? "Proses pasang"
+                  : l.status === "contacted"
+                    ? "Dihubungi"
+                    : l.status === "survey"
+                      ? "Survey"
+                      : l.status,
+              ])}
+            />
+          </div>
+          <div className="panel-card overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-6 py-4">
+              <h3 className="eyebrow">Tiket saya</h3>
+              <Button type="button" variant="outline" size="sm" onClick={() => onNavigate("tickets")}>
+                Lihat semua
+              </Button>
+            </div>
+            <Table
+              columns={["Subjek", "Pelanggan", "Status"]}
+              rows={(myTickets.data?.data ?? []).map((t) => [
+                t.subject,
+                t.customer_name || "—",
+                t.status === "in_progress" ? "Proses" : t.status,
+              ])}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-2xl font-bold tracking-tight">
-          Selamat datang{tenantSlug ? `, ${tenantSlug}` : ""}
+          Selamat datang{greetName ? `, ${greetName}` : ""}
         </h2>
         <div className="flex flex-wrap items-center gap-2">
           <span className="btn-ghost text-sm">{today}</span>
@@ -409,10 +552,10 @@ function Dashboard({ tenantSlug }: { tenantSlug?: string }) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card title="Pelanggan aktif" value={s.active_customers ?? 0} />
-        <Card title="Langganan aktif" value={s.active_subscriptions ?? 0} />
-        <Card title="Tagihan belum lunas" value={s.unpaid_invoices ?? 0} />
-        <Card title="Pendapatan bulan ini" value={formatRp(s.monthly_revenue ?? 0)} />
+        <Card title="Pelanggan aktif" value={Number(s.active_customers ?? 0)} />
+        <Card title="Langganan aktif" value={Number(s.active_subscriptions ?? 0)} />
+        <Card title="Tagihan belum lunas" value={Number(s.unpaid_invoices ?? 0)} />
+        <Card title="Pendapatan bulan ini" value={formatRp(Number(s.monthly_revenue ?? 0))} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -422,7 +565,7 @@ function Dashboard({ tenantSlug }: { tenantSlug?: string }) {
             <span className="text-xs text-[var(--muted)]">6 bulan terakhir</span>
           </div>
           <p className="mb-4 text-xs text-[var(--muted)]">
-            Total bulan ini: <span className="text-xl font-bold text-[var(--text)]">{formatRp(s.monthly_revenue ?? 0)}</span>
+            Total bulan ini: <span className="text-xl font-bold text-[var(--text)]">{formatRp(Number(s.monthly_revenue ?? 0))}</span>
           </p>
           <ReactECharts
             style={{ height: 280 }}
@@ -559,7 +702,7 @@ function Customers() {
   });
   const usersQ = useQuery({
     queryKey: ["tenant-users"],
-    queryFn: () => api<{ user_id: string; full_name: string; email: string; is_active: boolean }[]>("/api/settings/users"),
+    queryFn: () => api<{ user_id: string; full_name: string; email: string; is_active: boolean }[]>("/api/users/options"),
   });
   const [form, setForm] = useState<CustForm>(emptyForm);
   const [editId, setEditId] = useState<string | null>(null);
@@ -1165,6 +1308,12 @@ function Plans() {
     service_type: string;
     billing_cycle?: string;
     profile_name?: string | null;
+    isolir_profile?: string | null;
+    grace_days?: number;
+    tax_percent?: number;
+    quota_gb?: number | null;
+    limit_uptime?: string | null;
+    shared_users?: number | null;
     is_active?: boolean;
   };
   type ClusterOpt = { id: string; name: string; code: string };
@@ -1179,6 +1328,8 @@ function Plans() {
     cluster_name: string;
     cluster_code: string;
     download_mbps: number;
+    ip_pool_id?: string | null;
+    ip_pool_name?: string;
   };
   type PlanForm = {
     name: string;
@@ -1189,6 +1340,12 @@ function Plans() {
     service_type: string;
     billing_cycle: string;
     profile_name: string;
+    isolir_profile: string;
+    grace_days: number;
+    tax_percent: number;
+    quota_gb: string;
+    limit_uptime: string;
+    shared_users: string;
     is_active: boolean;
   };
   const emptyPlanForm: PlanForm = {
@@ -1200,6 +1357,12 @@ function Plans() {
     service_type: "pppoe",
     billing_cycle: "monthly",
     profile_name: "",
+    isolir_profile: "isolir",
+    grace_days: 3,
+    tax_percent: 0,
+    quota_gb: "",
+    limit_uptime: "",
+    shared_users: "",
     is_active: true,
   };
 
@@ -1215,6 +1378,16 @@ function Plans() {
     queryKey: ["plan-offers"],
     queryFn: () => api<OfferRow[]>("/api/plan-offers"),
   });
+  type PoolOpt = { id: string; name: string; network: string; router_id?: string | null; router_name?: string | null };
+  type RouterOpt = { id: string; name: string; cluster_id?: string | null; is_active: boolean };
+  const poolsQ = useQuery({
+    queryKey: ["ip-pools"],
+    queryFn: () => api<PoolOpt[]>("/api/ip-pools"),
+  });
+  const routersQ = useQuery({
+    queryKey: ["routers"],
+    queryFn: () => api<RouterOpt[]>("/api/routers"),
+  });
   const [form, setForm] = useState<PlanForm>(emptyPlanForm);
   const [editId, setEditId] = useState<string | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
@@ -1225,6 +1398,7 @@ function Plans() {
     price: 150000,
     is_active: true,
     sync_profiles: true,
+    ip_pool_id: "",
   });
   const [offerEditId, setOfferEditId] = useState<string | null>(null);
   const [offerOpen, setOfferOpen] = useState(false);
@@ -1237,6 +1411,7 @@ function Plans() {
   };
 
   function openCreatePlan() {
+    setOfferOpen(false);
     setEditId(null);
     setPlanErr("");
     setForm(emptyPlanForm);
@@ -1244,6 +1419,7 @@ function Plans() {
   }
 
   function openEditPlan(p: PlanRow) {
+    setOfferOpen(false);
     setEditId(p.id);
     setPlanErr("");
     setForm({
@@ -1255,6 +1431,12 @@ function Plans() {
       service_type: p.service_type || "pppoe",
       billing_cycle: p.billing_cycle || "monthly",
       profile_name: p.profile_name || "",
+      isolir_profile: p.isolir_profile || "isolir",
+      grace_days: p.grace_days ?? 3,
+      tax_percent: p.tax_percent ?? 0,
+      quota_gb: p.quota_gb != null && p.quota_gb > 0 ? String(p.quota_gb) : "",
+      limit_uptime: p.limit_uptime || "",
+      shared_users: p.shared_users != null && p.shared_users > 0 ? String(p.shared_users) : "",
       is_active: p.is_active !== false,
     });
     setPlanOpen(true);
@@ -1268,13 +1450,15 @@ function Plans() {
   }
 
   function openCreateOffer() {
+    setPlanOpen(false);
     setOfferEditId(null);
     setOfferErr("");
-    setOfferForm({ plan_id: "", cluster_id: "", price: 150000, is_active: true, sync_profiles: true });
+    setOfferForm({ plan_id: "", cluster_id: "", price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "" });
     setOfferOpen(true);
   }
 
   function openEditOffer(o: OfferRow) {
+    setPlanOpen(false);
     setOfferEditId(o.id);
     setOfferErr("");
     setOfferForm({
@@ -1283,6 +1467,7 @@ function Plans() {
       price: o.price,
       is_active: o.is_active,
       sync_profiles: false,
+      ip_pool_id: o.ip_pool_id || "",
     });
     setOfferOpen(true);
   }
@@ -1291,7 +1476,7 @@ function Plans() {
     setOfferOpen(false);
     setOfferEditId(null);
     setOfferErr("");
-    setOfferForm({ plan_id: "", cluster_id: "", price: 150000, is_active: true, sync_profiles: true });
+    setOfferForm({ plan_id: "", cluster_id: "", price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "" });
   }
 
   const savePlan = useMutation({
@@ -1304,8 +1489,23 @@ function Plans() {
         download_mbps: form.download_mbps,
         upload_mbps: form.upload_mbps,
         profile_name: form.profile_name.trim() || form.code,
+        isolir_profile: form.isolir_profile.trim() || "isolir",
+        grace_days: Math.max(0, Math.floor(Number(form.grace_days) || 0)),
+        tax_percent: Math.max(0, Number(form.tax_percent) || 0),
         is_active: form.is_active,
       };
+      if (form.service_type === "hotspot") {
+        const q = Math.floor(Number(form.quota_gb));
+        body.quota_gb = Number.isFinite(q) && q > 0 ? q : null;
+        const up = form.limit_uptime.trim();
+        body.limit_uptime = up || null;
+        const su = Math.floor(Number(form.shared_users));
+        body.shared_users = Number.isFinite(su) && su > 0 ? su : null;
+      } else {
+        body.quota_gb = null;
+        body.limit_uptime = null;
+        body.shared_users = null;
+      }
       if (editId) {
         return api(`/api/plans/${editId}`, { method: "PUT", body: JSON.stringify(body) });
       }
@@ -1349,6 +1549,7 @@ function Plans() {
           body: JSON.stringify({
             price: offerForm.price,
             is_active: offerForm.is_active,
+            ip_pool_id: offerForm.ip_pool_id || null,
             sync_profiles: false,
           }),
         });
@@ -1360,6 +1561,7 @@ function Plans() {
             cluster_id: offerForm.cluster_id,
             price: offerForm.price,
             is_active: offerForm.is_active,
+            ip_pool_id: offerForm.ip_pool_id || null,
             sync_profiles: false,
           }),
         });
@@ -1416,6 +1618,12 @@ function Plans() {
   const plans = Array.isArray(plansQ.data) ? plansQ.data : [];
   const clusters = Array.isArray(clustersQ.data) ? clustersQ.data : [];
   const offers = Array.isArray(offersQ.data) ? offersQ.data : [];
+  const pools = Array.isArray(poolsQ.data) ? poolsQ.data : [];
+  const routers = Array.isArray(routersQ.data) ? routersQ.data : [];
+  const clusterRouterIds = new Set(
+    routers.filter((r) => r.cluster_id && r.cluster_id === offerForm.cluster_id).map((r) => r.id),
+  );
+  const poolsForCluster = pools.filter((p) => p.router_id && clusterRouterIds.has(p.router_id));
 
   type SyncProfileResult = {
     synced: number;
@@ -1480,12 +1688,22 @@ function Plans() {
       {planErr && !planOpen && <p className="mb-3 text-sm text-[var(--danger)]">{planErr}</p>}
 
       <Table
-        columns={["Nama", "Kode", "Harga dasar", "DL / UL (Mbps)", "Profile", "Tipe", "Status", "Aksi"]}
+        columns={["Nama", "Kode", "Harga dasar", "Pajak", "DL / UL", "Kuota / limit", "Profile", "Tipe", "Status", "Aksi"]}
         rows={plans.map((p) => [
           p.name,
           p.code,
           formatRp(p.price),
+          `${p.tax_percent ?? 0}%`,
           `DL ${p.download_mbps} / UL ${p.upload_mbps || p.download_mbps}`,
+          p.service_type === "hotspot"
+            ? [
+                p.quota_gb ? `${p.quota_gb} GB` : null,
+                p.limit_uptime || null,
+                p.shared_users ? `${p.shared_users} user` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "—"
+            : "—",
           p.profile_name || p.code,
           p.service_type,
           p.is_active === false ? "nonaktif" : "aktif",
@@ -1520,11 +1738,12 @@ function Plans() {
         </p>
       )}
       <Table
-        columns={["Cluster", "Paket", "Harga", "DL (Mbps)", "Status", "Aksi"]}
+        columns={["Cluster", "Paket", "Harga", "IP Pool", "DL (Mbps)", "Status", "Aksi"]}
         rows={offers.map((o) => [
           `${o.cluster_name} (${o.cluster_code})`,
           `${o.plan_name} (${o.plan_code})`,
           formatRp(o.price),
+          o.ip_pool_name || "— auto",
           o.download_mbps,
           o.is_active ? "aktif" : "nonaktif",
           <span key="act" className="flex flex-wrap items-center gap-1.5">
@@ -1576,6 +1795,34 @@ function Plans() {
           />
           <Input type="number" placeholder="Harga dasar" value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} />
           <Input placeholder="Profile RouterOS (kosong = kode)" value={form.profile_name} onChange={(e) => setForm({ ...form, profile_name: e.target.value })} />
+          <Input
+            placeholder="Profil isolir RouterOS"
+            value={form.isolir_profile}
+            onChange={(e) => setForm({ ...form, isolir_profile: e.target.value })}
+          />
+          <div className="grid gap-1.5">
+            <Label htmlFor="plan-grace">Grace days (hari setelah jatuh tempo)</Label>
+            <Input
+              id="plan-grace"
+              type="number"
+              min={0}
+              value={form.grace_days}
+              onChange={(e) => setForm({ ...form, grace_days: Number(e.target.value) })}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="plan-tax">Pajak (%)</Label>
+            <Input
+              id="plan-tax"
+              type="number"
+              min={0}
+              step={0.01}
+              placeholder="mis. 11"
+              value={form.tax_percent}
+              onChange={(e) => setForm({ ...form, tax_percent: Number(e.target.value) })}
+            />
+            <p className="text-xs text-[var(--muted)]">Ditambahkan ke setiap invoice (mis. PPN 11).</p>
+          </div>
           <div className="grid gap-1.5">
             <Label htmlFor="plan-dl">Download / DL (Mbps)</Label>
             <Input
@@ -1619,6 +1866,43 @@ function Plans() {
               <SelectItem value="yearly">Tahunan</SelectItem>
             </SelectContent>
           </Select>
+          {form.service_type === "hotspot" ? (
+            <>
+              <div className="grid gap-1.5">
+                <Label htmlFor="plan-quota">Kuota data (GB)</Label>
+                <Input
+                  id="plan-quota"
+                  type="number"
+                  min={0}
+                  placeholder="Kosong = unlimited"
+                  value={form.quota_gb}
+                  onChange={(e) => setForm({ ...form, quota_gb: e.target.value })}
+                />
+                <p className="text-xs text-[var(--muted)]">Di-push ke MikroTik sebagai limit-bytes-total.</p>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="plan-uptime">Limit waktu (uptime)</Label>
+                <Input
+                  id="plan-uptime"
+                  placeholder="mis. 1d, 12h, 30m"
+                  value={form.limit_uptime}
+                  onChange={(e) => setForm({ ...form, limit_uptime: e.target.value })}
+                />
+                <p className="text-xs text-[var(--muted)]">Format RouterOS: 1d / 12h / 30m. Kosong = unlimited.</p>
+              </div>
+              <div className="grid gap-1.5 sm:col-span-2">
+                <Label htmlFor="plan-shared">Shared users (login bersamaan)</Label>
+                <Input
+                  id="plan-shared"
+                  type="number"
+                  min={1}
+                  placeholder="Kosong = default router (biasanya 1)"
+                  value={form.shared_users}
+                  onChange={(e) => setForm({ ...form, shared_users: e.target.value })}
+                />
+              </div>
+            </>
+          ) : null}
           {editId && (
             <div className="flex items-center gap-2 sm:col-span-2">
               <Checkbox
@@ -1648,54 +1932,95 @@ function Plans() {
         onClose={closeOfferForm}
       >
         <form
-          className="grid gap-3 sm:grid-cols-2"
+          className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
             upsertOffer.mutate();
           }}
         >
-          <select
-            className="input"
-            value={offerForm.plan_id}
-            onChange={(e) => {
-              const plan = plans.find((p) => p.id === e.target.value);
-              setOfferForm({ ...offerForm, plan_id: e.target.value, price: plan?.price ?? offerForm.price });
-            }}
-            required
-            disabled={Boolean(offerEditId)}
-            title={offerEditId ? "Paket tidak bisa diubah" : undefined}
-          >
-            <option value="">— Pilih paket —</option>
-            {plans.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.code})
-              </option>
-            ))}
-          </select>
-          <select
-            className="input"
-            value={offerForm.cluster_id}
-            onChange={(e) => setOfferForm({ ...offerForm, cluster_id: e.target.value })}
-            required
-            disabled={Boolean(offerEditId)}
-            title={offerEditId ? "Cluster tidak bisa diubah" : undefined}
-          >
-            <option value="">— Pilih cluster —</option>
-            {clusters.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.code})
-              </option>
-            ))}
-          </select>
-          <Input
-            type="number"
-            min={0}
-            placeholder="Harga di cluster"
-            value={offerForm.price}
-            onChange={(e) => setOfferForm({ ...offerForm, price: Number(e.target.value) })}
-            required
-          />
-          <div className="flex flex-col gap-2 justify-center">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <Label htmlFor="offer-plan">Paket</Label>
+            <SearchableSelect
+              id="offer-plan"
+              required
+              disabled={Boolean(offerEditId)}
+              placeholder="— Pilih paket —"
+              searchPlaceholder="Cari paket…"
+              value={offerForm.plan_id}
+              onValueChange={(v) => {
+                const plan = plans.find((p) => p.id === v);
+                setOfferForm({ ...offerForm, plan_id: v, price: plan?.price ?? offerForm.price });
+              }}
+              options={plans.map((p) => ({
+                value: p.id,
+                label: `${p.name} (${p.code})`,
+                keywords: `${p.name} ${p.code}`,
+              }))}
+            />
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <Label htmlFor="offer-cluster">Cluster</Label>
+            <SearchableSelect
+              id="offer-cluster"
+              required
+              disabled={Boolean(offerEditId)}
+              placeholder="— Pilih cluster —"
+              searchPlaceholder="Cari cluster…"
+              value={offerForm.cluster_id}
+              onValueChange={(v) => setOfferForm({ ...offerForm, cluster_id: v, ip_pool_id: "" })}
+              options={clusters.map((c) => ({
+                value: c.id,
+                label: `${c.name} (${c.code})`,
+                keywords: `${c.name} ${c.code}`,
+              }))}
+            />
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <Label htmlFor="offer-price">Harga di cluster (Rp)</Label>
+            <Input
+              id="offer-price"
+              type="number"
+              min={0}
+              className="w-full"
+              value={offerForm.price}
+              onChange={(e) => setOfferForm({ ...offerForm, price: Number(e.target.value) })}
+              required
+            />
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-1.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel-muted)]/40 p-3">
+            <Label htmlFor="offer-pool">IP Pool (untuk profil router)</Label>
+            <SearchableSelect
+              id="offer-pool"
+              allowClear
+              clearLabel="— Auto (pool pertama di router) —"
+              placeholder="— Auto (pool pertama di router) —"
+              searchPlaceholder="Cari pool / network…"
+              value={offerForm.ip_pool_id}
+              onValueChange={(v) => setOfferForm({ ...offerForm, ip_pool_id: v })}
+              disabled={!offerForm.cluster_id}
+              options={poolsForCluster.map((p) => ({
+                value: p.id,
+                label: `${p.name} · ${p.network}${p.router_name ? ` · ${p.router_name}` : ""}`,
+                keywords: `${p.name} ${p.network} ${p.router_name || ""}`,
+              }))}
+            />
+            {!offerForm.cluster_id ? (
+              <p className="text-xs text-[var(--muted)]">Pilih cluster dulu untuk melihat pool yang tersedia.</p>
+            ) : poolsForCluster.length === 0 ? (
+              <p className="text-xs text-[var(--muted)]">
+                Belum ada IP pool di router cluster ini. Buat di menu IPAM, atau biarkan Auto.
+              </p>
+            ) : (
+              <p className="text-xs text-[var(--muted)]">
+                Dipakai sebagai address-pool (hotspot) / remote-address (PPPoE) saat sync profile.
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
             <label className="flex items-center gap-2 text-sm text-[var(--text-body)]">
               <input
                 type="checkbox"
@@ -1713,7 +2038,8 @@ function Plans() {
               Sync profile ke router cluster
             </label>
           </div>
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
+
+          <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={upsertOffer.isPending}>
               {upsertOffer.isPending ? "Menyimpan…" : "Simpan"}
             </Button>
@@ -1721,7 +2047,7 @@ function Plans() {
               Batal
             </Button>
           </div>
-          {offerErr && <p className="text-sm text-[var(--danger)] sm:col-span-2">{offerErr}</p>}
+          {offerErr && <p className="text-sm text-[var(--danger)]">{offerErr}</p>}
         </form>
       </FormDialog>
     </Section>
@@ -1740,6 +2066,8 @@ function Subscriptions() {
     customer_name: string;
     plan_name: string;
     status: string;
+    started_at?: string | null;
+    next_bill_at?: string | null;
     odp_id?: string | null;
     odp_code?: string;
     odp_name?: string;
@@ -1781,12 +2109,128 @@ function Subscriptions() {
     odp_id: "",
     port_number: "",
   };
+  const emptyBillForm = () => {
+    const start = new Date();
+    start.setHours(12, 0, 0, 0);
+    const next = defaultNextBill(start, "monthly", true);
+    return {
+      activate_now: true,
+      started_at: toDateInput(start),
+      next_bill_at: toDateInput(next),
+      prorate: true,
+    };
+  };
   const [form, setForm] = useState(emptyForm);
+  const [billForm, setBillForm] = useState(emptyBillForm);
   const [createOpen, setCreateOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [editStatus, setEditStatus] = useState<string | null>(null);
+  const [editStartedAt, setEditStartedAt] = useState<string | null>(null);
+  const [editNextBillAt, setEditNextBillAt] = useState<string | null>(null);
   const [formErr, setFormErr] = useState("");
+  const [activateTarget, setActivateTarget] = useState<SubRow | null>(null);
+  const [changePlanTarget, setChangePlanTarget] = useState<SubRow | null>(null);
+  const [changePlanId, setChangePlanId] = useState("");
+  type PlanChangeQuote = {
+    old_plan_id: string;
+    old_plan_name: string;
+    old_price: number;
+    new_plan_id: string;
+    new_plan_name: string;
+    new_price: number;
+    remaining_days: number;
+    period_days: number;
+    old_credit: number;
+    new_charge: number;
+    delta_subtotal: number;
+    tax_amount: number;
+    total_amount: number;
+    direction: string;
+    next_bill_at?: string;
+    requires_charge: boolean;
+  };
+  const [changePlanQuote, setChangePlanQuote] = useState<PlanChangeQuote | null>(null);
+  const [changePlanErr, setChangePlanErr] = useState("");
 
   const dialogOpen = createOpen || Boolean(editId);
+
+  function toDateInput(d: Date) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  function parseDateInput(s: string) {
+    const [y, m, d] = s.split("-").map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d, 12, 0, 0, 0);
+  }
+  function addBillingCycle(from: Date, cycle: string) {
+    const n = new Date(from);
+    switch (cycle) {
+      case "daily":
+        n.setDate(n.getDate() + 1);
+        break;
+      case "weekly":
+        n.setDate(n.getDate() + 7);
+        break;
+      case "yearly":
+        n.setFullYear(n.getFullYear() + 1);
+        break;
+      default:
+        n.setMonth(n.getMonth() + 1);
+    }
+    return n;
+  }
+  function cycleDaysOf(cycle: string) {
+    switch (cycle) {
+      case "daily":
+        return 1;
+      case "weekly":
+        return 7;
+      case "yearly":
+        return 365;
+      default:
+        return 30;
+    }
+  }
+  function defaultNextBill(start: Date, cycle: string, prorate: boolean) {
+    if (!prorate) return addBillingCycle(start, cycle);
+    const firstNext = new Date(start.getFullYear(), start.getMonth() + 1, 1, 12, 0, 0, 0);
+    if (firstNext > start) return firstNext;
+    return addBillingCycle(start, cycle);
+  }
+  function isoToDateInput(iso?: string | null) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return toDateInput(d);
+  }
+  function validateBillDates(f: { started_at: string; next_bill_at: string; prorate: boolean }) {
+    if (!f.started_at) return "Tanggal mulai wajib diisi";
+    if (f.prorate && !f.next_bill_at) return "Tanggal tagihan berikutnya wajib diisi";
+    const start = parseDateInput(f.started_at);
+    const next = parseDateInput(f.next_bill_at);
+    if (f.prorate && start && next && !(next > start)) {
+      return "Tanggal tagihan berikutnya harus setelah tanggal mulai";
+    }
+    return "";
+  }
+  const openActivate = (s: SubRow) => {
+    const start = s.started_at ? new Date(s.started_at) : new Date();
+    start.setHours(12, 0, 0, 0);
+    const next = s.next_bill_at
+      ? new Date(s.next_bill_at)
+      : defaultNextBill(start, "monthly", true);
+    next.setHours(12, 0, 0, 0);
+    setActivateTarget(s);
+    setBillForm({
+      activate_now: true,
+      started_at: toDateInput(start),
+      next_bill_at: toDateInput(next),
+      prorate: true,
+    });
+  };
 
   const listQ = useQuery({
     queryKey: ["subs"],
@@ -1794,7 +2238,7 @@ function Subscriptions() {
   });
   const customersQ = useQuery({
     queryKey: ["customers"],
-    queryFn: () => api<{ data: CustomerOpt[] }>("/api/customers?limit=100"),
+    queryFn: () => api<{ data: CustomerOpt[] }>("/api/customers?limit=500"),
   });
   const routersQ = useQuery({
     queryKey: ["routers"],
@@ -1825,6 +2269,30 @@ function Subscriptions() {
     queryFn: () => api<{ ports: OdpPortOpt[] }>(`/api/odps/${form.odp_id}/ports`),
     enabled: dialogOpen && Boolean(form.odp_id),
   });
+  const activatePlansQ = useQuery({
+    queryKey: ["plans", "activate"],
+    queryFn: () =>
+      api<
+        {
+          id: string;
+          name: string;
+          price: number;
+          billing_cycle?: string;
+          tax_percent?: number;
+        }[]
+      >("/api/plans"),
+    enabled: dialogOpen || Boolean(activateTarget),
+  });
+  const billPlanId = activateTarget?.plan_id || form.plan_id;
+  const activateCustomer = customers.find(
+    (c) => c.id === (activateTarget?.customer_id || form.customer_id),
+  );
+  const activateClusterId = activateCustomer?.cluster_id || "";
+  const activateOffersQ = useQuery({
+    queryKey: ["plan-offers", activateClusterId, "activate"],
+    queryFn: () => api<OfferOpt[]>(`/api/plan-offers?cluster_id=${activateClusterId}`),
+    enabled: (dialogOpen || Boolean(activateTarget)) && Boolean(activateClusterId),
+  });
 
   const offers = (Array.isArray(offersQ.data) ? offersQ.data : []).filter((o) => o.is_active);
   const basePlans = Array.isArray(plansQ.data) ? plansQ.data : [];
@@ -1848,13 +2316,20 @@ function Subscriptions() {
   function closeForm() {
     setCreateOpen(false);
     setEditId(null);
+    setEditStatus(null);
+    setEditStartedAt(null);
+    setEditNextBillAt(null);
     setForm(emptyForm);
+    setBillForm(emptyBillForm());
     setFormErr("");
   }
 
   function startEdit(s: SubRow) {
     setCreateOpen(false);
     setEditId(s.id);
+    setEditStatus(s.status);
+    setEditStartedAt(isoToDateInput(s.started_at));
+    setEditNextBillAt(isoToDateInput(s.next_bill_at));
     setFormErr("");
     setForm({
       customer_id: s.customer_id,
@@ -1865,10 +2340,42 @@ function Subscriptions() {
       odp_id: s.odp_id || "",
       port_number: s.port_number != null ? String(s.port_number) : "",
     });
+    const start = s.started_at ? new Date(s.started_at) : new Date();
+    start.setHours(12, 0, 0, 0);
+    const next = s.next_bill_at
+      ? new Date(s.next_bill_at)
+      : defaultNextBill(start, "monthly", true);
+    next.setHours(12, 0, 0, 0);
+    setBillForm({
+      activate_now: s.status === "pending",
+      started_at: toDateInput(start),
+      next_bill_at: toDateInput(next),
+      prorate: true,
+    });
+  }
+
+  async function postActivate(id: string, f: typeof billForm) {
+    return api<{
+      status: string;
+      prorate_days?: number;
+      period_days?: number;
+      invoice_total?: number;
+    }>(`/api/subscriptions/${id}/activate`, {
+      method: "POST",
+      body: JSON.stringify({
+        started_at: `${f.started_at}T12:00:00`,
+        next_bill_at: f.prorate ? `${f.next_bill_at}T12:00:00` : undefined,
+        prorate: f.prorate,
+      }),
+    });
   }
 
   const create = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      if (billForm.activate_now) {
+        const err = validateBillDates(billForm);
+        if (err) throw new Error(err);
+      }
       const body: Record<string, unknown> = {
         customer_id: form.customer_id,
         plan_id: form.plan_id,
@@ -1880,14 +2387,31 @@ function Subscriptions() {
         body.odp_id = form.odp_id;
         if (form.port_number) body.port_number = Number(form.port_number);
       }
-      return api("/api/subscriptions", { method: "POST", body: JSON.stringify(body) });
+      const created = await api<{ id: string }>("/api/subscriptions", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (billForm.activate_now) {
+        const act = await postActivate(created.id, billForm);
+        return { created, act, activated: true as const };
+      }
+      return { created, act: null, activated: false as const };
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       closeForm();
       void qc.invalidateQueries({ queryKey: ["subs"] });
       void qc.invalidateQueries({ queryKey: ["odps"] });
       void qc.invalidateQueries({ queryKey: ["ftth-map"] });
-      void toastSuccess("Langganan ditambahkan");
+      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      if (res.activated && res.act?.prorate_days && res.act.period_days) {
+        void toastSuccess(
+          `Langganan dibuat & diaktifkan (prorata ${res.act.prorate_days}/${res.act.period_days} hari)`,
+        );
+      } else if (res.activated) {
+        void toastSuccess("Langganan dibuat & diaktifkan");
+      } else {
+        void toastSuccess("Langganan ditambahkan (status pending — belum ditagih)");
+      }
     },
     onError: (e: Error) => {
       setFormErr(e.message);
@@ -1896,7 +2420,12 @@ function Subscriptions() {
   });
 
   const update = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      const shouldActivate = editStatus === "pending" && billForm.activate_now;
+      if (shouldActivate) {
+        const err = validateBillDates(billForm);
+        if (err) throw new Error(err);
+      }
       const body: Record<string, unknown> = {
         plan_id: form.plan_id,
         router_id: form.router_id || null,
@@ -1909,14 +2438,24 @@ function Subscriptions() {
         body.odp_id = form.odp_id;
         if (form.port_number) body.port_number = Number(form.port_number);
       }
-      return api(`/api/subscriptions/${editId}`, { method: "PUT", body: JSON.stringify(body) });
+      await api(`/api/subscriptions/${editId}`, { method: "PUT", body: JSON.stringify(body) });
+      if (shouldActivate && editId) {
+        const act = await postActivate(editId, billForm);
+        return { activated: true as const, act };
+      }
+      return { activated: false as const, act: null };
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       closeForm();
       void qc.invalidateQueries({ queryKey: ["subs"] });
       void qc.invalidateQueries({ queryKey: ["odps"] });
       void qc.invalidateQueries({ queryKey: ["ftth-map"] });
-      void toastSuccess("Langganan diperbarui");
+      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      if (res.activated) {
+        void toastSuccess("Langganan diperbarui & diaktifkan");
+      } else {
+        void toastSuccess("Langganan diperbarui");
+      }
     },
     onError: (e: Error) => {
       setFormErr(e.message);
@@ -1925,14 +2464,165 @@ function Subscriptions() {
   });
 
   const activate = useMutation({
-    mutationFn: (id: string) => api(`/api/subscriptions/${id}/activate`, { method: "POST" }),
-    onSuccess: () => {
+    mutationFn: (payload: {
+      id: string;
+      started_at: string;
+      next_bill_at: string;
+      prorate: boolean;
+    }) => postActivate(payload.id, { ...payload, activate_now: true }),
+    onSuccess: (res) => {
+      setActivateTarget(null);
       void qc.invalidateQueries({ queryKey: ["subs"] });
       void qc.invalidateQueries({ queryKey: ["invoices"] });
-      void toastSuccess("Langganan diaktifkan");
+      if (res?.prorate_days && res.period_days) {
+        void toastSuccess(
+          `Langganan diaktifkan (prorata ${res.prorate_days}/${res.period_days} hari${
+            res.invoice_total != null ? ` · ${formatRp(res.invoice_total)}` : ""
+          })`,
+        );
+      } else {
+        void toastSuccess(
+          res?.invoice_total != null
+            ? `Langganan diaktifkan · invoice ${formatRp(res.invoice_total)}`
+            : "Langganan diaktifkan",
+        );
+      }
     },
     onError: (e: Error) => void toastError(e.message),
   });
+
+  const changePlanCustomer = customers.find((c) => c.id === changePlanTarget?.customer_id);
+  const changePlanClusterId = changePlanCustomer?.cluster_id || "";
+  const changePlanOffersQ = useQuery({
+    queryKey: ["plan-offers", changePlanClusterId, "change-plan"],
+    queryFn: () => api<OfferOpt[]>(`/api/plan-offers?cluster_id=${changePlanClusterId}`),
+    enabled: Boolean(changePlanTarget) && Boolean(changePlanClusterId),
+  });
+  const changePlanPlansQ = useQuery({
+    queryKey: ["plans", "change-plan"],
+    queryFn: () =>
+      api<{ id: string; name: string; code: string; price: number; is_active?: boolean }[]>("/api/plans"),
+    enabled: Boolean(changePlanTarget),
+  });
+  const changePlanOptions = changePlanClusterId
+    ? (Array.isArray(changePlanOffersQ.data) ? changePlanOffersQ.data : []).filter(
+        (o) => o.is_active && o.plan_id !== changePlanTarget?.plan_id,
+      )
+    : (Array.isArray(changePlanPlansQ.data) ? changePlanPlansQ.data : [])
+        .filter((p) => p.is_active !== false && p.id !== changePlanTarget?.plan_id)
+        .map((p) => ({
+          plan_id: p.id,
+          plan_name: p.name,
+          plan_code: p.code,
+          price: p.price,
+          service_type: "",
+          is_active: true,
+        }));
+
+  const previewChangePlan = useMutation({
+    mutationFn: (planId: string) =>
+      api<PlanChangeQuote>(`/api/subscriptions/${changePlanTarget!.id}/change-plan/preview`, {
+        method: "POST",
+        body: JSON.stringify({ plan_id: planId }),
+      }),
+    onSuccess: (q) => {
+      setChangePlanQuote(q);
+      setChangePlanErr("");
+    },
+    onError: (e: Error) => {
+      setChangePlanQuote(null);
+      setChangePlanErr(e.message);
+    },
+  });
+
+  const applyChangePlan = useMutation({
+    mutationFn: () =>
+      api<{
+        quote: PlanChangeQuote;
+        invoice?: { invoice_number: string; total_amount: number };
+        status: string;
+      }>(`/api/subscriptions/${changePlanTarget!.id}/change-plan`, {
+        method: "POST",
+        body: JSON.stringify({ plan_id: changePlanId }),
+      }),
+    onSuccess: (res) => {
+      setChangePlanTarget(null);
+      setChangePlanId("");
+      setChangePlanQuote(null);
+      void qc.invalidateQueries({ queryKey: ["subs"] });
+      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      const q = res.quote;
+      if (q.requires_charge && res.invoice) {
+        void toastSuccess(
+          `Paket diganti (${q.direction}) · tagihan ${formatRp(res.invoice.total_amount)}`,
+        );
+      } else if (q.direction === "downgrade") {
+        void toastSuccess(
+          `Paket diganti (downgrade). Selisih ${formatRp(Math.abs(q.delta_subtotal))} tidak ditagih; harga baru berlaku di siklus berikutnya.`,
+        );
+      } else {
+        void toastSuccess("Paket diganti");
+      }
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  function openChangePlan(s: SubRow) {
+    setChangePlanTarget(s);
+    setChangePlanId("");
+    setChangePlanQuote(null);
+    setChangePlanErr("");
+  }
+
+  useEffect(() => {
+    if (!changePlanTarget || !changePlanId || changePlanId === changePlanTarget.plan_id) {
+      setChangePlanQuote(null);
+      return;
+    }
+    const t = window.setTimeout(() => previewChangePlan.mutate(changePlanId), 200);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [changePlanTarget?.id, changePlanId]);
+
+  const activatePlan = (Array.isArray(activatePlansQ.data) ? activatePlansQ.data : []).find(
+    (p) => p.id === billPlanId,
+  );
+  const activateOffer = (Array.isArray(activateOffersQ.data) ? activateOffersQ.data : []).find(
+    (o) => o.plan_id === billPlanId && o.is_active,
+  );
+  const activatePrice = activateOffer?.price ?? activatePlan?.price ?? 0;
+  const activateCycle = activatePlan?.billing_cycle || "monthly";
+  const activateCycleDays = cycleDaysOf(activateCycle);
+  const activateTaxPct = activatePlan?.tax_percent ?? 0;
+  const activateStart = parseDateInput(billForm.started_at);
+  const activateNext = parseDateInput(billForm.next_bill_at);
+  let activateProrateDays = 0;
+  if (billForm.prorate && activateStart && activateNext && activateNext > activateStart) {
+    activateProrateDays = Math.max(
+      1,
+      Math.ceil((activateNext.getTime() - activateStart.getTime()) / (24 * 60 * 60 * 1000)),
+    );
+    if (activateProrateDays > activateCycleDays) activateProrateDays = activateCycleDays;
+  }
+  const activateIsProrated =
+    billForm.prorate && activateProrateDays > 0 && activateProrateDays < activateCycleDays;
+  const activateSubtotal = activateIsProrated
+    ? Math.round((activatePrice * activateProrateDays) / activateCycleDays)
+    : activatePrice;
+  const activateTax = Math.round((activateSubtotal * activateTaxPct) / 100);
+  const activateTotal = activateSubtotal + activateTax;
+  useEffect(() => {
+    if (!activatePlan) return;
+    if (!activateTarget && !dialogOpen) return;
+    setBillForm((f) => {
+      const start = parseDateInput(f.started_at);
+      if (!start) return f;
+      return {
+        ...f,
+        next_bill_at: toDateInput(defaultNextBill(start, activateCycle, f.prorate)),
+      };
+    });
+  }, [activateTarget?.id, editId, activatePlan?.id, activateCycle]);
 
   const remove = useMutation({
     mutationFn: (id: string) => api(`/api/subscriptions/${id}`, { method: "DELETE" }),
@@ -1956,7 +2646,11 @@ function Subscriptions() {
           className="btn"
           onClick={() => {
             setEditId(null);
+            setEditStatus(null);
+            setEditStartedAt(null);
+            setEditNextBillAt(null);
             setForm(emptyForm);
+            setBillForm(emptyBillForm());
             setFormErr("");
             setCreateOpen(true);
           }}
@@ -1966,6 +2660,10 @@ function Subscriptions() {
       }
     >
       {formErr && !dialogOpen && <p className="mb-3 text-sm text-[var(--danger)]">{formErr}</p>}
+      <p className="mb-3 text-sm text-[var(--muted)]">
+        Buat secret (pending) → aktifkan dengan tanggal/prorata. Untuk pelanggan aktif: ikon kotak{" "}
+        <strong>Ganti paket</strong> menghitung selisih harga sisa hari sampai tagihan berikutnya.
+      </p>
       <Table
         columns={["Username", "Pelanggan", "Paket", "ODP / Port", "Status", "Aksi"]}
         rows={(listQ.data?.data ?? []).map((s) => [
@@ -1978,12 +2676,22 @@ function Subscriptions() {
           s.status,
           <span key={s.id} className="flex flex-wrap items-center gap-1.5">
             {s.status === "pending" ? (
-              <IconButton
-                label="Aktifkan"
-                onClick={() => activate.mutate(s.id)}
+              <Button
+                type="button"
+                size="sm"
+                title="Aktifkan langganan (prorata & tanggal)"
+                aria-label="Aktifkan langganan"
                 disabled={activate.isPending}
+                onClick={() => openActivate(s)}
+                className="gap-1.5"
               >
                 <IconPlug />
+                Aktifkan
+              </Button>
+            ) : null}
+            {s.status === "active" || s.status === "suspended" || s.status === "overdue" ? (
+              <IconButton label="Ganti paket" onClick={() => openChangePlan(s)}>
+                <IconBox />
               </IconButton>
             ) : null}
             <IconButton label="Edit langganan" onClick={() => startEdit(s)}>
@@ -2022,80 +2730,92 @@ function Subscriptions() {
             else create.mutate();
           }}
         >
-          <select
-            className="input sm:col-span-2"
-            value={form.customer_id}
-            onChange={(e) =>
-              setForm({
-                customer_id: e.target.value,
-                plan_id: "",
-                router_id: "",
-                username: form.username,
-                password: form.password,
-                odp_id: "",
-                port_number: "",
-              })
-            }
-            required
-            disabled={Boolean(editId)}
-          >
-            <option value="">— Pelanggan —</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.customer_code} — {c.full_name}
-                {c.cluster_name ? ` [${c.cluster_name}]` : ""}
-              </option>
-            ))}
-          </select>
+          <div className="sm:col-span-2">
+            <SearchableSelect
+              required
+              disabled={Boolean(editId)}
+              placeholder="— Pelanggan —"
+              searchPlaceholder="Cari kode / nama / cluster…"
+              value={form.customer_id}
+              onValueChange={(v) =>
+                setForm({
+                  customer_id: v,
+                  plan_id: "",
+                  router_id: "",
+                  username: form.username,
+                  password: form.password,
+                  odp_id: "",
+                  port_number: "",
+                })
+              }
+              options={customers.map((c) => ({
+                value: c.id,
+                label: `${c.customer_code} — ${c.full_name}${c.cluster_name ? ` [${c.cluster_name}]` : ""}`,
+                keywords: `${c.customer_code} ${c.full_name} ${c.cluster_name || ""}`,
+              }))}
+            />
+          </div>
           {selectedCustomer && !clusterId && (
             <p className="text-xs text-[var(--warn)] sm:col-span-2">
               Pelanggan tanpa cluster: set cluster di halaman Pelanggan agar harga offer dipakai.
             </p>
           )}
-          <select
-            className="input"
-            value={form.plan_id}
-            onChange={(e) => setForm({ ...form, plan_id: e.target.value })}
+          <SearchableSelect
             required
-            disabled={Boolean(clusterId) && offers.length === 0}
-          >
-            <option value="">— Paket {clusterId ? "(offer cluster)" : "(harga dasar)"} —</option>
-            {clusterId
-              ? offers.map((o) => (
-                  <option key={o.plan_id} value={o.plan_id}>
-                    {o.plan_name} — {formatRp(o.price)}
-                  </option>
-                ))
-              : basePlans.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} — {formatRp(p.price)}
-                  </option>
-                ))}
-          </select>
-          <select
-            className="input"
+            disabled={
+              (Boolean(editId) && editStatus !== "pending") ||
+              (Boolean(clusterId) && offers.length === 0)
+            }
+            placeholder={`— Paket ${clusterId ? "(offer cluster)" : "(harga dasar)"} —`}
+            searchPlaceholder="Cari paket…"
+            value={form.plan_id}
+            onValueChange={(v) => setForm({ ...form, plan_id: v })}
+            options={
+              clusterId
+                ? offers.map((o) => ({
+                    value: o.plan_id,
+                    label: `${o.plan_name} — ${formatRp(o.price)}`,
+                    keywords: o.plan_name,
+                  }))
+                : basePlans.map((p) => ({
+                    value: p.id,
+                    label: `${p.name} — ${formatRp(p.price)}`,
+                    keywords: `${p.name} ${p.code}`,
+                  }))
+            }
+          />
+          {editId && editStatus && editStatus !== "pending" ? (
+            <p className="text-xs text-[var(--muted)] sm:col-span-2">
+              Ganti paket untuk langganan aktif lewat tombol <strong>Ganti paket</strong> di tabel
+              (agar hitung selisih harga).
+            </p>
+          ) : null}
+          <SearchableSelect
+            allowClear
+            clearLabel="— Router (opsional) —"
+            placeholder="— Router (opsional) —"
+            searchPlaceholder="Cari router…"
             value={form.router_id}
-            onChange={(e) => setForm({ ...form, router_id: e.target.value })}
-          >
-            <option value="">— Router (opsional) —</option>
-            {routers.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="input"
+            onValueChange={(v) => setForm({ ...form, router_id: v })}
+            options={routers.map((r) => ({
+              value: r.id,
+              label: r.name,
+              keywords: r.name,
+            }))}
+          />
+          <SearchableSelect
+            allowClear
+            clearLabel="— ODP (opsional) —"
+            placeholder="— ODP (opsional) —"
+            searchPlaceholder="Cari kode / nama ODP…"
             value={form.odp_id}
-            onChange={(e) => setForm({ ...form, odp_id: e.target.value, port_number: "" })}
-          >
-            <option value="">— ODP (opsional) —</option>
-            {odps.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.code} — {o.name} · sisa {o.free_ports}/{o.port_count}
-              </option>
-            ))}
-          </select>
+            onValueChange={(v) => setForm({ ...form, odp_id: v, port_number: "" })}
+            options={odps.map((o) => ({
+              value: o.id,
+              label: `${o.code} — ${o.name} · sisa ${o.free_ports}/${o.port_count}`,
+              keywords: `${o.code} ${o.name}`,
+            }))}
+          />
           <select
             className="input"
             value={form.port_number}
@@ -2136,6 +2856,129 @@ function Subscriptions() {
               ? "Untuk langganan aktif/suspend: simpan akan sync ulang secret ke RouterOS (password, profil paket, username)."
               : "Password dipakai saat aktivasi ke RouterOS. Komentar secret: kode + nama pelanggan."}
           </p>
+
+          {editId ? (
+            <p className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-sm sm:col-span-2">
+              Status: <strong>{editStatus || "—"}</strong>
+              {editStatus && editStatus !== "pending" ? (
+                <>
+                  {" · "}Mulai: {editStartedAt || "—"}
+                  {" · "}Tagihan berikutnya: {editNextBillAt || "—"}
+                </>
+              ) : null}
+            </p>
+          ) : null}
+
+          {!editId || editStatus === "pending" ? (
+            <div className="sm:col-span-2 grid gap-3 rounded-lg border border-[var(--border)] p-3">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={billForm.activate_now}
+                  onCheckedChange={(v) => {
+                    const activate_now = v === true;
+                    const start = parseDateInput(billForm.started_at) || new Date();
+                    setBillForm((f) => ({
+                      ...f,
+                      activate_now,
+                      next_bill_at: toDateInput(defaultNextBill(start, activateCycle, f.prorate)),
+                    }));
+                  }}
+                />
+                <span>{editId ? "Aktifkan saat simpan (set tanggal & buat invoice)" : "Aktifkan sekarang (set tanggal & buat invoice)"}</span>
+              </label>
+              {!billForm.activate_now ? (
+                <p className="text-xs text-[var(--muted)]">
+                  Tanpa aktivasi: status tetap <strong>pending</strong>. Belum sync billing/invoice;
+                  secret bisa diaktifkan nanti.
+                </p>
+              ) : (
+                <>
+                  <label className="grid gap-1 text-sm">
+                    <span>Tanggal mulai</span>
+                    <Input
+                      type="date"
+                      required
+                      value={billForm.started_at}
+                      onChange={(e) => {
+                        const started_at = e.target.value;
+                        const start = parseDateInput(started_at);
+                        setBillForm((f) => ({
+                          ...f,
+                          started_at,
+                          next_bill_at: start
+                            ? toDateInput(defaultNextBill(start, activateCycle, f.prorate))
+                            : f.next_bill_at,
+                        }));
+                      }}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={billForm.prorate}
+                      onCheckedChange={(v) => {
+                        const prorate = v === true;
+                        const start = parseDateInput(billForm.started_at) || new Date();
+                        setBillForm((f) => ({
+                          ...f,
+                          prorate,
+                          next_bill_at: toDateInput(defaultNextBill(start, activateCycle, prorate)),
+                        }));
+                      }}
+                    />
+                    <span>Prorata tagihan pertama</span>
+                  </label>
+                  {billForm.prorate ? (
+                    <label className="grid gap-1 text-sm">
+                      <span>Tanggal tagihan berikutnya</span>
+                      <Input
+                        type="date"
+                        required
+                        value={billForm.next_bill_at}
+                        onChange={(e) => setBillForm({ ...billForm, next_bill_at: e.target.value })}
+                      />
+                      <span className="text-xs text-[var(--muted)]">
+                        Default: tanggal 1 bulan berikutnya.
+                      </span>
+                    </label>
+                  ) : (
+                    <p className="text-xs text-[var(--muted)]">
+                      Tanpa prorata: tagihan penuh 1 siklus ({activateCycle}).
+                    </p>
+                  )}
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 text-sm">
+                    <div className="flex justify-between gap-2">
+                      <span className="text-[var(--muted)]">Harga paket</span>
+                      <span>{formatRp(activatePrice)}</span>
+                    </div>
+                    {activateIsProrated ? (
+                      <div className="mt-1 flex justify-between gap-2">
+                        <span className="text-[var(--muted)]">
+                          Prorata {activateProrateDays}/{activateCycleDays} hari
+                        </span>
+                        <span>{formatRp(activateSubtotal)}</span>
+                      </div>
+                    ) : (
+                      <div className="mt-1 flex justify-between gap-2">
+                        <span className="text-[var(--muted)]">Tagihan penuh</span>
+                        <span>{formatRp(activateSubtotal)}</span>
+                      </div>
+                    )}
+                    {activateTaxPct > 0 ? (
+                      <div className="mt-1 flex justify-between gap-2">
+                        <span className="text-[var(--muted)]">Pajak ({activateTaxPct}%)</span>
+                        <span>{formatRp(activateTax)}</span>
+                      </div>
+                    ) : null}
+                    <div className="mt-2 flex justify-between gap-2 border-t border-[var(--border)] pt-2 font-medium">
+                      <span>Estimasi invoice</span>
+                      <span>{formatRp(activateTotal)}</span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
+
           {clusterId && offers.length === 0 && (
             <p className="text-sm text-[var(--danger)] sm:col-span-2">
               Belum ada offer paket untuk cluster ini.
@@ -2143,13 +2986,283 @@ function Subscriptions() {
           )}
           <div className="flex flex-wrap gap-2 sm:col-span-2">
             <button className="btn" disabled={saving || (Boolean(clusterId) && !form.plan_id)}>
-              {saving ? "Menyimpan…" : editId ? "Simpan" : "Buat"}
+              {saving
+                ? "Menyimpan…"
+                : editId
+                  ? billForm.activate_now && editStatus === "pending"
+                    ? "Simpan & aktifkan"
+                    : "Simpan"
+                  : billForm.activate_now
+                    ? "Buat & aktifkan"
+                    : "Buat (pending)"}
             </button>
             <button type="button" className="btn-ghost" onClick={closeForm}>
               Batal
             </button>
           </div>
           {formErr && <p className="text-sm text-[var(--danger)] sm:col-span-2">{formErr}</p>}
+        </form>
+      </FormDialog>
+
+      <FormDialog
+        open={Boolean(activateTarget)}
+        title="Aktifkan langganan"
+        onClose={() => setActivateTarget(null)}
+      >
+        <form
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!activateTarget) return;
+            if (!billForm.started_at) {
+              void toastError("Tanggal mulai wajib diisi");
+              return;
+            }
+            if (billForm.prorate && !billForm.next_bill_at) {
+              void toastError("Tanggal tagihan berikutnya wajib diisi");
+              return;
+            }
+            const start = parseDateInput(billForm.started_at);
+            const next = parseDateInput(billForm.next_bill_at);
+            if (billForm.prorate && start && next && !(next > start)) {
+              void toastError("Tanggal tagihan berikutnya harus setelah tanggal mulai");
+              return;
+            }
+            activate.mutate({
+              id: activateTarget.id,
+              started_at: billForm.started_at,
+              next_bill_at: billForm.next_bill_at,
+              prorate: billForm.prorate,
+            });
+          }}
+        >
+          <p className="text-sm text-[var(--muted)]">
+            {activateTarget
+              ? `${activateTarget.username} · ${activateTarget.customer_name} · ${activateTarget.plan_name}`
+              : ""}
+          </p>
+          <label className="grid gap-1 text-sm">
+            <span>Tanggal mulai</span>
+            <Input
+              type="date"
+              required
+              value={billForm.started_at}
+              onChange={(e) => {
+                const started_at = e.target.value;
+                const start = parseDateInput(started_at);
+                setBillForm((f) => ({
+                  ...f,
+                  started_at,
+                  next_bill_at: start
+                    ? toDateInput(defaultNextBill(start, activateCycle, f.prorate))
+                    : f.next_bill_at,
+                }));
+              }}
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={billForm.prorate}
+              onCheckedChange={(v) => {
+                const prorate = v === true;
+                const start = parseDateInput(billForm.started_at) || new Date();
+                setBillForm((f) => ({
+                  ...f,
+                  prorate,
+                  next_bill_at: toDateInput(defaultNextBill(start, activateCycle, prorate)),
+                }));
+              }}
+            />
+            <span>Prorata tagihan pertama</span>
+          </label>
+          {billForm.prorate ? (
+            <label className="grid gap-1 text-sm">
+              <span>Tanggal tagihan berikutnya</span>
+              <Input
+                type="date"
+                required
+                value={billForm.next_bill_at}
+                onChange={(e) => setBillForm({ ...billForm, next_bill_at: e.target.value })}
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Tagihan pertama dihitung dari tanggal mulai sampai tanggal ini (default: tanggal 1
+                bulan berikutnya).
+              </span>
+            </label>
+          ) : (
+            <p className="text-xs text-[var(--muted)]">
+              Tanpa prorata: tagihan penuh 1 siklus ({activateCycle}), next bill = tanggal mulai +
+              siklus.
+            </p>
+          )}
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 text-sm">
+            <div className="flex justify-between gap-2">
+              <span className="text-[var(--muted)]">Harga paket</span>
+              <span>{formatRp(activatePrice)}</span>
+            </div>
+            {activateIsProrated ? (
+              <div className="mt-1 flex justify-between gap-2">
+                <span className="text-[var(--muted)]">
+                  Prorata {activateProrateDays}/{activateCycleDays} hari
+                </span>
+                <span>{formatRp(activateSubtotal)}</span>
+              </div>
+            ) : (
+              <div className="mt-1 flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Tagihan penuh</span>
+                <span>{formatRp(activateSubtotal)}</span>
+              </div>
+            )}
+            {activateTaxPct > 0 ? (
+              <div className="mt-1 flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Pajak ({activateTaxPct}%)</span>
+                <span>{formatRp(activateTax)}</span>
+              </div>
+            ) : null}
+            <div className="mt-2 flex justify-between gap-2 border-t border-[var(--border)] pt-2 font-medium">
+              <span>Estimasi invoice</span>
+              <span>{formatRp(activateTotal)}</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn" disabled={activate.isPending}>
+              {activate.isPending ? "Mengaktifkan…" : "Aktifkan"}
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => setActivateTarget(null)}>
+              Batal
+            </button>
+          </div>
+        </form>
+      </FormDialog>
+
+      <FormDialog
+        open={Boolean(changePlanTarget)}
+        title="Ganti paket"
+        onClose={() => {
+          setChangePlanTarget(null);
+          setChangePlanId("");
+          setChangePlanQuote(null);
+          setChangePlanErr("");
+        }}
+      >
+        <form
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!changePlanId) {
+              void toastError("Pilih paket baru");
+              return;
+            }
+            applyChangePlan.mutate();
+          }}
+        >
+          <p className="text-sm text-[var(--muted)]">
+            {changePlanTarget
+              ? `${changePlanTarget.username} · ${changePlanTarget.customer_name} · saat ini: ${changePlanTarget.plan_name}`
+              : ""}
+          </p>
+          <SearchableSelect
+            required
+            placeholder="— Paket baru —"
+            searchPlaceholder="Cari paket…"
+            value={changePlanId}
+            onValueChange={(v) => setChangePlanId(v)}
+            options={changePlanOptions.map((o) => ({
+              value: o.plan_id,
+              label: `${o.plan_name} — ${formatRp(o.price)}`,
+              keywords: `${o.plan_name} ${o.plan_code || ""}`,
+            }))}
+          />
+          {changePlanCustomer && !changePlanClusterId ? (
+            <p className="text-xs text-[var(--warn)]">
+              Pelanggan tanpa cluster: harga dasar paket dipakai.
+            </p>
+          ) : null}
+          {previewChangePlan.isPending ? (
+            <p className="text-sm text-[var(--muted)]">Menghitung selisih harga…</p>
+          ) : null}
+          {changePlanErr ? <p className="text-sm text-[var(--danger)]">{changePlanErr}</p> : null}
+          {changePlanQuote ? (
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 text-sm">
+              <div className="mb-2 text-xs uppercase tracking-wide text-[var(--muted)]">
+                {changePlanQuote.direction === "upgrade"
+                  ? "Upgrade"
+                  : changePlanQuote.direction === "downgrade"
+                    ? "Downgrade"
+                    : "Sama harga"}{" "}
+                · sisa {changePlanQuote.remaining_days}/{changePlanQuote.period_days} hari
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Harga lama (penuh)</span>
+                <span>{formatRp(changePlanQuote.old_price)}</span>
+              </div>
+              <div className="mt-1 flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Harga baru (penuh)</span>
+                <span>{formatRp(changePlanQuote.new_price)}</span>
+              </div>
+              <div className="mt-1 flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Kredit sisa paket lama</span>
+                <span>−{formatRp(changePlanQuote.old_credit)}</span>
+              </div>
+              <div className="mt-1 flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Prorata paket baru</span>
+                <span>{formatRp(changePlanQuote.new_charge)}</span>
+              </div>
+              <div className="mt-1 flex justify-between gap-2">
+                <span className="text-[var(--muted)]">Selisih</span>
+                <span>
+                  {changePlanQuote.delta_subtotal < 0 ? "−" : ""}
+                  {formatRp(Math.abs(changePlanQuote.delta_subtotal))}
+                </span>
+              </div>
+              {changePlanQuote.tax_amount > 0 ? (
+                <div className="mt-1 flex justify-between gap-2">
+                  <span className="text-[var(--muted)]">Pajak</span>
+                  <span>{formatRp(changePlanQuote.tax_amount)}</span>
+                </div>
+              ) : null}
+              <div className="mt-2 flex justify-between gap-2 border-t border-[var(--border)] pt-2 font-medium">
+                <span>Tagihan sekarang</span>
+                <span>
+                  {changePlanQuote.requires_charge
+                    ? formatRp(changePlanQuote.total_amount)
+                    : "Rp 0 (tanpa tagihan)"}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                Tanggal tagihan berikutnya tidak berubah. Siklus berikutnya memakai harga paket baru
+                penuh.
+                {changePlanQuote.direction === "downgrade"
+                  ? " Downgrade: selisih negatif tidak diganti uang; langsung pakai paket baru."
+                  : ""}
+              </p>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="btn"
+              disabled={
+                applyChangePlan.isPending ||
+                !changePlanId ||
+                previewChangePlan.isPending ||
+                Boolean(changePlanErr)
+              }
+            >
+              {applyChangePlan.isPending ? "Memproses…" : "Konfirmasi ganti paket"}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setChangePlanTarget(null);
+                setChangePlanId("");
+                setChangePlanQuote(null);
+                setChangePlanErr("");
+              }}
+            >
+              Batal
+            </button>
+          </div>
         </form>
       </FormDialog>
     </Section>
@@ -3080,58 +4193,3 @@ function ODP({ tenantSlug }: { tenantSlug?: string }) {
   );
 }
 
-function Vouchers() {
-  const [name, setName] = useState("Voucher 1 hari");
-  const [open, setOpen] = useState(false);
-  const mut = useMutation({
-    mutationFn: () =>
-      api("/api/vouchers/batches", {
-        method: "POST",
-        body: JSON.stringify({ name, price: 10000, codes: Array.from({ length: 10 }, (_, i) => `VCH${Date.now()}${i}`) }),
-      }),
-    onSuccess: () => {
-      setOpen(false);
-      void toastSuccess("Batch voucher ditambahkan");
-    },
-    onError: (e: Error) => void toastError(e.message),
-  });
-  return (
-    <Section
-      title="Voucher Hotspot"
-      actions={
-        <button type="button" className="btn" onClick={() => setOpen(true)}>
-          + Tambah
-        </button>
-      }
-    >
-      {mut.isSuccess && (
-        <p className="mb-3 text-sm text-[var(--ok)]">
-          Batch dibuat.{" "}
-          <a className="underline" href="/api/vouchers/batches/1/qr">
-            Unduh QR batch #1
-          </a>
-        </p>
-      )}
-      <p className="text-sm text-[var(--muted)]">Generate batch voucher hotspot dari tombol + Tambah.</p>
-      <FormDialog open={open} title="Generate voucher" onClose={() => setOpen(false)}>
-        <form
-          className="grid gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            mut.mutate();
-          }}
-        >
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
-          <div className="flex flex-wrap gap-2">
-            <button className="btn" disabled={mut.isPending}>
-              {mut.isPending ? "Membuat…" : "Generate 10 kode"}
-            </button>
-            <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>
-              Batal
-            </button>
-          </div>
-        </form>
-      </FormDialog>
-    </Section>
-  );
-}

@@ -49,16 +49,17 @@ type PortalUser = {
   is_active: boolean;
 };
 
-const PERM_PRESETS = [
-  "*",
-  "dashboard",
-  "customers",
-  "billing",
-  "network",
-  "ops",
-  "tickets",
-  "leads",
-  "settings",
+const PERM_PRESETS: { key: string; label: string; hint: string }[] = [
+  { key: "*", label: "Semua akses (*)", hint: "Akses penuh ke semua menu" },
+  { key: "dashboard", label: "Dashboard", hint: "Halaman dashboard" },
+  { key: "customers", label: "Pelanggan & Lead", hint: "Pelanggan, Lead, Reseller & Komisi" },
+  { key: "leads", label: "Lead saja", hint: "Hanya menu Lead" },
+  { key: "billing", label: "Billing", hint: "Paket, Tagihan, Akunting" },
+  { key: "network", label: "Jaringan", hint: "Cluster, Router, Secrets, IP Pool, ODP, Voucher" },
+  { key: "ops", label: "Operasional", hint: "Menu Tiket (instalasi & support)" },
+  { key: "tickets", label: "Tiket saja", hint: "Hanya menu Tiket" },
+  { key: "sla-report", label: "Laporan SLA", hint: "Evaluasi SLA & waktu resolve tiket" },
+  { key: "settings", label: "Pengaturan", hint: "Branding, Isolir, Notifikasi, Roles, Users, Backup, Integrasi" },
 ];
 
 export function BrandingSettingsPage() {
@@ -343,7 +344,7 @@ export function RolesSettingsPage() {
         )}
       </Section>
 
-      <FormDialog open={open} title="Buat role" onClose={() => setOpen(false)} wide>
+      <FormDialog open={open} title="Buat role" onClose={() => setOpen(false)}>
         <RoleForm
           form={form}
           setForm={setForm}
@@ -354,7 +355,7 @@ export function RolesSettingsPage() {
         />
       </FormDialog>
 
-      <FormDialog open={Boolean(edit)} title="Edit role" onClose={() => setEdit(null)} wide>
+      <FormDialog open={Boolean(edit)} title="Edit role" onClose={() => setEdit(null)}>
         {edit && (
           <RoleForm
             form={{ name: edit.name, slug: edit.slug, permissions: edit.permissions || [] }}
@@ -403,37 +404,53 @@ function RoleForm({
   }
   return (
     <form
-      className="grid gap-3"
+      className="grid gap-2.5"
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit();
       }}
     >
-      <input
-        className="input"
-        placeholder="Nama role"
-        value={form.name}
-        onChange={(e) => setForm({ ...form, name: e.target.value })}
-        required
-      />
-      <input
-        className="input"
-        placeholder="slug (huruf kecil)"
-        value={form.slug}
-        onChange={(e) => setForm({ ...form, slug: e.target.value })}
-        required
-        disabled={slugLocked}
-        pattern="[a-z][a-z0-9_-]{1,62}"
-      />
       <div className="grid gap-2 sm:grid-cols-2">
-        {PERM_PRESETS.map((p) => (
-          <label key={p} className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.permissions.includes(p)} onChange={() => toggle(p)} />
-            <code className="text-xs">{p}</code>
-          </label>
-        ))}
+        <input
+          className="input"
+          placeholder="Nama role"
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          required
+        />
+        <input
+          className="input"
+          placeholder="slug"
+          value={form.slug}
+          onChange={(e) => setForm({ ...form, slug: e.target.value })}
+          required
+          disabled={slugLocked}
+          pattern="[a-z][a-z0-9_-]{1,62}"
+          title="huruf kecil, angka, _ atau -"
+        />
       </div>
-      <div className="flex gap-2">
+      <div>
+        <p className="mb-1.5 text-xs text-[var(--muted)]">Izin menu</p>
+        <div className="max-h-56 space-y-0.5 overflow-y-auto rounded-md border border-[var(--border)] p-1.5">
+          {PERM_PRESETS.map((p) => (
+            <label
+              key={p.key}
+              className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-[var(--panel-muted)]/60"
+              title={p.hint}
+            >
+              <input
+                type="checkbox"
+                className="shrink-0"
+                checked={form.permissions.includes(p.key)}
+                onChange={() => toggle(p.key)}
+              />
+              <span className="min-w-0 truncate font-medium">{p.label}</span>
+              <code className="ml-auto shrink-0 text-[10px] text-[var(--muted)]">{p.key}</code>
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-2 pt-0.5">
         <button className="btn" disabled={busy}>
           {busy ? "Menyimpan..." : "Simpan"}
         </button>

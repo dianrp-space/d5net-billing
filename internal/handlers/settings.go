@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/dianrp/drp-billing/internal/auth"
@@ -34,10 +35,10 @@ func requireSettings(ctx context.Context, d *Deps) (xid.ID, error) {
 		if info.Role == "admin" {
 			return info.ID, nil
 		}
-		return xid.Nil(), httpx.Unauthorized("role not found")
+		return xid.Nil(), httpx.Forbidden("role not found")
 	}
 	if !store.RoleHasPermission(role.Permissions, "settings") && !store.RoleHasPermission(role.Permissions, "*") {
-		return xid.Nil(), httpx.Unauthorized("settings permission required")
+		return xid.Nil(), httpx.Forbidden("settings permission required")
 	}
 	return info.ID, nil
 }
@@ -181,7 +182,161 @@ func MountStaticAndUploads(r chi.Router, d *Deps) {
 	r.Post("/api/settings/branding/favicon", uploadHandler(d, false, "favicon"))
 	r.Post("/api/platform/branding/logo", uploadHandler(d, true, "logo"))
 	r.Post("/api/platform/branding/favicon", uploadHandler(d, true, "favicon"))
+	r.Post("/api/work-orders/{id}/photos", workOrderPhotoUpload(d))
+	r.Post("/api/leads/{id}/comments/photos", leadCommentPhotoUpload(d))
+	r.Post("/api/tickets/{id}/messages/photos", ticketMessagePhotoUpload(d))
 	MountDBBackupRoutes(r, d)
+}
+
+func leadCommentPhotoUpload(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		rawID := chi.URLParam(r, "id")
+		leadID, err := xid.Parse(rawID)
+		if err != nil || xid.IsNil(leadID) {
+			http.Error(w, `{"error":"id tidak valid"}`, http.StatusBadRequest)
+			return
+		}
+		lead, err := d.Store.GetLead(ctx, tid, leadID)
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, `{"error":"lead tidak ditemukan"}`, http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		if err := enforceLeadAssigned(ctx, d, lead); err != nil {
+			http.Error(w, `{"error":"lead ini tidak di-assign ke Anda"}`, http.StatusForbidden)
+			return
+		}
+		if err := r.ParseMultipartForm(upload.MaxBytes + (1 << 20)); err != nil {
+			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, `{"error":"file is required"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		kind := fmt.Sprintf("lead-%s-%d", leadID.String(), time.Now().UnixNano())
+		url, err := saveUpload(d, tid, false, kind, file, header.Filename, header.Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
+	}
+}
+
+func ticketMessagePhotoUpload(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		rawID := chi.URLParam(r, "id")
+		ticketID, err := xid.Parse(rawID)
+		if err != nil || xid.IsNil(ticketID) {
+			http.Error(w, `{"error":"id tidak valid"}`, http.StatusBadRequest)
+			return
+		}
+		t, err := d.Store.GetTicket(ctx, tid, ticketID)
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, `{"error":"tiket tidak ditemukan"}`, http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		if err := enforceTicketAssigned(ctx, d, t); err != nil {
+			http.Error(w, `{"error":"tiket ini tidak di-assign ke Anda"}`, http.StatusForbidden)
+			return
+		}
+		if err := r.ParseMultipartForm(upload.MaxBytes + (1 << 20)); err != nil {
+			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, `{"error":"file is required"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		kind := fmt.Sprintf("ticket-%s-%d", ticketID.String(), time.Now().UnixNano())
+		url, err := saveUpload(d, tid, false, kind, file, header.Filename, header.Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
+	}
+}
+
+func workOrderPhotoUpload(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		rawID := chi.URLParam(r, "id")
+		woID, err := xid.Parse(rawID)
+		if err != nil || xid.IsNil(woID) {
+			http.Error(w, `{"error":"id tidak valid"}`, http.StatusBadRequest)
+			return
+		}
+		cur, err := d.Store.GetWorkOrder(ctx, tid, woID)
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, `{"error":"work order not found"}`, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		if err := enforceWorkOrderAssigned(ctx, d, tid, cur); err != nil {
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			return
+		}
+		if err := r.ParseMultipartForm(upload.MaxBytes + (1 << 20)); err != nil {
+			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, `{"error":"file is required"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		kind := fmt.Sprintf("wo-%s-%d", woID.String(), time.Now().UnixNano())
+		url, err := saveUpload(d, tid, false, kind, file, header.Filename, header.Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+		wo, err := d.Store.AppendWorkOrderPhoto(ctx, tid, woID, url)
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, `{"error":"work order not found"}`, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(wo)
+	}
 }
 
 func uploadHandler(d *Deps, platform bool, kind string) http.HandlerFunc {
@@ -196,7 +351,12 @@ func uploadHandler(d *Deps, platform bool, kind string) http.HandlerFunc {
 		} else {
 			id, err := requireSettings(ctx, d)
 			if err != nil {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				// Distinguish auth vs permission so the SPA does not treat 403 as session expiry.
+				if _, ok := tenant.FromContext(ctx); !ok {
+					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+					return
+				}
+				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 				return
 			}
 			tid = id
@@ -258,7 +418,39 @@ func saveUpload(d *Deps, tenantID xid.ID, platform bool, kind string, src io.Rea
 	return "/uploads/" + subdir + "/" + name, nil
 }
 
+// UserOption is a lightweight user row for assign pickers (OpenAPI-named to avoid Huma "Item" clashes).
+type UserOption struct {
+	UserID   xid.ID `json:"user_id"`
+	FullName string `json:"full_name"`
+	Email    string `json:"email"`
+	IsActive bool   `json:"is_active"`
+	RoleSlug string `json:"role_slug"`
+}
+
 func registerRolesUsers(api huma.API, d *Deps) {
+	// Lightweight staff picker for assign UI — any authenticated tenant user (not settings-only).
+	huma.Register(api, huma.Operation{
+		OperationID: "list-user-options", Method: http.MethodGet, Path: "/api/users/options",
+		Tags: []string{"Users"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body []UserOption }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListTenantUsers(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := make([]UserOption, 0, len(list))
+		for _, u := range list {
+			out = append(out, UserOption{
+				UserID: u.UserID, FullName: u.FullName, Email: u.Email,
+				IsActive: u.IsActive, RoleSlug: u.RoleSlug,
+			})
+		}
+		return &struct{ Body []UserOption }{Body: out}, nil
+	})
+
 	huma.Register(api, huma.Operation{
 		OperationID: "list-roles", Method: http.MethodGet, Path: "/api/settings/roles",
 		Tags: []string{"Settings"}, Security: []map[string][]string{{"bearer": {}}},

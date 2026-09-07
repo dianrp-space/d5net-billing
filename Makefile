@@ -61,10 +61,10 @@ run-worker:
 
 migrate-up:
 	@test -f .env || (echo "missing .env — copy from .env.example" && exit 1)
-	go run ./cmd/migrate up
+	unset GOROOT; GOTOOLCHAIN=$${GOTOOLCHAIN:-go1.27.1} go run ./cmd/migrate up
 
 migrate-down:
-	go run ./cmd/migrate down
+	unset GOROOT; GOTOOLCHAIN=$${GOTOOLCHAIN:-go1.27.1} go run ./cmd/migrate down
 
 migrate-status:
-	go run ./cmd/migrate status
+	unset GOROOT; GOTOOLCHAIN=$${GOTOOLCHAIN:-go1.27.1} go run ./cmd/migrate status

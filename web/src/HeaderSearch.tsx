@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { IconSearch } from "./icons";
 import type { AdminPage } from "./AdminApp";
+import { canAccessPage } from "./permissions";
 
 type SearchHit = {
   kind: string;
@@ -34,12 +35,14 @@ const menuHits: { page: AdminPage; title: string; keywords: string }[] = [
   { page: "ipam", title: "IP Pool", keywords: "ipam ip pool cidr gateway router" },
   { page: "odp", title: "ODP / FTTH", keywords: "odp ftth jalur kabel peta" },
   { page: "vouchers", title: "Voucher", keywords: "voucher hotspot" },
-  { page: "tickets", title: "Tiket", keywords: "tiket ticket" },
+  { page: "tickets", title: "Tiket", keywords: "tiket ticket teknisi instalasi wo" },
+  { page: "sla-report", title: "Laporan SLA", keywords: "sla laporan gangguan tiket resolve waktu" },
   { page: "leads", title: "Lead", keywords: "lead prospek" },
   { page: "accounting", title: "Akunting", keywords: "akunting accounting laporan" },
   { page: "resellers", title: "Reseller & Komisi", keywords: "reseller komisi commission agen" },
-  { page: "tech", title: "Teknisi", keywords: "teknisi tech" },
   { page: "branding", title: "Branding", keywords: "branding logo favicon app name settings" },
+  { page: "isolir-template", title: "Template Isolir", keywords: "isolir captive pool profil firewall nat redirect" },
+  { page: "notifications", title: "Notifikasi", keywords: "notifikasi broadcast dunning promo whatsapp delay" },
   { page: "roles", title: "Roles", keywords: "roles rbac permission settings" },
   { page: "users", title: "Users", keywords: "users staf portal pelanggan settings" },
   { page: "webhooks", title: "Webhook", keywords: "webhook outbound integrasi n8n" },
@@ -48,9 +51,10 @@ const menuHits: { page: AdminPage; title: string; keywords: string }[] = [
   { page: "backup", title: "Backup / Restore", keywords: "backup restore database pg_dump export import settings" },
 ];
 
-function matchMenus(q: string): SearchHit[] {
+function matchMenus(q: string, allowedPages?: string[] | null): SearchHit[] {
   const n = q.toLowerCase();
   return menuHits
+    .filter((m) => canAccessPage(allowedPages, m.page))
     .filter((m) => m.title.toLowerCase().includes(n) || m.keywords.includes(n))
     .slice(0, 5)
     .map((m) => ({
@@ -64,8 +68,10 @@ function matchMenus(q: string): SearchHit[] {
 
 export function HeaderSearch({
   onNavigate,
+  allowedPages,
 }: {
   onNavigate: (page: AdminPage) => void;
+  allowedPages?: string[] | null;
 }) {
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -88,7 +94,7 @@ export function HeaderSearch({
     enabled: debounced.length >= 2,
   });
 
-  const menuResults = debounced.length >= 1 ? matchMenus(debounced) : [];
+  const menuResults = debounced.length >= 1 ? matchMenus(debounced, allowedPages) : [];
   const apiResults = searchQ.data?.results ?? [];
   const results = [...menuResults, ...apiResults];
   const showPanel = open && (debounced.length >= 1 || q.length >= 1);

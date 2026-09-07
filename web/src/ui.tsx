@@ -24,18 +24,28 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea };
+export { SearchableSelect, type SearchableOption } from "./SearchableSelect";
 
 /** Stat card for dashboard — keeps NeedMCP layout class. */
-export function Card({ title, value }: { title: string; value: string | number }) {
+export function Card({ title, value, hint }: { title: string; value: string | number; hint?: string }) {
   return (
-    <div className="stat-card">
+    <div className="stat-card" title={hint}>
       <div className="stat-card-label">{title}</div>
       <div className="stat-card-value">{value}</div>
+      {hint ? <p className="mt-1 text-[10px] leading-snug text-[var(--muted)]">{hint}</p> : null}
     </div>
   );
 }
 
-export function Table({ columns, rows }: { columns: string[]; rows: ReactNode[][] }) {
+export function Table({
+  columns,
+  rows,
+  onRowClick,
+}: {
+  columns: string[];
+  rows: ReactNode[][];
+  onRowClick?: (index: number) => void;
+}) {
   return (
     <UiTable>
       <TableHeader>
@@ -54,9 +64,15 @@ export function Table({ columns, rows }: { columns: string[]; rows: ReactNode[][
           </TableRow>
         ) : (
           rows.map((r, i) => (
-            <TableRow key={i}>
+            <TableRow
+              key={i}
+              className={onRowClick ? "cursor-pointer hover:bg-[var(--panel-muted)]/60" : undefined}
+              onClick={onRowClick ? () => onRowClick(i) : undefined}
+            >
               {r.map((c, j) => (
-                <TableCell key={j}>{c}</TableCell>
+                <TableCell key={j} onClick={j === r.length - 1 && onRowClick ? (e) => e.stopPropagation() : undefined}>
+                  {c}
+                </TableCell>
               ))}
             </TableRow>
           ))
@@ -274,7 +290,7 @@ export function FormDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
         hideClose
-        className={cn(wide ? "max-w-2xl" : "max-w-md", "gap-0 p-6")}
+        className={cn(wide ? "max-w-2xl" : "max-w-md", "gap-0 overflow-visible p-6")}
         style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px))` }}
       >
         <div

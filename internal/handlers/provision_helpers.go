@@ -33,6 +33,24 @@ func planProfileName(plan *store.Plan) string {
 	return plan.Code
 }
 
+// applyPlanHotspotLimits copies quota / uptime / shared-users from plan onto a ServiceSpec.
+func applyPlanHotspotLimits(spec *provision.ServiceSpec, plan *store.Plan) {
+	if spec == nil || plan == nil {
+		return
+	}
+	if plan.QuotaGB != nil && *plan.QuotaGB > 0 {
+		spec.LimitBytesTotal = int64(*plan.QuotaGB) * 1024 * 1024 * 1024
+	}
+	if plan.LimitUptime != nil {
+		if u := strings.TrimSpace(*plan.LimitUptime); u != "" {
+			spec.LimitUptime = u
+		}
+	}
+	if plan.SharedUsers != nil && *plan.SharedUsers > 0 {
+		spec.SharedUsers = *plan.SharedUsers
+	}
+}
+
 // syncSubscriptionToRouter pushes PPPoE/hotspot secret to RouterOS (remove+add).
 // When oldUsername/oldRouter differ, removes the previous secret first.
 func syncSubscriptionToRouter(
@@ -122,7 +140,21 @@ func syncSubscriptionToRouter(
 		UploadMbps:     plan.UploadMbps,
 		Comment:        comment,
 	}
+	if sub.ServiceType == "hotspot" {
+		applyPlanHotspotLimits(spec, plan)
+	}
 	applyIPAMToSpec(ctx, d, sub, spec)
+	preferred := resolveOfferIPPoolID(ctx, d, sub.TenantID, plan.ID, clusterIDForSubscription(ctx, d, sub))
+	if p := resolveIPPoolForRouter(ctx, d, sub.TenantID, *newRouter, preferred); p != nil {
+		_ = syncIPPoolToRouter(ctx, d, p)
+		// Dynamic IP: pin profile to offer/first pool. Static assignment keeps its own pool name.
+		if spec.IPAddress == "" {
+			spec.AddressPool = p.Name
+			if p.Gateway != nil {
+				spec.LocalAddress = strings.TrimSpace(*p.Gateway)
+			}
+		}
+	}
 	if ensurer, ok := prov.(provision.ProfileEnsurer); ok && profile != "" {
 		price := plan.Price
 		if cust, err := d.Store.GetCustomer(ctx, sub.TenantID, sub.CustomerID); err == nil && cust != nil {
@@ -160,15 +192,72 @@ func applyIPAMToSpec(ctx context.Context, d *Deps, sub *store.Subscription, spec
 			return
 		}
 	}
-	// No static assignment: still attach router pool name to PPP profile for dynamic IPs.
+	// No static assignment: attach pool from cluster offer (if any) or first pool on router.
 	if sub.RouterID != nil {
-		if p, err := d.Store.GetFirstIPPoolForRouter(ctx, sub.TenantID, *sub.RouterID); err == nil && p != nil {
+		preferred := resolveOfferIPPoolID(ctx, d, sub.TenantID, sub.PlanID, clusterIDForSubscription(ctx, d, sub))
+		if p := resolveIPPoolForRouter(ctx, d, sub.TenantID, *sub.RouterID, preferred); p != nil {
 			spec.AddressPool = p.Name
 			if p.Gateway != nil {
 				spec.LocalAddress = strings.TrimSpace(*p.Gateway)
 			}
 		}
 	}
+}
+
+// resolveOfferIPPoolID returns the IP pool chosen on plan×cluster offer, if any.
+func resolveOfferIPPoolID(ctx context.Context, d *Deps, tenantID, planID xid.ID, clusterID *xid.ID) *xid.ID {
+	if clusterID == nil {
+		return nil
+	}
+	offer, err := d.Store.GetPlanOfferByPlanCluster(ctx, tenantID, planID, *clusterID)
+	if err != nil || offer == nil {
+		return nil
+	}
+	return offer.IPPoolID
+}
+
+// clusterIDForSubscription prefers customer cluster, else the router's site/cluster.
+func clusterIDForSubscription(ctx context.Context, d *Deps, sub *store.Subscription) *xid.ID {
+	if sub == nil {
+		return nil
+	}
+	if cust, err := d.Store.GetCustomer(ctx, sub.TenantID, sub.CustomerID); err == nil && cust != nil && cust.ClusterID != nil {
+		return cust.ClusterID
+	}
+	if sub.RouterID != nil {
+		if r, err := d.Store.GetRouter(ctx, sub.TenantID, *sub.RouterID); err == nil && r != nil && r.SiteID != nil {
+			return r.SiteID
+		}
+	}
+	return nil
+}
+
+// resolveIPPoolForRouter picks the preferred offer pool when it belongs to this router,
+// otherwise the first IPAM pool linked to the router.
+func resolveIPPoolForRouter(ctx context.Context, d *Deps, tenantID, routerID xid.ID, preferredPoolID *xid.ID) *store.IPPool {
+	if preferredPoolID != nil {
+		if p, err := d.Store.GetIPPool(ctx, tenantID, *preferredPoolID); err == nil && p != nil {
+			if p.RouterID != nil && *p.RouterID == routerID {
+				return p
+			}
+		}
+	}
+	if p, err := d.Store.GetFirstIPPoolForRouter(ctx, tenantID, routerID); err == nil && p != nil {
+		return p
+	}
+	return nil
+}
+
+// ensureProfileIPPool syncs the resolved pool to RouterOS and returns its name for profile address-pool.
+func ensureProfileIPPool(ctx context.Context, d *Deps, tenantID, routerID xid.ID, preferredPoolID *xid.ID) string {
+	p := resolveIPPoolForRouter(ctx, d, tenantID, routerID, preferredPoolID)
+	if p == nil {
+		return ""
+	}
+	if err := syncIPPoolToRouter(ctx, d, p); err != nil {
+		slog.Warn("ensure profile ip pool", "pool", p.Name, "router_id", routerID, "err", err)
+	}
+	return p.Name
 }
 
 // syncIPPoolToRouter creates/updates /ip/pool on the linked MikroTik.
@@ -332,8 +421,11 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 	_ = d.Store.UpdatePaymentIntentStatus(ctx, event.ExternalID, "paid")
 
 	if inv != nil && inv.SubscriptionID != nil {
-		_ = d.Store.UpdateSubscriptionStatus(ctx, pi.TenantID, *inv.SubscriptionID, "active")
-		resumeSubscription(ctx, d, pi.TenantID, *inv.SubscriptionID)
+		stillDue, err := d.Store.SubscriptionHasPastDueUnpaid(ctx, pi.TenantID, *inv.SubscriptionID)
+		if err == nil && !stillDue {
+			_ = d.Store.UpdateSubscriptionStatus(ctx, pi.TenantID, *inv.SubscriptionID, "active")
+			resumeSubscription(ctx, d, pi.TenantID, *inv.SubscriptionID)
+		}
 	}
 
 	// Optional tip credit (0 = skip).
@@ -391,4 +483,143 @@ func webhookTipAmount(event *payment.WebhookEvent) int64 {
 		}
 	}
 	return 0
+}
+
+// syncVoucherBatchToRouter pushes hotspot users (username=password=code) to the batch router.
+// Returns updated batch from DB after writing sync_status.
+func syncVoucherBatchToRouter(ctx context.Context, d *Deps, batch *store.VoucherBatch) (*store.VoucherBatch, error) {
+	if batch == nil {
+		return nil, fmt.Errorf("batch kosong")
+	}
+	if batch.RouterID == nil {
+		_ = d.Store.UpdateVoucherBatchSync(ctx, batch.TenantID, batch.ID, "none", 0, "")
+		return d.Store.GetVoucherBatch(ctx, batch.TenantID, batch.ID)
+	}
+	r, err := d.Store.GetRouter(ctx, batch.TenantID, *batch.RouterID)
+	if err != nil {
+		_ = d.Store.UpdateVoucherBatchSync(ctx, batch.TenantID, batch.ID, "failed", 0, "router tidak ditemukan")
+		return d.Store.GetVoucherBatch(ctx, batch.TenantID, batch.ID)
+	}
+	if !r.IsActive {
+		_ = d.Store.UpdateVoucherBatchSync(ctx, batch.TenantID, batch.ID, "failed", 0, "router nonaktif")
+		return d.Store.GetVoucherBatch(ctx, batch.TenantID, batch.ID)
+	}
+	prov, err := d.Provisioner.Get(r.Provisioner)
+	if err != nil {
+		msg := fmt.Sprintf("provisioner: %v", err)
+		_ = d.Store.UpdateVoucherBatchSync(ctx, batch.TenantID, batch.ID, "failed", 0, msg)
+		return d.Store.GetVoucherBatch(ctx, batch.TenantID, batch.ID)
+	}
+
+	profile := ""
+	download, upload := 0, 0
+	price := batch.Price
+	var plan *store.Plan
+	if batch.PlanID != nil {
+		if p, err := d.Store.GetPlan(ctx, batch.TenantID, *batch.PlanID); err == nil && p != nil {
+			plan = p
+			profile = planProfileName(plan)
+			download, upload = plan.DownloadMbps, plan.UploadMbps
+			if price <= 0 {
+				price = plan.Price
+			}
+		}
+	}
+
+	// Hotspot users get IPs from the profile address-pool (not per-code static IPs).
+	// Prefer pool from plan×cluster offer when router belongs to a cluster.
+	var preferredPoolID *xid.ID
+	if batch.PlanID != nil {
+		var clusterID *xid.ID
+		if r.SiteID != nil {
+			clusterID = r.SiteID
+		}
+		preferredPoolID = resolveOfferIPPoolID(ctx, d, batch.TenantID, *batch.PlanID, clusterID)
+	}
+	poolName := ensureProfileIPPool(ctx, d, batch.TenantID, r.ID, preferredPoolID)
+
+	if ensurer, ok := prov.(provision.ProfileEnsurer); ok && profile != "" {
+		if err := ensurer.EnsureBandwidthProfile(ctx, batch.TenantID, r.ID, profile, download, upload, "hotspot", poolName, price); err != nil {
+			slog.Warn("voucher ensure hotspot profile", "batch_id", batch.ID, "profile", profile, "err", err)
+		}
+	} else if profile == "" && poolName != "" {
+		slog.Warn("voucher sync: paket tidak dipilih — address-pool tidak di-set di profil (pilih paket hotspot + offer)",
+			"batch_id", batch.ID, "pool", poolName)
+	}
+
+	codes, err := d.Store.ListVouchersByBatch(ctx, batch.TenantID, batch.ID, "")
+	if err != nil {
+		_ = d.Store.UpdateVoucherBatchSync(ctx, batch.TenantID, batch.ID, "failed", 0, err.Error())
+		return d.Store.GetVoucherBatch(ctx, batch.TenantID, batch.ID)
+	}
+
+	commentBase := ownershipComment(ctx, d, batch.TenantID, "VCH", batch.Name)
+	okCount := 0
+	var firstErr string
+	for _, v := range codes {
+		code := strings.TrimSpace(v.Code)
+		if code == "" {
+			continue
+		}
+		spec := &provision.ServiceSpec{
+			TenantID:     batch.TenantID,
+			RouterID:     r.ID,
+			Username:     code,
+			Password:     code,
+			ServiceType:  "hotspot",
+			ProfileName:  profile,
+			DownloadMbps: download,
+			UploadMbps:   upload,
+			Comment:      commentBase + " " + code,
+		}
+		applyPlanHotspotLimits(spec, plan)
+		if err := prov.Apply(ctx, spec); err != nil {
+			if firstErr == "" {
+				firstErr = fmt.Sprintf("%s: %v", code, err)
+			}
+			slog.Warn("voucher hotspot sync failed", "batch_id", batch.ID, "code", code, "err", err)
+			continue
+		}
+		okCount++
+	}
+
+	status := "synced"
+	if okCount == 0 && len(codes) > 0 {
+		status = "failed"
+		if firstErr == "" {
+			firstErr = "semua kode gagal di-push ke router"
+		}
+	} else if firstErr != "" {
+		status = "partial"
+	}
+	_ = d.Store.UpdateVoucherBatchSync(ctx, batch.TenantID, batch.ID, status, okCount, firstErr)
+	return d.Store.GetVoucherBatch(ctx, batch.TenantID, batch.ID)
+}
+
+func removeVoucherBatchFromRouter(ctx context.Context, d *Deps, batch *store.VoucherBatch) {
+	if batch == nil || batch.RouterID == nil {
+		return
+	}
+	r, err := d.Store.GetRouter(ctx, batch.TenantID, *batch.RouterID)
+	if err != nil {
+		return
+	}
+	prov, err := d.Provisioner.Get(r.Provisioner)
+	if err != nil {
+		return
+	}
+	codes, err := d.Store.ListVouchersByBatch(ctx, batch.TenantID, batch.ID, "")
+	if err != nil {
+		return
+	}
+	for _, v := range codes {
+		code := strings.TrimSpace(v.Code)
+		if code == "" {
+			continue
+		}
+		_ = prov.Remove(ctx, &provision.ServiceSpec{
+			TenantID: batch.TenantID, RouterID: r.ID,
+			Username: code, Password: code, ServiceType: "hotspot",
+		})
+	}
 }

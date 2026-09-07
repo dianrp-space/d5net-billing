@@ -195,6 +195,15 @@ func (c *Client) applyHotspot(ctx context.Context, spec *provision.ServiceSpec) 
 		if spec.ProfileName != "" {
 			args = append(args, "=profile="+spec.ProfileName)
 		}
+		if spec.LimitBytesTotal > 0 {
+			args = append(args, "=limit-bytes-total="+fmt.Sprintf("%d", spec.LimitBytesTotal))
+		}
+		if u := strings.TrimSpace(spec.LimitUptime); u != "" {
+			args = append(args, "=limit-uptime="+u)
+		}
+		if spec.SharedUsers > 0 {
+			args = append(args, "=shared-users="+fmt.Sprintf("%d", spec.SharedUsers))
+		}
 		return cl.Run(args...)
 	})
 }
@@ -263,57 +272,81 @@ func (c *Client) Suspend(ctx context.Context, spec *provision.ServiceSpec) error
 	if profile == "" {
 		profile = "isolir"
 	}
+	comment := provision.WithIsolirComment(commentTag(spec))
 	switch spec.ServiceType {
 	case "hotspot":
-		return c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/user/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-			return cl.Run("/ip/hotspot/user/set", "=numbers="+spec.Username, "=profile="+profile, "=disabled=yes")
+		err := c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/user/set", func(cl *routeros.Client) (*routeros.Reply, error) {
+			return cl.Run("/ip/hotspot/user/set", "=numbers="+spec.Username, "=profile="+profile, "=disabled=no", "=comment="+comment)
 		})
-	default:
-		// PPPoE (and default): set isolir profile; if IP known, also add address-list=isolir (walled garden prep).
-		return c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ppp/secret/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-			reply, err := cl.Run("/ppp/secret/set", "=numbers="+spec.Username, "=profile="+profile, "=disabled=yes")
+		if err != nil {
+			return err
+		}
+		// Best-effort kick hotspot active session
+		_ = c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/active/remove", func(cl *routeros.Client) (*routeros.Reply, error) {
+			reply, err := cl.Run("/ip/hotspot/active/print", "?user="+spec.Username)
 			if err != nil {
-				return reply, err
+				return nil, err
 			}
-			if spec.IPAddress != "" {
-				_, _ = cl.Run(
-					"/ip/firewall/address-list/add",
-					"=list=isolir",
-					"=address="+spec.IPAddress,
-					"=comment="+commentTag(spec),
-				)
+			for _, re := range reply.Re {
+				if id := re.Map[".id"]; id != "" {
+					_, _ = cl.Run("/ip/hotspot/active/remove", "=numbers="+id)
+				}
 			}
 			return reply, nil
 		})
+		return nil
+	default:
+		err := c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ppp/secret/set", func(cl *routeros.Client) (*routeros.Reply, error) {
+			return cl.Run("/ppp/secret/set", "=numbers="+spec.Username, "=profile="+profile, "=disabled=no", "=comment="+comment)
+		})
+		if err != nil {
+			return err
+		}
+		_ = c.Disconnect(ctx, spec)
+		return nil
 	}
 }
 
 func (c *Client) Resume(ctx context.Context, spec *provision.ServiceSpec) error {
+	comment := provision.WithoutIsolirComment(commentTag(spec))
 	switch spec.ServiceType {
 	case "hotspot":
-		return c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/user/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-			args := []string{"/ip/hotspot/user/set", "=numbers=" + spec.Username, "=disabled=no"}
+		err := c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/user/set", func(cl *routeros.Client) (*routeros.Reply, error) {
+			args := []string{"/ip/hotspot/user/set", "=numbers=" + spec.Username, "=disabled=no", "=comment=" + comment}
 			if spec.ProfileName != "" {
 				args = append(args, "=profile="+spec.ProfileName)
 			}
 			return cl.Run(args...)
 		})
-	default:
-		return c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ppp/secret/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-			args := []string{"/ppp/secret/set", "=numbers=" + spec.Username, "=disabled=no"}
-			if spec.ProfileName != "" {
-				args = append(args, "=profile="+spec.ProfileName)
-			}
-			reply, err := cl.Run(args...)
+		if err != nil {
+			return err
+		}
+		_ = c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/active/remove", func(cl *routeros.Client) (*routeros.Reply, error) {
+			reply, err := cl.Run("/ip/hotspot/active/print", "?user="+spec.Username)
 			if err != nil {
-				return reply, err
+				return nil, err
 			}
-			if spec.IPAddress != "" {
-				// Best-effort remove from isolir list (by comment match is harder; try address).
-				_, _ = cl.Run("/ip/firewall/address-list/remove", "=numbers="+spec.IPAddress)
+			for _, re := range reply.Re {
+				if id := re.Map[".id"]; id != "" {
+					_, _ = cl.Run("/ip/hotspot/active/remove", "=numbers="+id)
+				}
 			}
 			return reply, nil
 		})
+		return nil
+	default:
+		err := c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ppp/secret/set", func(cl *routeros.Client) (*routeros.Reply, error) {
+			args := []string{"/ppp/secret/set", "=numbers=" + spec.Username, "=disabled=no", "=comment=" + comment}
+			if spec.ProfileName != "" {
+				args = append(args, "=profile="+spec.ProfileName)
+			}
+			return cl.Run(args...)
+		})
+		if err != nil {
+			return err
+		}
+		_ = c.Disconnect(ctx, spec)
+		return nil
 	}
 }
 

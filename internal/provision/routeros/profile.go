@@ -33,9 +33,9 @@ func (c *Client) EnsureBandwidthProfile(ctx context.Context, tenantID, routerID 
 
 	switch serviceType {
 	case "hotspot":
+		// Note: /ip/hotspot/user/profile has no "comment" property (unlike /ppp/profile).
 		props := []string{
 			"=rate-limit=" + rate,
-			"=comment=" + comment,
 		}
 		if addressPool != "" {
 			props = append(props, "=address-pool="+addressPool)

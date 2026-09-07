@@ -68,3 +68,19 @@ func TestFakeProvisionerApply(t *testing.T) {
 		t.Fatal("apply")
 	}
 }
+
+func TestIsolirComment(t *testing.T) {
+	got := WithIsolirComment("Acme:KODE Nama")
+	if got != "ISOLIR Acme:KODE Nama" {
+		t.Fatal(got)
+	}
+	if WithIsolirComment(got) != got {
+		t.Fatal("not idempotent")
+	}
+	if WithoutIsolirComment(got) != "Acme:KODE Nama" {
+		t.Fatal(WithoutIsolirComment(got))
+	}
+	if WithoutIsolirComment("Acme:KODE") != "Acme:KODE" {
+		t.Fatal("should leave non-isolir")
+	}
+}

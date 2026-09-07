@@ -257,36 +257,250 @@ func registerAdvanced(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "create-work-order", Method: http.MethodPost, Path: "/api/work-orders",
-		Tags: []string{"WorkOrders"}, Security: []map[string][]string{{"bearer": {}}},
+		OperationID: "list-technicians", Method: http.MethodGet, Path: "/api/technicians",
+		Tags: []string{"Technicians"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ActiveOnly bool `query:"active_only"`
+	}) (*struct{ Body []store.Technician }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListTechnicians(ctx, tid, input.ActiveOnly)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.Technician{}
+		}
+		return &struct{ Body []store.Technician }{Body: list}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "create-technician", Method: http.MethodPost, Path: "/api/technicians",
+		Tags: []string{"Technicians"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			Type         string  `json:"type"`
-			Notes        *string `json:"notes,omitempty"`
-			CustomerID   *xid.ID `json:"customer_id,omitempty"`
-			TechnicianID *xid.ID `json:"technician_id,omitempty"`
-			Status       string  `json:"status,omitempty"`
+			FullName string  `json:"full_name"`
+			Phone    string  `json:"phone"`
+			UserID   *xid.ID `json:"user_id,omitempty"`
+			IsActive *bool   `json:"is_active,omitempty"`
 		}
+	}) (*struct{ Body store.Technician }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSpace(input.Body.FullName)
+		phone := strings.TrimSpace(input.Body.Phone)
+		if name == "" || phone == "" {
+			return nil, httpx.BadRequest("nama dan telepon wajib")
+		}
+		active := true
+		if input.Body.IsActive != nil {
+			active = *input.Body.IsActive
+		}
+		t := store.Technician{
+			TenantID: tid, UserID: input.Body.UserID, FullName: name, Phone: phone, IsActive: active,
+		}
+		if err := d.Store.CreateTechnician(ctx, &t); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.Technician }{Body: t}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "update-technician", Method: http.MethodPatch, Path: "/api/technicians/{id}",
+		Tags: []string{"Technicians"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			FullName string  `json:"full_name"`
+			Phone    string  `json:"phone"`
+			UserID   *xid.ID `json:"user_id,omitempty"`
+			IsActive bool    `json:"is_active"`
+		}
+	}) (*struct{ Body store.Technician }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSpace(input.Body.FullName)
+		phone := strings.TrimSpace(input.Body.Phone)
+		if name == "" || phone == "" {
+			return nil, httpx.BadRequest("nama dan telepon wajib")
+		}
+		t := store.Technician{
+			ID: input.ID, TenantID: tid, UserID: input.Body.UserID,
+			FullName: name, Phone: phone, IsActive: input.Body.IsActive,
+		}
+		if err := d.Store.UpdateTechnician(ctx, &t); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound("technician not found")
+			}
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.Technician }{Body: t}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-work-orders", Method: http.MethodGet, Path: "/api/work-orders",
+		Tags: []string{"WorkOrders"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Status       string `query:"status"`
+		TechnicianID string `query:"technician_id"`
+		Limit        int    `query:"limit"`
+		Offset       int    `query:"offset"`
+	}) (*struct {
+		Body struct {
+			Data  []store.WorkOrder `json:"data"`
+			Total int64             `json:"total"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		mineOnly, myTechID, err := fieldOpsTechnicianFilter(ctx, d, tid)
+		if err != nil {
+			return nil, err
+		}
+		out := &struct {
+			Body struct {
+				Data  []store.WorkOrder `json:"data"`
+				Total int64             `json:"total"`
+			}
+		}{}
+		if mineOnly && myTechID == nil {
+			out.Body.Data = []store.WorkOrder{}
+			return out, nil
+		}
+		techID, err := optionalQueryID(input.TechnicianID)
+		if err != nil {
+			return nil, httpx.BadRequest("technician_id tidak valid")
+		}
+		if mineOnly {
+			techID = myTechID
+		}
+		list, total, err := d.Store.ListWorkOrders(ctx, tid, input.Status, techID, input.Limit, input.Offset)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.WorkOrder{}
+		}
+		out.Body.Data = list
+		out.Body.Total = total
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-work-order", Method: http.MethodGet, Path: "/api/work-orders/{id}",
+		Tags: []string{"WorkOrders"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
 	}) (*struct{ Body store.WorkOrder }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		typ := strings.TrimSpace(input.Body.Type)
-		if typ == "" {
-			return nil, httpx.BadRequest("type is required")
+		wo, err := d.Store.GetWorkOrder(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("work order not found")
 		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := enforceWorkOrderAssigned(ctx, d, tid, wo); err != nil {
+			return nil, err
+		}
+		return &struct{ Body store.WorkOrder }{Body: *wo}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "create-work-order", Method: http.MethodPost, Path: "/api/work-orders",
+		Tags: []string{"WorkOrders"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			Type         string     `json:"type"`
+			Notes        *string    `json:"notes,omitempty"`
+			CustomerID   *xid.ID    `json:"customer_id,omitempty"`
+			TechnicianID *xid.ID    `json:"technician_id,omitempty"`
+			ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
+			Status       string     `json:"status,omitempty"`
+		}
+	}) (*struct{ Body store.WorkOrder }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		typ := store.NormalizeWorkOrderType(input.Body.Type)
+		if typ == "" {
+			return nil, httpx.BadRequest("type wajib: installation, repair, survey, maintenance, other")
+		}
+		status := store.NormalizeWorkOrderStatus(input.Body.Status)
 		wo := store.WorkOrder{
 			TenantID: tid, CustomerID: input.Body.CustomerID, TechnicianID: input.Body.TechnicianID,
-			Type: typ, Notes: input.Body.Notes, Status: input.Body.Status,
-		}
-		if wo.Status == "" {
-			wo.Status = "pending"
+			Type: typ, Notes: input.Body.Notes, Status: status, ScheduledAt: input.Body.ScheduledAt,
 		}
 		if err := d.Store.CreateWorkOrder(ctx, &wo); err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body store.WorkOrder }{Body: wo}, nil
+		full, err := d.Store.GetWorkOrder(ctx, tid, wo.ID)
+		if err != nil {
+			return &struct{ Body store.WorkOrder }{Body: wo}, nil
+		}
+		return &struct{ Body store.WorkOrder }{Body: *full}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "update-work-order", Method: http.MethodPatch, Path: "/api/work-orders/{id}",
+		Tags: []string{"WorkOrders"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			TechnicianID *xid.ID    `json:"technician_id"`
+			ClearTech    bool       `json:"clear_technician,omitempty"`
+			Status       *string    `json:"status,omitempty"`
+			Notes        *string    `json:"notes,omitempty"`
+			ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
+			ClearSched   bool       `json:"clear_scheduled_at,omitempty"`
+		}
+	}) (*struct{ Body store.WorkOrder }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var techPtr **xid.ID
+		if input.Body.ClearTech {
+			var nilID *xid.ID
+			techPtr = &nilID
+		} else if input.Body.TechnicianID != nil {
+			id := input.Body.TechnicianID
+			techPtr = &id
+		}
+		var schedPtr **time.Time
+		if input.Body.ClearSched {
+			var nilT *time.Time
+			schedPtr = &nilT
+		} else if input.Body.ScheduledAt != nil {
+			t := input.Body.ScheduledAt
+			schedPtr = &t
+		}
+		wo, err := d.Store.UpdateWorkOrder(ctx, tid, input.ID, techPtr, input.Body.Status, input.Body.Notes, schedPtr)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("work order not found")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.WorkOrder }{Body: *wo}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -298,15 +512,62 @@ func registerAdvanced(api huma.API, d *Deps) {
 			Lat float64 `json:"lat"`
 			Lng float64 `json:"lng"`
 		}
-	}) (*struct{ Body map[string]string }, error) {
+	}) (*struct{ Body store.WorkOrder }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if err := d.Store.CheckInWorkOrder(ctx, tid, input.ID, input.Body.Lat, input.Body.Lng); err != nil {
+		cur, err := d.Store.GetWorkOrder(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("work order not found")
+		}
+		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body map[string]string }{Body: map[string]string{"status": "in_progress"}}, nil
+		if err := enforceWorkOrderAssigned(ctx, d, tid, cur); err != nil {
+			return nil, err
+		}
+		wo, err := d.Store.CheckInWorkOrder(ctx, tid, input.ID, input.Body.Lat, input.Body.Lng)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("work order not found atau sudah selesai")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.WorkOrder }{Body: *wo}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "complete-work-order", Method: http.MethodPost, Path: "/api/work-orders/{id}/complete",
+		Tags: []string{"WorkOrders"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			Notes *string `json:"notes,omitempty"`
+		}
+	}) (*struct{ Body store.WorkOrder }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cur, err := d.Store.GetWorkOrder(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("work order not found")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := enforceWorkOrderAssigned(ctx, d, tid, cur); err != nil {
+			return nil, err
+		}
+		wo, err := d.Store.CompleteWorkOrder(ctx, tid, input.ID, input.Body.Notes)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("work order not found")
+		}
+		if err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+		return &struct{ Body store.WorkOrder }{Body: *wo}, nil
 	})
 }
 
@@ -328,7 +589,12 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, total, err := d.Store.ListLeads(ctx, tid, input.Status, input.Limit, input.Offset)
+		var assignedTo *xid.ID
+		if isFieldOps(ctx, d) {
+			uid := userIDFromCtx(ctx)
+			assignedTo = &uid
+		}
+		list, total, err := d.Store.ListLeads(ctx, tid, input.Status, assignedTo, input.Limit, input.Offset)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -363,8 +629,12 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			Notes       *string  `json:"notes,omitempty"`
 			ResellerID  *xid.ID  `json:"reseller_id,omitempty"`
 			SalesUserID *xid.ID  `json:"sales_user_id,omitempty"`
+			AssignedTo  *xid.ID  `json:"assigned_to,omitempty"`
 		}
 	}) (*struct{ Body store.Lead }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
@@ -380,16 +650,20 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if phone == "" {
 			return nil, httpx.BadRequest("telepon wajib")
 		}
+		status := store.NormalizeLeadStatus(input.Body.Status)
+		if store.LeadStatusNeedsAssignee(status) && (input.Body.AssignedTo == nil || xid.IsNil(*input.Body.AssignedTo)) {
+			return nil, httpx.BadRequest("teknisi wajib di-assign mulai status dihubungi")
+		}
 		rID, sID := store.NormalizeAttribution(input.Body.ResellerID, input.Body.SalesUserID)
 		l := store.Lead{
 			TenantID: tid, FullName: fullName, Phone: phone,
 			Email: emptyToNil(input.Body.Email), Address: emptyToNil(input.Body.Address),
 			Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
-			ODPID: input.Body.ODPID, Status: input.Body.Status, Notes: emptyToNil(input.Body.Notes),
-			ResellerID: rID, SalesUserID: sID,
+			ODPID: input.Body.ODPID, Status: status, Notes: emptyToNil(input.Body.Notes),
+			ResellerID: rID, SalesUserID: sID, AssignedTo: input.Body.AssignedTo,
 		}
 		if err := d.Store.CreateLead(ctx, &l); err != nil {
-			return nil, httpx.Internal(err)
+			return nil, httpx.BadRequest(err.Error())
 		}
 		out, _ := d.Store.GetLead(ctx, tid, l.ID)
 		if out != nil {
@@ -415,8 +689,12 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			Notes       *string  `json:"notes,omitempty"`
 			ResellerID  *xid.ID  `json:"reseller_id,omitempty"`
 			SalesUserID *xid.ID  `json:"sales_user_id,omitempty"`
+			AssignedTo  *xid.ID  `json:"assigned_to,omitempty"`
 		}
 	}) (*struct{ Body store.Lead }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
@@ -426,13 +704,14 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if fullName == "" || phone == "" {
 			return nil, httpx.BadRequest("nama dan telepon wajib")
 		}
+		status := store.NormalizeLeadStatus(input.Body.Status)
 		rID, sID := store.NormalizeAttribution(input.Body.ResellerID, input.Body.SalesUserID)
 		l := &store.Lead{
 			ID: input.ID, TenantID: tid, FullName: fullName, Phone: phone,
 			Email: emptyToNil(input.Body.Email), Address: emptyToNil(input.Body.Address),
 			Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
-			ODPID: input.Body.ODPID, Status: input.Body.Status, Notes: emptyToNil(input.Body.Notes),
-			ResellerID: rID, SalesUserID: sID,
+			ODPID: input.Body.ODPID, Status: status, Notes: emptyToNil(input.Body.Notes),
+			ResellerID: rID, SalesUserID: sID, AssignedTo: input.Body.AssignedTo,
 		}
 		if err := d.Store.UpdateLead(ctx, l); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
@@ -453,16 +732,49 @@ func registerOpsExtra(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			Status string `json:"status"`
+			Status     string  `json:"status"`
+			AssignedTo *xid.ID `json:"assigned_to,omitempty"`
 		}
 	}) (*struct{ Body store.Lead }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if err := d.Store.UpdateLeadStatus(ctx, tid, input.ID, input.Body.Status); err != nil {
+		if err := d.Store.UpdateLeadStatus(ctx, tid, input.ID, input.Body.Status, input.Body.AssignedTo); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, httpx.NotFound("lead tidak ditemukan atau sudah dikonversi")
+			}
+			return nil, httpx.BadRequest(err.Error())
+		}
+		out, err := d.Store.GetLead(ctx, tid, input.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.Lead }{Body: *out}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "assign-lead", Method: http.MethodPatch, Path: "/api/leads/{id}/assign",
+		Tags: []string{"Leads"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			AssignedTo *xid.ID `json:"assigned_to"`
+		}
+	}) (*struct{ Body store.Lead }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.AssignLead(ctx, tid, input.ID, input.Body.AssignedTo); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound("lead tidak ditemukan atau belum dihubungi/proses pasang")
 			}
 			return nil, httpx.BadRequest(err.Error())
 		}
@@ -479,6 +791,9 @@ func registerOpsExtra(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID xid.ID `path:"id"`
 	}) (*struct{}, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
@@ -510,6 +825,9 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			Lead     store.Lead     `json:"lead"`
 		}
 	}, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
@@ -530,6 +848,77 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			Customer store.Customer `json:"customer"`
 			Lead     store.Lead     `json:"lead"`
 		}{Customer: *cust, Lead: *lead}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-lead-comments", Method: http.MethodGet, Path: "/api/leads/{id}/comments",
+		Tags: []string{"Leads"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body []store.LeadComment }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lead, err := d.Store.GetLead(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("lead tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := enforceLeadAssigned(ctx, d, lead); err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListLeadComments(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("lead tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.LeadComment{}
+		}
+		return &struct{ Body []store.LeadComment }{Body: list}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "add-lead-comment", Method: http.MethodPost, Path: "/api/leads/{id}/comments",
+		Tags: []string{"Leads"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			Message   string   `json:"message"`
+			ImageURLs []string `json:"image_urls,omitempty"`
+		}
+	}) (*struct{ Body store.LeadComment }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lead, err := d.Store.GetLead(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("lead tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := enforceLeadAssigned(ctx, d, lead); err != nil {
+			return nil, err
+		}
+		var senderID *xid.ID
+		if uid := userIDFromCtx(ctx); !xid.IsNil(uid) {
+			senderID = &uid
+		}
+		c, err := d.Store.AddLeadComment(ctx, tid, input.ID, senderID, input.Body.Message, input.Body.ImageURLs)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("lead tidak ditemukan")
+		}
+		if err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+		return &struct{ Body store.LeadComment }{Body: *c}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -962,6 +1351,26 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body map[string]any }{Body: rep}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "sla-report", Method: http.MethodGet, Path: "/api/reports/sla",
+		Tags: []string{"Reports"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Days int `query:"days"`
+	}) (*struct{ Body store.TicketSLAReport }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rep, err := d.Store.TicketSLAReport(ctx, tid, input.Days)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.TicketSLAReport }{Body: *rep}, nil
 	})
 
 	huma.Register(api, huma.Operation{

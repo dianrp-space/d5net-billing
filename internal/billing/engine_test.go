@@ -35,6 +35,32 @@ func TestApplyLateFee(t *testing.T) {
 	}
 }
 
+func TestRemainingDaysUntil(t *testing.T) {
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+	if d := RemainingDaysUntil(now, until, 30); d != 22 {
+		t.Fatalf("days=%d want 22", d)
+	}
+	if RemainingDaysUntil(now, now, 30) != 0 {
+		t.Fatal("same day")
+	}
+}
+
+func TestPlanChangeDelta(t *testing.T) {
+	// old 300k, new 500k, 15/30 days → credit 150k, charge 250k, delta 100k
+	oldC := ProrateAmount(300_000, 15, 30)
+	newC := ProrateAmount(500_000, 15, 30)
+	delta := newC - oldC
+	if oldC != 150_000 || newC != 250_000 || delta != 100_000 {
+		t.Fatalf("old=%d new=%d delta=%d", oldC, newC, delta)
+	}
+	// downgrade
+	deltaDown := ProrateAmount(300_000, 15, 30) - ProrateAmount(500_000, 15, 30)
+	if deltaDown != -100_000 {
+		t.Fatalf("downgrade delta=%d", deltaDown)
+	}
+}
+
 func TestNextBillDate(t *testing.T) {
 	e := New(nil)
 	from := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)

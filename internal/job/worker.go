@@ -159,9 +159,26 @@ func (w *Worker) suspendSubscription(ctx context.Context, tenantID xid.ID, subID
 	if err != nil {
 		return
 	}
-	isolir := ""
-	if plan.IsolirProfile != nil {
+	isolirCfg, _ := w.store.GetIsolirNetworkSettings(ctx, tenantID)
+	_ = w.store.ResolveIsolirPool(ctx, tenantID, &isolirCfg)
+	isolir := isolirCfg.ProfileName
+	if plan.IsolirProfile != nil && *plan.IsolirProfile != "" {
 		isolir = *plan.IsolirProfile
+	}
+	if isolir == "" {
+		isolir = "isolir"
+	}
+	ten, _ := w.store.GetTenant(ctx, tenantID)
+	slug := ""
+	if ten != nil {
+		slug = ten.Slug
+	}
+	// Only push Web Proxy/pool infra when this subscription's router matches isolir settings.
+	sameRouter := isolirCfg.RouterID != nil && !xid.IsNil(*isolirCfg.RouterID) && *isolirCfg.RouterID == *sub.RouterID
+	if ensurer, ok := prov.(provision.IsolirEnsurer); ok && sameRouter && isolirCfg.PoolRanges != "" && isolirCfg.PortalBaseURL != "" {
+		if err := ensurer.EnsureIsolirInfra(ctx, tenantID, *sub.RouterID, isolirCfg, slug); err != nil {
+			slog.Warn("ensure isolir infra", "router_id", *sub.RouterID, "err", err)
+		}
 	}
 	profile := ""
 	if plan.ProfileName != nil {
