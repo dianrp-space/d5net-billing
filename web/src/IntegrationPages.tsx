@@ -1,11 +1,11 @@
-import { MessageCircle, Send } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "./api";
 import { useAppDialog } from "./confirm";
-import { IconCopy, IconTrash } from "./icons";
+import { IconCopy, IconSend, IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { usePersistedTab } from "./navPersist";
 import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
 
 type OutboundWebhook = {
@@ -23,10 +23,41 @@ type PaymentIntegration = {
   method: string;
   provider: string;
   env_fallback: boolean;
+  api_key?: string;
+  webhook_secret?: string;
+  expires_in_minutes: number;
   webhook_path: string;
   webhook_url: string;
   webhook_base_hint: string;
 };
+
+function ttlHint(minutes: number) {
+  const n = Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
+  if (n >= 1440) return "24 jam";
+  if (n % 60 === 0) return n === 60 ? "1 jam" : `${n / 60} jam`;
+  if (n > 60) {
+    const h = Math.floor(n / 60);
+    const m = n % 60;
+    return `${h} jam ${m} menit`;
+  }
+  return `${n} menit`;
+}
+
+const TTL_PRESETS = [
+  { minutes: 15, label: "15 menit" },
+  { minutes: 60, label: "1 jam" },
+  { minutes: 360, label: "6 jam" },
+  { minutes: 1440, label: "24 jam" },
+];
+
+function paymentWebhookDisplayURL(data?: PaymentIntegration | null) {
+  const path = data?.webhook_path || "/api/webhooks/payment/drp";
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  if (typeof window === "undefined") {
+    return data?.webhook_url || normalized;
+  }
+  return `${window.location.origin}${normalized}`;
+}
 
 const EVENT_PRESETS = ["payment.paid", "invoice.created", "subscription.suspended", "subscription.activated"];
 
@@ -183,6 +214,7 @@ export function PaymentGWPage() {
     base_url: "",
     api_key: "",
     webhook_secret: "",
+    expires_in_minutes: 15,
   });
 
   useEffect(() => {
@@ -190,8 +222,9 @@ export function PaymentGWPage() {
     setForm({
       enabled: q.data.enabled,
       base_url: q.data.base_url || "",
-      api_key: "",
-      webhook_secret: "",
+      api_key: q.data.api_key || "",
+      webhook_secret: q.data.webhook_secret || "",
+      expires_in_minutes: q.data.expires_in_minutes || 15,
     });
   }, [q.data]);
 
@@ -204,18 +237,25 @@ export function PaymentGWPage() {
           base_url: form.base_url.trim(),
           api_key: form.api_key.trim() || undefined,
           webhook_secret: form.webhook_secret.trim() || undefined,
+          expires_in_minutes: Math.min(1440, Math.max(1, form.expires_in_minutes || 15)),
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      qc.setQueryData(["integration-payment"], data);
+      setForm({
+        enabled: data.enabled,
+        base_url: data.base_url || "",
+        api_key: data.api_key || form.api_key,
+        webhook_secret: data.webhook_secret || form.webhook_secret,
+        expires_in_minutes: data.expires_in_minutes || form.expires_in_minutes,
+      });
       void qc.invalidateQueries({ queryKey: ["integration-payment"] });
-      setForm((f) => ({ ...f, api_key: "", webhook_secret: "" }));
       void toastSuccess("Payment gateway disimpan");
     },
     onError: (e: Error) => void toastError(e.message),
   });
 
-  const webhookURL =
-    q.data?.webhook_url || q.data?.webhook_base_hint || q.data?.webhook_path || "/api/webhooks/payment/drp";
+  const webhookURL = paymentWebhookDisplayURL(q.data);
 
   async function copyWebhook() {
     try {
@@ -229,8 +269,8 @@ export function PaymentGWPage() {
   return (
     <Section title="Payment Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Integrasi <strong>DRP Payment</strong> (QRIS saja). Kredensial per tenant disimpan terenkripsi. Kosongkan secret
-        untuk mempertahankan nilai lama.
+        Integrasi <strong>DRP Payment</strong> (QRIS saja). Kredensial per tenant disimpan terenkripsi. Gunakan tombol
+        mata untuk menampilkan API key dan webhook secret.
       </p>
       {q.isLoading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
@@ -261,20 +301,55 @@ export function PaymentGWPage() {
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">API key</span>
               <SecretInput
-                placeholder={q.data?.configured ? "API key baru (opsional)" : "API key (drp_live_…)"}
+                name="drp-payment-api-key"
+                placeholder="API key (drp_live_…)"
                 value={form.api_key}
                 onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-                autoComplete="off"
+                autoComplete="new-password"
               />
             </label>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Webhook secret</span>
               <SecretInput
-                placeholder={q.data?.configured ? "Webhook secret baru (opsional)" : "Webhook secret"}
+                name="drp-payment-webhook-secret"
+                placeholder="Webhook secret"
                 value={form.webhook_secret}
                 onChange={(e) => setForm({ ...form, webhook_secret: e.target.value })}
-                autoComplete="off"
+                autoComplete="new-password"
               />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Masa berlaku QRIS (TTL)</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={1440}
+                step={1}
+                value={form.expires_in_minutes}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    expires_in_minutes: Number(e.target.value) || 15,
+                  })
+                }
+              />
+              <div className="flex flex-wrap gap-1">
+                {TTL_PRESETS.map((p) => (
+                  <button
+                    key={p.minutes}
+                    type="button"
+                    className="btn-ghost px-2 py-1 text-[11px]"
+                    onClick={() => setForm({ ...form, expires_in_minutes: p.minutes })}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-[var(--muted)]">
+                QR baru berlaku {ttlHint(form.expires_in_minutes)} (1–1440 menit). QR yang sudah terbit tetap dipakai
+                sampai waktu kadaluwarsanya sendiri.
+              </span>
             </label>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Webhook URL (isi di dashboard DRP Payment)</span>
@@ -330,15 +405,20 @@ function ProviderBlock({
 }
 
 export function MessagingGWPage() {
+  const [tab, setTab] = usePersistedTab("messaging-channel", "whatsapp", ["whatsapp", "telegram"]);
+  const current = tab === "telegram" ? "telegram" : "whatsapp";
   return (
-    <Tabs defaultValue="whatsapp" className="space-y-0">
+    <Tabs
+      value={current}
+      onValueChange={(v) => {
+        if (v === "whatsapp" || v === "telegram") setTab(v);
+      }}
+      className="space-y-0"
+    >
       <TabsList aria-label="Messaging Gateway">
-        <TabsTrigger value="whatsapp">
-          <MessageCircle />
-          WhatsApp
-        </TabsTrigger>
+        <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
         <TabsTrigger value="telegram">
-          <Send />
+          <IconSend />
           Telegram
         </TabsTrigger>
       </TabsList>
@@ -369,7 +449,7 @@ function WhatsAppTab() {
     queryKey: ["integration-whatsapp"],
     queryFn: () => api<WAStatus>("/api/integrations/whatsapp/status"),
     refetchInterval: (q) => {
-      const d = q.state.data;
+      const d = q?.state?.data as WAStatus | undefined;
       if (d?.logged_in) return false;
       if (d?.qr_code) return 2500;
       return 8000;
@@ -444,16 +524,18 @@ function WhatsAppTab() {
   );
 }
 
+type TelegramIntegration = {
+  telegram_configured: boolean;
+  telegram_enabled: boolean;
+  telegram_chat_id: string;
+  telegram_bot_token?: string;
+};
+
 function TelegramTab() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["integration-telegram"],
-    queryFn: () =>
-      api<{
-        telegram_configured: boolean;
-        telegram_enabled: boolean;
-        telegram_chat_id: string;
-      }>("/api/integrations/telegram"),
+    queryFn: () => api<TelegramIntegration>("/api/integrations/telegram"),
   });
   const [form, setForm] = useState({
     telegram_bot_token: "",
@@ -464,7 +546,7 @@ function TelegramTab() {
   useEffect(() => {
     if (!q.data) return;
     setForm({
-      telegram_bot_token: "",
+      telegram_bot_token: q.data.telegram_bot_token || "",
       telegram_chat_id: q.data.telegram_chat_id || "",
       telegram_enabled: q.data.telegram_enabled,
     });
@@ -472,7 +554,7 @@ function TelegramTab() {
 
   const save = useMutation({
     mutationFn: () =>
-      api("/api/integrations/telegram", {
+      api<TelegramIntegration>("/api/integrations/telegram", {
         method: "PUT",
         body: JSON.stringify({
           telegram_enabled: form.telegram_enabled,
@@ -480,9 +562,14 @@ function TelegramTab() {
           telegram_bot_token: form.telegram_bot_token.trim() || undefined,
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      qc.setQueryData(["integration-telegram"], data);
+      setForm({
+        telegram_bot_token: data.telegram_bot_token || form.telegram_bot_token,
+        telegram_chat_id: data.telegram_chat_id || "",
+        telegram_enabled: data.telegram_enabled,
+      });
       void qc.invalidateQueries({ queryKey: ["integration-telegram"] });
-      setForm((f) => ({ ...f, telegram_bot_token: "" }));
       void toastSuccess("Telegram Gateway disimpan");
     },
     onError: (e: Error) => void toastError(e.message),
@@ -491,8 +578,9 @@ function TelegramTab() {
   return (
     <Section title="Telegram Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Alert ops tenant saja (bukan ke pelanggan). Isi bot token + chat ID grup/channel/DM admin. Start bot di chat
-        tujuan dulu, lalu salin chat ID. Kosongkan token untuk mempertahankan nilai lama.
+        Alert ke grup/channel/DM admin (bukan ke pelanggan). Aktifkan, isi bot token + chat ID, lalu start bot di chat
+        tujuan. Pesan terkirim otomatis untuk: tiket baru, work order baru, auto isolir, router tidak merespons, dan
+        drift reconcile mingguan. Router down paling banyak sekali per hari.
       </p>
       {q.isLoading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
@@ -503,7 +591,7 @@ function TelegramTab() {
               <div>
                 <p className="text-sm font-medium">Bot + chat tenant</p>
                 <p className="text-[10px] text-[var(--muted)]">
-                  {q.data?.telegram_configured ? "siap kirim" : "butuh token + chat ID"}
+                  {q.data?.telegram_configured ? "token tersimpan" : "butuh token + chat ID"}
                 </p>
               </div>
               <label className="flex items-center gap-2 text-sm">
@@ -516,18 +604,25 @@ function TelegramTab() {
               </label>
             </div>
             <div className="grid gap-2">
-              <SecretInput
-                placeholder={q.data?.telegram_configured ? "Bot token baru (opsional)" : "Bot token"}
-                value={form.telegram_bot_token}
-                onChange={(e) => setForm({ ...form, telegram_bot_token: e.target.value })}
-                autoComplete="off"
-              />
-              <input
-                className="input"
-                placeholder="Chat ID (contoh: -100123… atau 123456789)"
-                value={form.telegram_chat_id}
-                onChange={(e) => setForm({ ...form, telegram_chat_id: e.target.value })}
-              />
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Bot token</span>
+                <SecretInput
+                  name="telegram-bot-token"
+                  placeholder="Bot token (123456:AA…)"
+                  value={form.telegram_bot_token}
+                  onChange={(e) => setForm({ ...form, telegram_bot_token: e.target.value })}
+                  autoComplete="new-password"
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Chat ID</span>
+                <input
+                  className="input"
+                  placeholder="Chat ID (contoh: -100123… atau 123456789)"
+                  value={form.telegram_chat_id}
+                  onChange={(e) => setForm({ ...form, telegram_chat_id: e.target.value })}
+                />
+              </label>
             </div>
           </div>
           <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>

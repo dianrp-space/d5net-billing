@@ -1,6 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { useConfirm } from "./confirm";
+import { IconRefresh } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { Button, Input, Label, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table } from "./ui";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,7 +12,6 @@ type JobSchedule = {
   isolir_enabled: boolean;
   dunning_enabled: boolean;
   dunning_offsets: number[];
-  odp_outage_enabled: boolean;
   weekly_reconcile_enabled: boolean;
   weekly_reconcile_weekday: number;
   weekly_reconcile_hour: number;
@@ -18,6 +19,7 @@ type JobSchedule = {
   monthly_report_day: number;
   monthly_report_hour: number;
   notify_batch_size: number;
+  cycle_interval_seconds: number;
 };
 
 type JobsResponse = {
@@ -34,6 +36,12 @@ type JobRun = {
   created_at: string;
 };
 
+type JobRunResult = {
+  invoices: number;
+  isolir: number;
+  notify: number;
+};
+
 const WEEKDAYS = [
   { value: 0, label: "Minggu" },
   { value: 1, label: "Senin" },
@@ -44,6 +52,10 @@ const WEEKDAYS = [
   { value: 6, label: "Sabtu" },
 ];
 
+const INTERVAL_MINUTES = [1, 2, 5, 10, 15, 30, 60];
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const MONTH_DAYS = Array.from({ length: 28 }, (_, i) => i + 1);
+
 function formatWhen(iso?: string) {
   if (!iso) return "—";
   try {
@@ -51,6 +63,12 @@ function formatWhen(iso?: string) {
   } catch {
     return iso;
   }
+}
+
+function secondsToMinutes(sec: number | undefined) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n < 60) return 1;
+  return Math.max(1, Math.min(60, Math.round(n / 60)));
 }
 
 function offsetsToText(offsets: number[] | undefined) {
@@ -66,8 +84,40 @@ function parseOffsets(raw: string): number[] {
     .filter((n) => Number.isFinite(n));
 }
 
+function catalogHint(catalog: JobsResponse["catalog"], id: string, fallback: string) {
+  return catalog.find((c) => c.id === id)?.description || fallback;
+}
+
+function JobRow({
+  checked,
+  onCheckedChange,
+  title,
+  hint,
+  children,
+}: {
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+  title: string;
+  hint: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="rounded-[var(--radius-md,0.65rem)] border border-[var(--border)] bg-[var(--panel)] p-3">
+      <label className="flex items-start gap-3 text-sm">
+        <Checkbox className="mt-0.5" checked={checked} onCheckedChange={(v) => onCheckedChange(v === true)} />
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold">{title}</span>
+          <span className="mt-0.5 block text-xs leading-relaxed text-[var(--muted)]">{hint}</span>
+        </span>
+      </label>
+      {children ? <div className="mt-3 pl-8">{children}</div> : null}
+    </div>
+  );
+}
+
 export function JobsSettingsPage() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const q = useQuery({
     queryKey: ["jobs-settings"],
     queryFn: () => api<JobsResponse>("/api/settings/jobs"),
@@ -99,224 +149,270 @@ export function JobsSettingsPage() {
     onError: (e: Error) => void toastError(e.message),
   });
 
+  const runNow = useMutation({
+    mutationFn: () => api<JobRunResult>("/api/settings/jobs/run", { method: "POST" }),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["jobs-runs"] });
+      void toastSuccess(
+        `Siklus selesai. Tagihan baru ${res.invoices} · Isolir ${res.isolir} · Notifikasi ${res.notify}`,
+      );
+    },
+    onError: (e: Error) => void toastError(e.message || "Gagal menjalankan worker"),
+  });
+
   const catalog = q.data?.catalog ?? [];
   const runs = runsQ.data?.data ?? [];
+  const intervalMins = form ? secondsToMinutes(form.cycle_interval_seconds) : 1;
+  const intervalOptions = INTERVAL_MINUTES.includes(intervalMins)
+    ? INTERVAL_MINUTES
+    : [...INTERVAL_MINUTES, intervalMins].sort((a, b) => a - b);
 
   function patch<K extends keyof JobSchedule>(key: K, value: JobSchedule[K]) {
     setForm((f) => (f ? { ...f, [key]: value } : f));
   }
 
+  function scheduleBody(src: JobSchedule): JobSchedule {
+    return {
+      ...src,
+      dunning_offsets: parseOffsets(offsetsText),
+      weekly_reconcile_weekday: Number(src.weekly_reconcile_weekday),
+      weekly_reconcile_hour: Number(src.weekly_reconcile_hour),
+      monthly_report_day: Number(src.monthly_report_day),
+      monthly_report_hour: Number(src.monthly_report_hour),
+      notify_batch_size: Number(src.notify_batch_size),
+      cycle_interval_seconds: secondsToMinutes(src.cycle_interval_seconds) * 60,
+    };
+  }
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!form) return;
-    const body: JobSchedule = {
-      ...form,
-      dunning_offsets: parseOffsets(offsetsText),
-      weekly_reconcile_weekday: Number(form.weekly_reconcile_weekday),
-      weekly_reconcile_hour: Number(form.weekly_reconcile_hour),
-      monthly_report_day: Number(form.monthly_report_day),
-      monthly_report_hour: Number(form.monthly_report_hour),
-      notify_batch_size: Number(form.notify_batch_size),
-    };
-    save.mutate(body);
+    save.mutate(scheduleBody(form));
+  }
+
+  async function onRunNow() {
+    const ok = await confirm({
+      title: "Jalankan worker sekarang?",
+      description:
+        "Tagihan jatuh tempo, auto isolir, pengingat, dan antrian notifikasi tenant ini akan diproses segera — tidak menunggu interval.",
+      confirmLabel: "Jalankan",
+    });
+    if (!ok) return;
+    runNow.mutate();
   }
 
   return (
-    <Section title="Cronjob / Worker">
-      <p className="mb-4 text-sm text-[var(--muted)]">
-        Atur tugas yang dijalankan proses <code className="text-xs">drp-worker</code> untuk tenant ini.
-        Worker mengecek jadwal setiap ~1 menit; tugas terjadwal (reconcile / laporan) tetap idempoten lewat{" "}
-        <code className="text-xs">job_runs</code>.
+    <Section title="Cronjob">
+      <p className="mb-5 max-w-2xl text-sm text-[var(--muted)]">
+        Atur interval dan tugas worker untuk tenant ini. Reconcile dan laporan tetap sekali per jadwal (idempoten).
       </p>
 
       {q.isLoading || !form ? (
         <p className="text-sm text-[var(--muted)]">Memuat pengaturan…</p>
       ) : (
-        <form className="space-y-6" onSubmit={onSubmit}>
-          <div className="panel-card space-y-3 p-4">
-            <h3 className="text-sm font-semibold">Tugas aktif</h3>
-            <label className="flex items-start gap-2 text-sm">
-              <Checkbox
-                checked={form.billing_enabled}
-                onCheckedChange={(v) => patch("billing_enabled", v === true)}
-              />
-              <span>
-                <strong>Generate tagihan</strong>
-                <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                  {catalog.find((c) => c.id === "billing")?.description}
-                </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-2 text-sm">
-              <Checkbox checked={form.isolir_enabled} onCheckedChange={(v) => patch("isolir_enabled", v === true)} />
-              <span>
-                <strong>Auto isolir</strong>
-                <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                  {catalog.find((c) => c.id === "isolir")?.description}
-                </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-2 text-sm">
-              <Checkbox
-                checked={form.dunning_enabled}
-                onCheckedChange={(v) => patch("dunning_enabled", v === true)}
-              />
-              <span>
-                <strong>Pengingat tagihan (dunning)</strong>
-                <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                  {catalog.find((c) => c.id === "dunning")?.description}
-                </span>
-              </span>
-            </label>
-            <div className="ml-6 max-w-md">
-              <Label className="mb-1.5 block">Offset hari (negatif = sebelum jatuh tempo)</Label>
-              <Input
-                value={offsetsText}
-                onChange={(e) => setOffsetsText(e.target.value)}
-                placeholder="-7, -3, 0, 1, 3"
-                disabled={!form.dunning_enabled}
-              />
-              <p className="mt-1 text-xs text-[var(--muted)]">Contoh: -7, -3, 0, 1, 3 → H-7, H-3, H0, H+1, H+3</p>
-            </div>
-            <label className="flex items-start gap-2 text-sm">
-              <Checkbox
-                checked={form.odp_outage_enabled}
-                onCheckedChange={(v) => patch("odp_outage_enabled", v === true)}
-              />
-              <span>
-                <strong>Deteksi gangguan ODP</strong>
-                <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                  {catalog.find((c) => c.id === "odp_outage")?.description}
-                </span>
-              </span>
-            </label>
-          </div>
-
-          <div className="panel-card grid gap-4 p-4 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <label className="flex items-start gap-2 text-sm">
-                <Checkbox
-                  checked={form.weekly_reconcile_enabled}
-                  onCheckedChange={(v) => patch("weekly_reconcile_enabled", v === true)}
+        <form className="grid gap-5" onSubmit={onSubmit}>
+          <div className="panel-card flex flex-col gap-4 p-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="grid flex-1 gap-4 sm:grid-cols-3">
+              <div>
+                <Label className="mb-1.5 block">Interval</Label>
+                <Select
+                  value={String(intervalMins)}
+                  onValueChange={(v) => patch("cycle_interval_seconds", Number(v) * 60)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {intervalOptions.map((m) => (
+                      <SelectItem key={m} value={String(m)}>
+                        Setiap {m} menit
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="mb-1.5 block">Batch notifikasi</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={form.notify_batch_size}
+                  onChange={(e) => patch("notify_batch_size", Number(e.target.value))}
                 />
-                <span>
-                  <strong>Reconcile mingguan</strong>
-                  <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                    {catalog.find((c) => c.id === "weekly_reconcile")?.description}
-                  </span>
-                </span>
-              </label>
+              </div>
             </div>
-            <div>
-              <Label className="mb-1.5 block">Hari</Label>
-              <Select
-                value={String(form.weekly_reconcile_weekday)}
-                onValueChange={(v) => patch("weekly_reconcile_weekday", Number(v))}
-                disabled={!form.weekly_reconcile_enabled}
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={onRunNow} disabled={runNow.isPending}>
+                <IconRefresh />
+                {runNow.isPending ? "Menjalankan…" : "Jalankan sekarang"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  if (!q.data?.defaults) return;
+                  setForm({ ...q.data.defaults });
+                  setOffsetsText(offsetsToText(q.data.defaults.dunning_offsets));
+                }}
               >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WEEKDAYS.map((d) => (
-                    <SelectItem key={d.value} value={String(d.value)}>
-                      {d.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="mb-1.5 block">Jam (0–23, waktu lokal server)</Label>
-              <Input
-                type="number"
-                min={0}
-                max={23}
-                value={form.weekly_reconcile_hour}
-                disabled={!form.weekly_reconcile_enabled}
-                onChange={(e) => patch("weekly_reconcile_hour", Number(e.target.value))}
-              />
+                Reset
+              </Button>
+              <Button type="submit" disabled={save.isPending}>
+                {save.isPending ? "Menyimpan…" : "Simpan"}
+              </Button>
             </div>
           </div>
 
-          <div className="panel-card grid gap-4 p-4 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <label className="flex items-start gap-2 text-sm">
-                <Checkbox
-                  checked={form.monthly_report_enabled}
-                  onCheckedChange={(v) => patch("monthly_report_enabled", v === true)}
+          <div className="grid gap-5 lg:grid-cols-2 lg:items-start">
+            <div className="panel-card space-y-3 p-4">
+              <div>
+                <h3 className="text-sm font-semibold">Setiap siklus</h3>
+                <p className="mt-0.5 text-xs text-[var(--muted)]">Jalan otomatis sesuai interval, atau lewat tombol di atas.</p>
+              </div>
+              <JobRow
+                checked={form.billing_enabled}
+                onCheckedChange={(v) => patch("billing_enabled", v)}
+                title="Generate tagihan"
+                hint={catalogHint(catalog, "billing", "Invoice untuk langganan yang jatuh tempo.")}
+              />
+              <JobRow
+                checked={form.isolir_enabled}
+                onCheckedChange={(v) => patch("isolir_enabled", v)}
+                title="Auto isolir"
+                hint={catalogHint(catalog, "isolir", "Suspend langganan lewat jatuh tempo + grace, lalu retry resume.")}
+              />
+              <JobRow
+                checked={form.dunning_enabled}
+                onCheckedChange={(v) => patch("dunning_enabled", v)}
+                title="Pengingat tagihan"
+                hint={catalogHint(catalog, "dunning", "Reminder WhatsApp/email pada offset hari relatif jatuh tempo.")}
+              >
+                <Label className="mb-1.5 block">Offset hari</Label>
+                <Input
+                  value={offsetsText}
+                  onChange={(e) => setOffsetsText(e.target.value)}
+                  placeholder="-7, -3, 0, 1, 3"
+                  disabled={!form.dunning_enabled}
                 />
-                <span>
-                  <strong>Laporan bulanan (email)</strong>
-                  <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                    {catalog.find((c) => c.id === "monthly_report")?.description}
-                  </span>
-                </span>
-              </label>
+                <p className="mt-1 text-xs text-[var(--muted)]">Negatif = sebelum jatuh tempo. Contoh: -7, -3, 0, 1, 3</p>
+              </JobRow>
             </div>
-            <div>
-              <Label className="mb-1.5 block">Tanggal (1–28)</Label>
-              <Input
-                type="number"
-                min={1}
-                max={28}
-                value={form.monthly_report_day}
-                disabled={!form.monthly_report_enabled}
-                onChange={(e) => patch("monthly_report_day", Number(e.target.value))}
-              />
-            </div>
-            <div>
-              <Label className="mb-1.5 block">Jam (0–23)</Label>
-              <Input
-                type="number"
-                min={0}
-                max={23}
-                value={form.monthly_report_hour}
-                disabled={!form.monthly_report_enabled}
-                onChange={(e) => patch("monthly_report_hour", Number(e.target.value))}
-              />
-            </div>
-          </div>
 
-          <div className="panel-card max-w-xs p-4">
-            <Label className="mb-1.5 block">Batch notifikasi keluar</Label>
-            <Input
-              type="number"
-              min={1}
-              max={500}
-              value={form.notify_batch_size}
-              onChange={(e) => patch("notify_batch_size", Number(e.target.value))}
-            />
-            <p className="mt-1 text-xs text-[var(--muted)]">Maks pesan antrian diproses per siklus worker.</p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Menyimpan…" : "Simpan"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                if (!q.data?.defaults) return;
-                setForm({ ...q.data.defaults });
-                setOffsetsText(offsetsToText(q.data.defaults.dunning_offsets));
-              }}
-            >
-              Reset default
-            </Button>
+            <div className="panel-card space-y-3 p-4">
+              <div>
+                <h3 className="text-sm font-semibold">Jadwal</h3>
+                <p className="mt-0.5 text-xs text-[var(--muted)]">Sekali per slot waktu (tidak diulang tiap siklus).</p>
+              </div>
+              <JobRow
+                checked={form.weekly_reconcile_enabled}
+                onCheckedChange={(v) => patch("weekly_reconcile_enabled", v)}
+                title="Reconcile mingguan"
+                hint={catalogHint(catalog, "weekly_reconcile", "Dry-run drift RouterOS vs billing.")}
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label className="mb-1.5 block">Hari</Label>
+                    <Select
+                      value={String(form.weekly_reconcile_weekday)}
+                      onValueChange={(v) => patch("weekly_reconcile_weekday", Number(v))}
+                      disabled={!form.weekly_reconcile_enabled}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WEEKDAYS.map((d) => (
+                          <SelectItem key={d.value} value={String(d.value)}>
+                            {d.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="mb-1.5 block">Jam</Label>
+                    <Select
+                      value={String(form.weekly_reconcile_hour)}
+                      onValueChange={(v) => patch("weekly_reconcile_hour", Number(v))}
+                      disabled={!form.weekly_reconcile_enabled}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {HOURS.map((h) => (
+                          <SelectItem key={h} value={String(h)}>
+                            {String(h).padStart(2, "0")}:00
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </JobRow>
+              <JobRow
+                checked={form.monthly_report_enabled}
+                onCheckedChange={(v) => patch("monthly_report_enabled", v)}
+                title="Laporan bulanan"
+                hint={catalogHint(catalog, "monthly_report", "Email ringkas statistik bisnis.")}
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label className="mb-1.5 block">Tanggal</Label>
+                    <Select
+                      value={String(form.monthly_report_day)}
+                      onValueChange={(v) => patch("monthly_report_day", Number(v))}
+                      disabled={!form.monthly_report_enabled}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MONTH_DAYS.map((d) => (
+                          <SelectItem key={d} value={String(d)}>
+                            {d}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="mb-1.5 block">Jam</Label>
+                    <Select
+                      value={String(form.monthly_report_hour)}
+                      onValueChange={(v) => patch("monthly_report_hour", Number(v))}
+                      disabled={!form.monthly_report_enabled}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {HOURS.map((h) => (
+                          <SelectItem key={h} value={String(h)}>
+                            {String(h).padStart(2, "0")}:00
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </JobRow>
+            </div>
           </div>
         </form>
       )}
 
-      <h3 className="mb-2 mt-8 text-sm font-semibold">Riwayat job (terbaru)</h3>
-      <p className="mb-3 text-xs text-[var(--muted)]">
-        Entri idempotensi (dunning, reconcile, laporan). Bukan log detail setiap tick billing.
-      </p>
-      <Table
-        columns={["Waktu", "Job", "Key", "Status"]}
-        rows={runs.map((r) => [formatWhen(r.created_at), r.job_name, r.job_key, r.status])}
-      />
+      <div className="panel-card mt-5 p-4">
+        <h3 className="text-sm font-semibold">Riwayat</h3>
+        <p className="mb-3 mt-0.5 text-xs text-[var(--muted)]">
+          Idempotensi dunning, reconcile, dan laporan — bukan setiap tick billing/isolir.
+        </p>
+        <Table
+          columns={["Waktu", "Job", "Key", "Status"]}
+          rows={runs.map((r) => [formatWhen(r.created_at), r.job_name, r.job_key, r.status])}
+        />
+      </div>
     </Section>
   );
 }

@@ -98,6 +98,98 @@ export function formatRp(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 }
 
+const INVOICE_STATUS_ID: Record<string, string> = {
+  paid: "Sudah bayar",
+  issued: "Belum bayar",
+  unpaid: "Belum bayar",
+  pending: "Belum bayar",
+  partial: "Bayar sebagian",
+  overdue: "Jatuh tempo",
+  void: "Dibatalkan",
+  cancelled: "Dibatalkan",
+  canceled: "Dibatalkan",
+  draft: "Draf",
+};
+
+const PAYMENT_STATUS_ID: Record<string, string> = {
+  paid: "Berhasil",
+  success: "Berhasil",
+  pending: "Menunggu",
+  failed: "Gagal",
+  expired: "Kedaluwarsa",
+  cancelled: "Dibatalkan",
+  canceled: "Dibatalkan",
+  void: "Dibatalkan",
+};
+
+export function invoiceStatusLabel(status?: string | null) {
+  const key = String(status || "").trim().toLowerCase();
+  return INVOICE_STATUS_ID[key] || status || "—";
+}
+
+export function paymentStatusLabel(status?: string | null) {
+  const key = String(status || "").trim().toLowerCase();
+  return PAYMENT_STATUS_ID[key] || status || "—";
+}
+
+const SUBSCRIPTION_STATUS_ID: Record<string, string> = {
+  active: "Aktif",
+  suspended: "Isolir",
+  isolir: "Isolir",
+  overdue: "Tunggakan",
+  cancelled: "Dibatalkan",
+  canceled: "Dibatalkan",
+  pending: "Menunggu",
+  expired: "Kedaluwarsa",
+};
+
+export function subscriptionStatusLabel(status?: string | null) {
+  const key = String(status || "").trim().toLowerCase();
+  return SUBSCRIPTION_STATUS_ID[key] || status || "—";
+}
+
+const TICKET_STATUS_ID: Record<string, string> = {
+  open: "Menunggu",
+  in_progress: "Sedang diproses",
+  resolved: "Selesai",
+  closed: "Ditutup",
+  cancelled: "Dibatalkan",
+  canceled: "Dibatalkan",
+};
+
+const TICKET_STATUS_HINT: Record<string, string> = {
+  open: "Keluhan sudah kami terima. Tim akan menindaklanjuti.",
+  in_progress: "Tim sedang menangani keluhan ini.",
+  resolved: "Keluhan sudah diselesaikan.",
+  closed: "Tiket ini sudah ditutup.",
+  cancelled: "Keluhan ini dibatalkan.",
+  canceled: "Keluhan ini dibatalkan.",
+};
+
+export function ticketStatusLabel(status?: string | null) {
+  const key = String(status || "").trim().toLowerCase();
+  return TICKET_STATUS_ID[key] || status || "—";
+}
+
+export function ticketStatusHint(status?: string | null) {
+  const key = String(status || "").trim().toLowerCase();
+  return TICKET_STATUS_HINT[key] || "";
+}
+
+export function ticketStatusTone(status?: string | null): "wait" | "progress" | "done" | "stop" {
+  switch (String(status || "").trim().toLowerCase()) {
+    case "open":
+      return "wait";
+    case "in_progress":
+      return "progress";
+    case "resolved":
+    case "closed":
+      return "done";
+    default:
+      return "stop";
+  }
+}
+
 export function LoginShell({
   brand = "drp-billing",
   title,

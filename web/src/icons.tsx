@@ -223,6 +223,19 @@ export function IconPlug(props: IconProps) {
   );
 }
 
+/** Cabut / lepas layanan. */
+export function IconUnplug(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M9 7v3" />
+      <path d="M15 7v3" />
+      <path d="M8 10h8v2.5" />
+      <path d="M12 18v3" />
+      <path d="m4 4 16 16" />
+    </svg>
+  );
+}
+
 /** Gembok — secrets / akses terlindungi. */
 export function IconLock(props: IconProps) {
   return (

@@ -42,6 +42,7 @@ export function PlansPage() {
     limit_uptime?: string | null;
     shared_users?: number | null;
     is_active?: boolean;
+    portal_visible?: boolean;
   };
   type ClusterOpt = { id: string; name: string; code: string };
   type OfferRow = {
@@ -73,6 +74,7 @@ export function PlansPage() {
     limit_uptime: string;
     shared_users: string;
     is_active: boolean;
+    portal_visible: boolean;
   };
   const emptyPlanForm: PlanForm = {
     name: "",
@@ -89,6 +91,7 @@ export function PlansPage() {
     limit_uptime: "",
     shared_users: "",
     is_active: true,
+    portal_visible: false,
   };
 
   const plansQ = useQuery({
@@ -103,7 +106,7 @@ export function PlansPage() {
     queryKey: ["plan-offers"],
     queryFn: () => api<OfferRow[]>("/api/plan-offers"),
   });
-  type PoolOpt = { id: string; name: string; network: string; router_id?: string | null; router_name?: string | null };
+  type PoolOpt = { id: string; name: string; network: string; router_id?: string | null; router_name?: string | null; cluster_id?: string | null };
   type RouterOpt = { id: string; name: string; cluster_id?: string | null; is_active: boolean };
   const poolsQ = useQuery({
     queryKey: ["ip-pools"],
@@ -162,6 +165,7 @@ export function PlansPage() {
       limit_uptime: p.limit_uptime || "",
       shared_users: p.shared_users != null && p.shared_users > 0 ? String(p.shared_users) : "",
       is_active: p.is_active !== false,
+      portal_visible: p.portal_visible === true,
     });
     setPlanOpen(true);
   }
@@ -217,6 +221,7 @@ export function PlansPage() {
         grace_days: Math.max(0, Math.floor(Number(form.grace_days) || 0)),
         tax_percent: 0,
         is_active: form.is_active,
+        portal_visible: form.portal_visible,
       };
       if (form.service_type === "hotspot") {
         const q = Math.floor(Number(form.quota_gb));
@@ -368,7 +373,11 @@ export function PlansPage() {
   const clusterRouterIds = new Set(
     routers.filter((r) => r.cluster_id && r.cluster_id === offerForm.cluster_id).map((r) => r.id),
   );
-  const poolsForCluster = pools.filter((p) => p.router_id && clusterRouterIds.has(p.router_id));
+  const poolsForCluster = pools.filter((p) => {
+    if (!offerForm.cluster_id) return false;
+    if (p.cluster_id && p.cluster_id === offerForm.cluster_id) return true;
+    return Boolean(p.router_id && clusterRouterIds.has(p.router_id));
+  });
 
   type SyncProfileResult = {
     synced: number;
@@ -428,7 +437,7 @@ export function PlansPage() {
       }
     >
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Katalog paket tenant-wide. Harga jual per cluster lewat offer. Sync profile mendorong PPP/hotspot ke router di cluster.
+        Katalog paket tenant-wide. Centang tampil di portal agar pelanggan bisa upgrade/downgrade. Harga jual per cluster lewat offer.
       </p>
       {planErr && !planOpen && <p className="mb-3 text-sm text-[var(--danger)]">{planErr}</p>}
 
@@ -461,7 +470,7 @@ export function PlansPage() {
         total={filteredPlans.length}
       />
       <Table
-        columns={["Nama", "Kode", "Harga dasar", "DL / UL", "Kuota / limit", "Profile", "Tipe", "Status", "Aksi"]}
+        columns={["Nama", "Kode", "Harga dasar", "DL / UL", "Kuota / limit", "Profile", "Tipe", "Portal", "Status", "Aksi"]}
         rows={filteredPlans.map((p) => [
           p.name,
           p.code,
@@ -478,6 +487,7 @@ export function PlansPage() {
             : "—",
           p.profile_name || p.code,
           p.service_type,
+          p.portal_visible ? "tampil" : "—",
           p.is_active === false ? "nonaktif" : "aktif",
           <span key="act" className="flex flex-wrap items-center gap-1.5">
             <IconButton label="Edit paket" onClick={() => openEditPlan(p)}>
@@ -678,6 +688,19 @@ export function PlansPage() {
               <Label htmlFor="plan-active">Paket aktif</Label>
             </div>
           )}
+          <div className="grid gap-1 sm:col-span-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="plan-portal"
+                checked={form.portal_visible}
+                onCheckedChange={(v) => setForm({ ...form, portal_visible: v === true })}
+              />
+              <Label htmlFor="plan-portal">Tampil di portal pelanggan</Label>
+            </div>
+            <p className="text-xs text-[var(--muted)]">
+              Pelanggan bisa upgrade/downgrade ke paket ini. Di cluster, tetap butuh offer aktif.
+            </p>
+          </div>
           <div className="flex flex-wrap gap-2 sm:col-span-2">
             <Button type="submit" disabled={savePlan.isPending}>
               {savePlan.isPending ? "Menyimpan…" : "Simpan"}
@@ -776,7 +799,7 @@ export function PlansPage() {
               <p className="text-xs text-[var(--muted)]">Pilih cluster dulu untuk melihat pool yang tersedia.</p>
             ) : poolsForCluster.length === 0 ? (
               <p className="text-xs text-[var(--muted)]">
-                Belum ada IP pool di router cluster ini. Buat di menu IPAM, atau biarkan Auto.
+                Belum ada IP pool di cluster ini. Buat di menu IP Pool (tab cluster ini), atau biarkan Auto.
               </p>
             ) : (
               <p className="text-xs text-[var(--muted)]">

@@ -37,15 +37,16 @@ const emptyNetwork: IsolirNetwork = {
 };
 
 function buildDocsHint(isolirURL: string, poolLabel: string) {
-  const url = isolirURL || "{portal_base_url}/isolir/{tenantSlug}";
-  return `URL isolir (Web Proxy redirect-to):
+  const url = isolirURL || "{portal_base_url}/{tenantSlug}/client";
+  return `URL isolir (portal pelanggan):
 ${url}
 
-Pool: ${poolLabel || "(pilih IP pool IPAM)"}
+Pool: ${poolLabel || "(pilih IP pool isolir)"}
 
-Sync hanya ke router terpilih.
-IP → Web Proxy: enable proxy 8080, allow host billing, deny+redirect-to URL di atas,
-NAT tcp/80 → 8080, allow DNS + host billing.`;
+Redirect Web Proxy ke /{slug}/client.
+IP → Web Proxy: enable proxy 8080, allow host billing, redirect HTTP ke URL isolir
+(RouterOS 7: action=redirect + action-data; v6: deny + redirect-to),
+NAT tcp/80 → 8080, allow DNS + HTTPS portal (address-list FQDN, bukan IP publik).`;
 }
 
 function defaultPreviewHTML(appName: string, logoURL: string, loginURL: string) {
@@ -147,8 +148,8 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
   const appName = brandingQ.data?.name || brandingQ.data?.app_name || tenantSlug || "ISP";
   const logoURL = brandingQ.data?.logo_url || "";
   const loginURL = network.portal_base_url
-    ? `${network.portal_base_url.replace(/\/$/, "")}/isolir/${tenantSlug || "slug"}`
-    : `/isolir/${tenantSlug || "slug"}`;
+    ? `${network.portal_base_url.replace(/\/$/, "")}/${tenantSlug || "slug"}/client`
+    : `/${tenantSlug || "slug"}/client`;
 
   const poolLabel = selectedPool
     ? `${selectedPool.name} · ${selectedPool.network}${selectedPool.router_name ? ` · ${selectedPool.router_name}` : ""}`
@@ -218,7 +219,7 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
         <div className="grid min-w-0 gap-4">
           <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel-muted)]/40 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--stone)]">URL page isolir</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--stone)]">URL portal pelanggan (isolir)</p>
             <code className="mt-1 block break-all text-sm text-[var(--accent)]">{loginURL}</code>
             <button
               type="button"
@@ -242,6 +243,9 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
                 value={network.portal_base_url}
                 onChange={(e) => setNetwork({ ...network, portal_base_url: e.target.value })}
               />
+              <span className="text-xs text-[var(--muted)]">
+                Redirect isolir ke <code>{"{base}"}/{tenantSlug || "slug"}/client</code>
+              </span>
             </label>
 
             <label className="grid gap-1.5 text-sm">
@@ -289,7 +293,7 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
               />
               {selectedPool ? (
                 <span className="text-xs text-[var(--muted)]">
-                  Sync Web Proxy + profil isolir ke router <strong>{selectedPool.router_name || "terpilih"}</strong> memakai pool ini.
+                  Sync Web Proxy + profil isolir ke router ini. Worker juga menerapkan profil isolir di router langganan yang statusnya isolir (bukan hanya router ini).
                 </span>
               ) : (
                 <span className="text-xs text-[var(--muted)]">Buat pool khusus isolir di menu IP Pool, lalu pilih di sini.</span>

@@ -4,6 +4,31 @@ import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
 import { formatRp, FormDialog } from "./ui";
 
+function qrisDataUrl(src: string) {
+  return src.startsWith("data:") ? src : `data:image/png;base64,${src}`;
+}
+
+function safeFilenamePart(value: string) {
+  return value.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "tagihan";
+}
+
+async function blobFromDataUrl(src: string): Promise<Blob> {
+  const res = await fetch(qrisDataUrl(src));
+  return res.blob();
+}
+
+async function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 export type QrisIntent = {
   id: string;
   status: string;
@@ -59,6 +84,7 @@ export function QrisPayDialog({
   const [current, setCurrent] = useState<QrisIntent | null>(intent);
   const [checking, setChecking] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const paid = isPaid(current?.status);
   const cancelled = isCancelled(current?.status);
   const expired = isExpired(current?.status);
@@ -142,6 +168,31 @@ export function QrisPayDialog({
   const payAmount = current?.payable_amount || current?.amount || 0;
   const expires = current?.expires_at ? new Date(current.expires_at) : null;
 
+  async function onDownloadQris() {
+    if (!img) return;
+    setDownloading(true);
+    try {
+      const blob = await blobFromDataUrl(img);
+      const filename = `qris-${safeFilenamePart(invoiceNumber)}.png`;
+      const file = new File([blob], filename, { type: blob.type || "image/png" });
+      const shareData: ShareData = { files: [file], title: `QRIS ${invoiceNumber}` };
+      if (typeof navigator.canShare === "function" && navigator.canShare(shareData) && navigator.share) {
+        try {
+          await navigator.share(shareData);
+          return;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+        }
+      }
+      await downloadBlob(blob, filename);
+      void toastSuccess("QRIS diunduh. Buka dari galeri di aplikasi e-wallet.");
+    } catch {
+      void toastError("Gagal mengunduh QRIS");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <FormDialog open={open} title={title || `Bayar QRIS · ${invoiceNumber}`} onClose={onClose}>
       {paid ? (
@@ -176,8 +227,20 @@ export function QrisPayDialog({
               Berlaku sampai {expires.toLocaleString("id-ID")}
             </p>
           ) : null}
-          <p className="text-[11px] text-[var(--muted)]">Scan dengan aplikasi e-wallet / m-banking yang mendukung QRIS.</p>
+          <p className="text-[11px] text-[var(--muted)]">
+            Scan dengan e-wallet / m-banking. Kalau hanya punya 1 HP, unduh QRIS lalu unggah dari galeri.
+          </p>
           <div className="mt-1 flex w-full flex-wrap justify-center gap-2">
+            {img ? (
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={downloading || checking || cancelling}
+                onClick={() => void onDownloadQris()}
+              >
+                {downloading ? "Mengunduh…" : "Unduh QRIS"}
+              </button>
+            ) : null}
             {pollPath ? (
               <button type="button" className="btn" disabled={checking || cancelling} onClick={() => void onCheckPaid()}>
                 {checking ? "Mengecek…" : "Aku sudah bayar"}

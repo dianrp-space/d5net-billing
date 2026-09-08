@@ -41,6 +41,12 @@ type MapCluster = {
   latitude?: number | null;
   longitude?: number | null;
 };
+/** Tenant-custom map icon URLs (nil = use built-in SVG marker). */
+type MapIcons = {
+  pop?: string | null;
+  odp?: string | null;
+  customer?: string | null;
+};
 type CableRoute = {
   id: string;
   name: string;
@@ -114,8 +120,20 @@ function mapMarkerSvg(kind: MapMarkerKind, color: string): string {
   </svg>`;
 }
 
-function createMapMarkerIcon(L: Window["L"], kind: MapMarkerKind) {
+function createMapMarkerIcon(L: Window["L"], kind: MapMarkerKind, iconUrl?: string | null) {
   const { color, label } = MAP_MARKER[kind];
+  // Tenant custom image marker — rendered as-is (transparency preserved), anchored bottom-centre.
+  if (iconUrl) {
+    return L.divIcon({
+      className: `ftth-map-marker ftth-map-marker--${kind} ftth-map-marker--img`,
+      html: `<div class="ftth-map-marker-pin ftth-map-marker-pin--img" title="${label}">
+        <img class="ftth-map-marker-img" src="${iconUrl}" alt="${label}" />
+      </div>`,
+      iconSize: [34, 34],
+      iconAnchor: [17, 34],
+      popupAnchor: [0, -34],
+    });
+  }
   return L.divIcon({
     className: `ftth-map-marker ftth-map-marker--${kind}`,
     html: `<div class="ftth-map-marker-pin" style="--ftth-marker:${color}" title="${label}">
@@ -213,7 +231,7 @@ export function MapODP({
   const assetsQ = useQuery({
     queryKey: ["ftth-map"],
     queryFn: () =>
-      api<{ odps: MapODP[]; customers: MapCustomer[]; clusters: MapCluster[] }>("/api/ftth/map-assets"),
+      api<{ odps: MapODP[]; customers: MapCustomer[]; clusters: MapCluster[]; icons: MapIcons }>("/api/ftth/map-assets"),
   });
   const routesQ = useQuery({
     queryKey: ["cable-routes", clusterId ?? "all"],
@@ -419,6 +437,7 @@ export function MapODP({
     if (!clusterId || clusterId === "__none__") return false;
     return c.id === clusterId;
   });
+  const mapIcons = assetsQ.data?.icons;
   const routesRaw = Array.isArray(routesQ.data) ? routesQ.data : [];
   const routes = routesRaw.filter((r) => matchCluster(r.cluster_id));
 
@@ -507,7 +526,7 @@ export function MapODP({
     for (const c of clusters) {
       if (c.latitude == null || c.longitude == null) continue;
       pts.push({ lat: c.latitude, lng: c.longitude });
-      L.marker([c.latitude, c.longitude], { icon: createMapMarkerIcon(L, "pop"), zIndexOffset: 300 })
+      L.marker([c.latitude, c.longitude], { icon: createMapMarkerIcon(L, "pop", mapIcons?.pop), zIndexOffset: 300 })
         .bindPopup(`<b>POP ${c.name}</b><br/>${c.code}<br/><span style="opacity:.7">Klik saat mode gambar untuk snap</span>`)
         .on("click", snapClick(c.latitude, c.longitude))
         .addTo(group);
@@ -515,7 +534,7 @@ export function MapODP({
     for (const o of odpsList) {
       if (o.latitude == null || o.longitude == null) continue;
       pts.push({ lat: o.latitude, lng: o.longitude });
-      L.marker([o.latitude, o.longitude], { icon: createMapMarkerIcon(L, "odp"), zIndexOffset: 200 })
+      L.marker([o.latitude, o.longitude], { icon: createMapMarkerIcon(L, "odp", mapIcons?.odp), zIndexOffset: 200 })
         .bindPopup(
           `<b>ODP ${o.name}</b><br/>${o.code}<br/>Port terpakai ${o.used_ports ?? 0}/${o.port_count}` +
             (o.free_ports != null ? ` · sisa ${o.free_ports}` : ""),
@@ -526,7 +545,7 @@ export function MapODP({
     for (const c of customers) {
       if (c.latitude == null || c.longitude == null) continue;
       pts.push({ lat: c.latitude, lng: c.longitude });
-      L.marker([c.latitude, c.longitude], { icon: createMapMarkerIcon(L, "customer"), zIndexOffset: 100 })
+      L.marker([c.latitude, c.longitude], { icon: createMapMarkerIcon(L, "customer", mapIcons?.customer), zIndexOffset: 100 })
         .bindPopup(`<b>${c.full_name}</b><br/>${c.customer_code}`)
         .on("click", snapClick(c.latitude, c.longitude))
         .addTo(group);
@@ -548,7 +567,7 @@ export function MapODP({
         { padding: [40, 40], maxZoom: 16 },
       );
     }
-  }, [odpsList, customers, clusters, routes, editId, clusterCenter]);
+  }, [odpsList, customers, clusters, routes, editId, clusterCenter, mapIcons]);
 
   useEffect(() => {
     const el = mapRef.current;

@@ -10,6 +10,7 @@ import { toastError, toastSuccess } from "./swal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FormDialog, IconButton, IconLink, Section, SecretInput, Table } from "./ui";
 import { ThemeToggle } from "./ThemeToggle";
+import { usePersistedTab } from "./navPersist";
 
 type Tenant = {
   id: string;
@@ -35,10 +36,8 @@ const emptyCreate = {
   fullName: "Admin",
 };
 
-type PlatformPage = "tenants" | "branding" | "backup";
-
 export function PlatformApp({ onLogout }: { onLogout: () => void }) {
-  const [page, setPage] = useState<PlatformPage>("tenants");
+  const [page, setPage] = usePersistedTab("platform", "tenants", ["tenants", "branding", "backup"] as const);
   const branding = useQuery({
     queryKey: ["platform-branding"],
     queryFn: () => api<Branding>("/api/platform/branding", {}, { platform: true }),
@@ -86,7 +85,7 @@ export function PlatformApp({ onLogout }: { onLogout: () => void }) {
 
       <Tabs
         value={page}
-        onValueChange={(v: string) => setPage(v as PlatformPage)}
+        onValueChange={setPage}
         className="space-y-0"
       >
         <TabsList aria-label="Menu platform" className="mb-6">
@@ -362,10 +361,10 @@ function PlatformTenants() {
       >
         <IconPencil />
       </IconButton>
-      <IconLink label="Login admin" href={`/admin/${t.slug}/login`}>
+      <IconLink label="Login admin" href={`/${t.slug}/login`}>
         <IconShield />
       </IconLink>
-      <IconLink label="Portal pelanggan" href={`/client/${t.slug}/login`}>
+      <IconLink label="Portal pelanggan" href={`/${t.slug}/client/login`}>
         <IconUser />
       </IconLink>
       <IconButton

@@ -4,7 +4,7 @@ import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
 import { useAppDialog } from "../confirm";
 import { toastError } from "../swal";
-import { formatRp, Section, Table, Button } from "../ui";
+import { formatRp, Section, Table, Button, invoiceStatusLabel } from "../ui";
 import { InvoiceActions } from "../AdminExtra";
 
 export function InvoicesPage() {
@@ -79,10 +79,10 @@ export function InvoicesPage() {
               setPage(0);
             },
             options: [
-              { value: "issued", label: "Issued" },
-              { value: "partial", label: "Partial" },
-              { value: "overdue", label: "Overdue" },
-              { value: "paid", label: "Paid" },
+              { value: "issued", label: "Belum bayar" },
+              { value: "partial", label: "Bayar sebagian" },
+              { value: "overdue", label: "Jatuh tempo" },
+              { value: "paid", label: "Sudah bayar" },
             ],
           },
         ]}
@@ -103,7 +103,7 @@ export function InvoicesPage() {
           i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
           formatRp(i.total_amount),
           formatRp(i.paid_amount ?? 0),
-          i.status,
+          invoiceStatusLabel(i.status),
           <InvoiceActions
             key={i.id}
             id={i.id}

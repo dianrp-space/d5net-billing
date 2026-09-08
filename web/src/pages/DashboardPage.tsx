@@ -5,7 +5,7 @@ import { IconTicket, IconUsers } from "../icons";
 import type { AdminPage } from "../admin/pages";
 import { AlertsPanel } from "../AdminExtra";
 import { useAppDialog } from "../confirm";
-import { Card, formatRp, Table, Button } from "../ui";
+import { Card, formatRp, invoiceStatusLabel, Table, Button } from "../ui";
 import { toastError } from "../swal";
 
 export function DashboardPage({
@@ -213,12 +213,12 @@ function StatusPill({ status }: { status: string }) {
   const tone =
     status === "paid" || status === "success"
       ? "bg-[rgba(43,154,102,0.1)] text-[var(--ok)]"
-      : status === "overdue" || status === "canceled"
+      : status === "overdue" || status === "canceled" || status === "cancelled" || status === "void"
         ? "bg-[rgba(220,38,38,0.1)] text-[var(--danger)]"
         : "bg-[rgba(245,158,11,0.12)] text-[var(--warn)]";
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-1 text-[10px] font-bold ${tone}`}>
-      {status}
+      {invoiceStatusLabel(status)}
     </span>
   );
 }

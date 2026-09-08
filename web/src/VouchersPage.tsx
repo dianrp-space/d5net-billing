@@ -224,7 +224,7 @@ export function VouchersPage() {
       <p className="mb-4 text-sm text-[var(--muted)]">
         Generate kode, push sebagai user hotspot ke MikroTik (username = password = kode), lalu unduh CSV untuk cetak.
         IP dialokasikan lewat <strong>IP Pool</strong> yang terhubung ke router yang sama (profil hotspot{" "}
-        <code className="text-xs">address-pool</code>) — pastikan pool sudah dibuat di menu IPAM.
+        <code className="text-xs">address-pool</code>) — pastikan pool sudah dibuat di menu IP Pool.
       </p>
 
       <ListToolbar

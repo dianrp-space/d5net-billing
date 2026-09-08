@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
-import { IconDownload, IconImage, IconLock, IconPencil, IconTrash, IconUpload } from "../icons";
+import { IconDownload, IconImage, IconLock, IconPencil, IconTrash, IconUnplug, IconUpload } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
 import { FormDialog, IconButton, Section, Table } from "../ui";
@@ -37,6 +37,8 @@ export function CustomersPage({
     identity_number?: string | null;
     is_active: boolean;
     portal_enabled?: boolean;
+    service_status?: string;
+    dismantled_at?: string | null;
     cluster_id?: string | null;
     cluster_name?: string;
     cluster_code?: string;
@@ -95,7 +97,7 @@ export function CustomersPage({
       });
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (clusterFilter) params.set("cluster_id", clusterFilter);
-      if (statusFilter) params.set("is_active", statusFilter);
+      if (statusFilter) params.set("status", statusFilter);
       return api<{ data: CustomerRow[]; total: number }>(`/api/customers?${params}`);
     },
   });
@@ -211,6 +213,28 @@ export function CustomersPage({
     },
   });
 
+  const cabut = useMutation({
+    mutationFn: (id: string) => api(`/api/customers/${id}/dismantle`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      qc.invalidateQueries({ queryKey: ["subs"] });
+      qc.invalidateQueries({ queryKey: ["ip-pools"] });
+      qc.invalidateQueries({ queryKey: ["churn"] });
+      qc.invalidateQueries({ queryKey: ["ftth-map"] });
+      void toastSuccess("Pelanggan dicabut");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  function isCabut(c: Pick<CustomerRow, "service_status" | "dismantled_at">) {
+    return c.service_status === "dismantled" || Boolean(c.dismantled_at);
+  }
+
+  function statusLabel(c: CustomerRow) {
+    if (isCabut(c)) return "cabut";
+    return c.is_active ? "aktif" : "nonaktif";
+  }
+
   function startEdit(c: CustomerRow) {
     setCreateOpen(false);
     setEditId(c.id);
@@ -251,7 +275,7 @@ export function CustomersPage({
     try {
       const params = new URLSearchParams();
       if (clusterFilter) params.set("cluster_id", clusterFilter);
-      if (statusFilter) params.set("is_active", statusFilter);
+      if (statusFilter) params.set("status", statusFilter);
       const qs = params.toString();
       await apiDownload(`/api/customers/export.csv${qs ? `?${qs}` : ""}`, "customers.csv");
     } catch (e: unknown) {
@@ -364,8 +388,9 @@ export function CustomersPage({
               setPage(0);
             },
             options: [
-              { value: "true", label: "Aktif" },
-              { value: "false", label: "Nonaktif" },
+              { value: "active", label: "Aktif" },
+              { value: "inactive", label: "Nonaktif" },
+              { value: "dismantled", label: "Cabut" },
             ],
           },
         ]}
@@ -382,7 +407,7 @@ export function CustomersPage({
           c.full_name,
           c.phone,
           c.reseller_name ? `Reseller: ${c.reseller_name}` : c.sales_user_name ? `Sales: ${c.sales_user_name}` : "—",
-          c.is_active ? "aktif" : "nonaktif",
+          statusLabel(c),
           <span key="act" className="flex flex-wrap items-center gap-1.5">
             <IconButton label="Dokumentasi / galeri" onClick={() => onOpenGallery(c.id)}>
               <IconImage />
@@ -393,6 +418,24 @@ export function CustomersPage({
             <IconButton label="Edit pelanggan" onClick={() => startEdit(c)}>
               <IconPencil />
             </IconButton>
+            {!isCabut(c) ? (
+              <IconButton
+                label="Cabut pelanggan"
+                danger
+                disabled={cabut.isPending}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: "Cabut pelanggan",
+                    description: `Cabut "${c.full_name}"? Secret di router dilepas, port ODP dikosongkan, dan status menjadi cabut. Data pelanggan tetap tersimpan.`,
+                    confirmLabel: "Cabut",
+                  });
+                  if (!ok) return;
+                  cabut.mutate(c.id);
+                }}
+              >
+                <IconUnplug />
+              </IconButton>
+            ) : null}
             <IconButton
               label="Hapus pelanggan"
               danger
@@ -520,14 +563,22 @@ export function CustomersPage({
           )}
           {editId && (
             <>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
-                Aktif
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.portal_enabled} onChange={(e) => setForm({ ...form, portal_enabled: e.target.checked })} />
-                Portal aktif
-              </label>
+              {rows.find((c) => c.id === editId && isCabut(c)) ? (
+                <p className="text-sm text-[var(--muted)] sm:col-span-2">
+                  Status: <strong>cabut</strong>. Layanan sudah dihentikan; data tetap tersimpan.
+                </p>
+              ) : (
+                <>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
+                    Aktif
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={form.portal_enabled} onChange={(e) => setForm({ ...form, portal_enabled: e.target.checked })} />
+                    Portal aktif
+                  </label>
+                </>
+              )}
               <p className="text-xs text-[var(--muted)] sm:col-span-2">Password portal default = nomor HP (ikut berubah jika HP diubah).</p>
             </>
           )}

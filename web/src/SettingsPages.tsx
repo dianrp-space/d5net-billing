@@ -1,23 +1,47 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe, UserRound } from "lucide-react";
 import { api, apiUpload } from "./api";
-import { IconPencil, IconTrash } from "./icons";
+import { IconPencil, IconTrash, IconUpload } from "./icons";
 import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
+import { EXAMPLE_ICONS, exampleIconDataUrl, exampleIconFile, type ExampleIcon } from "./exampleIcons";
+import { DEFAULT_PRIMARY, parseHexColor, setTenantPrimaryColor } from "./theme";
+import { cn } from "./lib/utils";
+import { usePersistedTab } from "./navPersist";
 
 type Branding = {
   app_name: string;
   logo_url?: string | null;
   favicon_url?: string | null;
+  map_pop_icon_url?: string | null;
+  map_odp_icon_url?: string | null;
+  map_customer_icon_url?: string | null;
+};
+
+type BrandingField = "logo" | "favicon" | "map-pop" | "map-odp" | "map-customer";
+
+const CLEAR_FLAG: Record<BrandingField, string> = {
+  logo: "clear_logo",
+  favicon: "clear_favicon",
+  "map-pop": "clear_map_pop_icon",
+  "map-odp": "clear_map_odp_icon",
+  "map-customer": "clear_map_customer_icon",
 };
 
 type TenantBrandingView = {
   overrides: Branding;
   effective: Branding;
-  from_owner: { app_name: boolean; logo_url: boolean; favicon_url: boolean };
+  from_owner: {
+    app_name: boolean;
+    logo_url: boolean;
+    favicon_url: boolean;
+    map_pop_icon_url: boolean;
+    map_odp_icon_url: boolean;
+    map_customer_icon_url: boolean;
+  };
 };
 
 type Role = {
@@ -62,7 +86,7 @@ const PERM_PRESETS: { key: string; label: string; hint: string }[] = [
   { key: "settings", label: "Pengaturan", hint: "Umum, Isolir, Cronjob, Notifikasi, Roles, Users, Backup, Integrasi" },
 ];
 
-export function BrandingSettingsPage() {
+export function GeneralSettingsPage() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["settings-branding"],
@@ -72,12 +96,14 @@ export function BrandingSettingsPage() {
           tenant_name: string;
           timezone: string;
           default_tax_percent: number;
+          primary_color?: string;
         }
       >("/api/settings/branding"),
   });
   const [tenantName, setTenantName] = useState("");
   const [timezone, setTimezone] = useState("Asia/Jakarta");
   const [taxPercent, setTaxPercent] = useState(0);
+  const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -85,7 +111,14 @@ export function BrandingSettingsPage() {
     setTenantName(q.data.tenant_name || q.data.overrides.app_name || "");
     setTimezone(q.data.timezone || "Asia/Jakarta");
     setTaxPercent(Number(q.data.default_tax_percent) || 0);
+    setPrimaryColor(parseHexColor(q.data.primary_color) || DEFAULT_PRIMARY);
   }, [q.data]);
+
+  function onPrimaryChange(next: string) {
+    const parsed = parseHexColor(next) || primaryColor;
+    setPrimaryColor(parsed);
+    setTenantPrimaryColor(parsed);
+  }
 
   const save = useMutation({
     mutationFn: () =>
@@ -95,9 +128,12 @@ export function BrandingSettingsPage() {
           tenant_name: tenantName.trim(),
           timezone: timezone.trim() || "Asia/Jakarta",
           default_tax_percent: Math.max(0, Number(taxPercent) || 0),
+          primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
         }),
       }),
     onSuccess: () => {
+      const parsed = parseHexColor(primaryColor);
+      setTenantPrimaryColor(parsed && parsed !== DEFAULT_PRIMARY ? parsed : null);
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
       void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
       void toastSuccess("Pengaturan umum disimpan");
@@ -110,15 +146,15 @@ export function BrandingSettingsPage() {
   });
 
   const clearField = useMutation({
-    mutationFn: (field: "logo" | "favicon") =>
+    mutationFn: (field: BrandingField) =>
       api("/api/settings/branding", {
         method: "PUT",
         body: JSON.stringify({
           tenant_name: tenantName.trim(),
           timezone: timezone.trim() || "Asia/Jakarta",
           default_tax_percent: Math.max(0, Number(taxPercent) || 0),
-          clear_logo: field === "logo",
-          clear_favicon: field === "favicon",
+          primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
+          [CLEAR_FLAG[field]]: true,
         }),
       }),
     onSuccess: () => {
@@ -129,13 +165,15 @@ export function BrandingSettingsPage() {
     onError: (e: Error) => void toastError(e.message),
   });
 
-  async function onUpload(kind: "logo" | "favicon", file: File | undefined) {
+  async function onUpload(kind: BrandingField, file: File | undefined) {
     if (!file) return;
     try {
       await apiUpload<{ url: string }>(`/api/settings/branding/${kind}`, file);
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
       void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
-      void toastSuccess(kind === "logo" ? "Logo diunggah" : "Favicon diunggah");
+      void toastSuccess(
+        kind === "logo" ? "Logo diunggah" : kind === "favicon" ? "Favicon diunggah" : "Icon peta diunggah",
+      );
     } catch (e: unknown) {
       void toastError(e instanceof Error ? e.message : "Upload gagal");
     }
@@ -158,119 +196,258 @@ export function BrandingSettingsPage() {
       {q.isLoading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
       ) : (
-        <div className="grid max-w-xl gap-4">
-          <label className="grid gap-1 text-sm">
-            <span className="font-medium">Nama tenant</span>
-            <input
-              className="input"
-              value={tenantName}
-              onChange={(e) => setTenantName(e.target.value)}
-              placeholder="Nama perusahaan / ISP"
-              required
-            />
-            <span className="text-xs text-[var(--muted)]">Ditampilkan di sidebar, login, dan dokumen.</span>
-          </label>
+        <div className="grid gap-6">
+          <div className="panel-card grid gap-4 p-4 sm:grid-cols-2">
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Nama tenant</span>
+              <input
+                className="input"
+                value={tenantName}
+                onChange={(e) => setTenantName(e.target.value)}
+                placeholder="Nama perusahaan / ISP"
+                required
+              />
+              <span className="text-xs text-[var(--muted)]">Ditampilkan di sidebar, login, dan dokumen.</span>
+            </label>
 
-          <label className="grid gap-1 text-sm">
-            <span className="font-medium">Timezone</span>
-            <select className="input" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-              {TIMEZONES.map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz}
-                </option>
-              ))}
-            </select>
-            <span className="text-xs text-[var(--muted)]">
-              Dipakai untuk jadwal worker / referensi waktu lokal tenant (server tetap memakai zona proses).
-            </span>
-          </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Timezone</span>
+              <select className="input" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+                {TIMEZONES.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-[var(--muted)]">
+                Dipakai untuk jadwal worker / referensi waktu lokal tenant (server tetap memakai zona proses).
+              </span>
+            </label>
 
-          <label className="grid gap-1 text-sm">
-            <span className="font-medium">Pajak default (%)</span>
-            <input
-              className="input"
-              type="number"
-              min={0}
-              max={100}
-              step={0.01}
-              value={taxPercent}
-              onChange={(e) => setTaxPercent(Number(e.target.value))}
-            />
-            <span className="text-xs text-[var(--muted)]">
-              Diterapkan ke semua tagihan & ganti paket (bukan per paket).
-            </span>
-          </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Pajak default (%)</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                value={taxPercent}
+                onChange={(e) => setTaxPercent(Number(e.target.value))}
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Diterapkan ke semua tagihan & ganti paket (bukan per paket).
+              </span>
+            </label>
 
-          <AssetRow
-            label="Logo"
-            url={eff?.logo_url}
-            fromOwner={Boolean(from?.logo_url)}
-            onFile={(f) => void onUpload("logo", f)}
-            onClear={() => clearField.mutate("logo")}
-          />
-          <AssetRow
-            label="Favicon"
-            url={eff?.favicon_url}
-            fromOwner={Boolean(from?.favicon_url)}
-            onFile={(f) => void onUpload("favicon", f)}
-            onClear={() => clearField.mutate("favicon")}
-          />
+            <div className="grid gap-2">
+              <span className="text-sm font-medium">Warna primary</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="color"
+                  className="h-9 w-12 cursor-pointer rounded-md border border-[var(--border)] bg-[var(--panel)] p-0.5"
+                  value={parseHexColor(primaryColor) || DEFAULT_PRIMARY}
+                  onChange={(e) => onPrimaryChange(e.target.value)}
+                  title="Pilih warna tombol"
+                  aria-label="Pilih warna primary"
+                />
+                <input
+                  className="input w-32 font-mono uppercase"
+                  value={primaryColor}
+                  onChange={(e) => onPrimaryChange(e.target.value)}
+                  spellCheck={false}
+                  aria-label="Kode hex warna primary"
+                />
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => {
+                    setPrimaryColor(DEFAULT_PRIMARY);
+                    setTenantPrimaryColor(null);
+                  }}
+                >
+                  Default
+                </button>
+                <button type="button" className="btn">
+                  Contoh tombol
+                </button>
+              </div>
+              <span className="text-xs text-[var(--muted)]">
+                Dipakai untuk tombol, tautan, dan aksen UI (termasuk portal pelanggan).
+              </span>
+            </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn" disabled={save.isPending} onClick={() => save.mutate()}>
-              {save.isPending ? "Menyimpan..." : "Simpan"}
-            </button>
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+              <button type="button" className="btn" disabled={save.isPending} onClick={() => save.mutate()}>
+                {save.isPending ? "Menyimpan..." : "Simpan"}
+              </button>
+              {err ? <p className="text-sm text-[var(--danger)]">{err}</p> : null}
+            </div>
           </div>
-          {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
+
+          <div className="grid gap-3">
+            <p className="text-sm font-medium">Identitas visual</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <BrandAssetField
+                label="Logo"
+                hint="PNG atau SVG transparan. Tampil di sidebar, login, dan dokumen."
+                url={eff?.logo_url}
+                fromOwner={Boolean(from?.logo_url)}
+                onFile={(f) => void onUpload("logo", f)}
+                onClear={() => clearField.mutate("logo")}
+              />
+              <BrandAssetField
+                label="Favicon"
+                hint="Ikon tab browser. ICO, PNG, atau SVG."
+                url={eff?.favicon_url}
+                fromOwner={Boolean(from?.favicon_url)}
+                onFile={(f) => void onUpload("favicon", f)}
+                onClear={() => clearField.mutate("favicon")}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3">
+            <p className="text-sm font-medium">Ikon peta FTTH</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <BrandAssetField
+                label="POP"
+                hint="Marker menara / cluster di peta. Kosongkan untuk icon bawaan."
+                url={eff?.map_pop_icon_url}
+                fromOwner={Boolean(from?.map_pop_icon_url)}
+                examples={EXAMPLE_ICONS.filter((e) => e.kind === "pop")}
+                onFile={(f) => void onUpload("map-pop", f)}
+                onClear={() => clearField.mutate("map-pop")}
+              />
+              <BrandAssetField
+                label="ODP"
+                hint="Marker kotak distribusi di peta. Kosongkan untuk icon bawaan."
+                url={eff?.map_odp_icon_url}
+                fromOwner={Boolean(from?.map_odp_icon_url)}
+                examples={EXAMPLE_ICONS.filter((e) => e.kind === "odp")}
+                onFile={(f) => void onUpload("map-odp", f)}
+                onClear={() => clearField.mutate("map-odp")}
+              />
+              <BrandAssetField
+                label="Pelanggan"
+                hint="Marker rumah pelanggan di peta. Kosongkan untuk icon bawaan."
+                url={eff?.map_customer_icon_url}
+                fromOwner={Boolean(from?.map_customer_icon_url)}
+                examples={EXAMPLE_ICONS.filter((e) => e.kind === "customer")}
+                onFile={(f) => void onUpload("map-customer", f)}
+                onClear={() => clearField.mutate("map-customer")}
+              />
+            </div>
+          </div>
         </div>
       )}
     </Section>
   );
 }
 
-function AssetRow({
+function BrandAssetField({
   label,
+  hint,
   url,
   fromOwner,
   onFile,
   onClear,
+  examples,
 }: {
   label: string;
+  hint?: string;
   url?: string | null;
   fromOwner: boolean;
   onFile: (f: File | undefined) => void;
   onClear: () => void;
+  examples?: ExampleIcon[];
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+
+  function take(file?: File) {
+    if (file) onFile(file);
+  }
+
+  function onDrop(e: DragEvent<HTMLButtonElement>) {
+    e.preventDefault();
+    setOver(false);
+    take(e.dataTransfer.files?.[0]);
+  }
+
   return (
-    <div className="rounded-xl border border-[var(--border)] p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{label}</span>
+    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--panel)] p-3">
+      <div className="mb-2 flex items-center justify-between gap-1">
+        <p className="truncate text-sm font-semibold text-[var(--text)]" title={hint}>
+          {label}
+        </p>
         {fromOwner ? (
-          <span className="text-[10px] text-[var(--muted)]">mengikuti owner</span>
+          <span className="shrink-0 text-[10px] text-[var(--muted)]">owner</span>
         ) : url ? (
-          <button type="button" className="btn-ghost text-xs" onClick={onClear}>
-            Hapus override
-          </button>
+          <IconButton label="Hapus override" danger onClick={onClear}>
+            <IconTrash />
+          </IconButton>
         ) : null}
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        {url ? (
-          <img src={url} alt="" className="h-12 w-12 rounded-lg border border-[var(--border)] object-contain" />
-        ) : (
-          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--muted)]">
-            —
-          </div>
-        )}
+
+      <div className="flex items-center gap-2">
+        <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--border)] bg-[var(--panel-muted)]">
+          {url ? (
+            <img src={url} alt="" className="h-full w-full object-contain p-0.5" />
+          ) : (
+            <span className="text-[9px] text-[var(--muted)]">—</span>
+          )}
+        </div>
+        <button
+          type="button"
+          title={hint ? `${hint} Klik atau seret file.` : `Unggah ${label}`}
+          aria-label={`Unggah ${label}`}
+          className={cn(
+            "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-dashed px-2 py-2 text-xs font-semibold transition-colors",
+            over
+              ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] text-[var(--accent)]"
+              : "border-[var(--border-strong)] bg-[var(--panel-muted)]/60 text-[var(--text)] hover:border-[var(--accent)]",
+          )}
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setOver(true);
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={onDrop}
+        >
+          <IconUpload />
+          Unggah
+        </button>
         <input
+          ref={inputRef}
           type="file"
           accept="image/*,.ico,.svg"
-          className="text-sm"
+          className="sr-only"
+          tabIndex={-1}
           onChange={(e) => {
-            onFile(e.target.files?.[0]);
+            take(e.target.files?.[0]);
             e.target.value = "";
           }}
         />
       </div>
+
+      {examples && examples.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {examples.map((ex) => (
+            <button
+              key={ex.key}
+              type="button"
+              title={`Pakai contoh ${ex.label}`}
+              aria-label={`Pakai contoh ${ex.label}`}
+              className="rounded-md border border-[var(--border)] bg-[var(--panel-muted)]/50 p-1 hover:border-[var(--accent)]"
+              onClick={() => onFile(exampleIconFile(ex))}
+            >
+              <img src={exampleIconDataUrl(ex)} alt="" className="size-6 object-contain" />
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -519,6 +696,7 @@ function RoleForm({
 export function UsersSettingsPage() {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
+  const [tab, setTab] = usePersistedTab("users", "staff", ["staff", "portal"] as const);
   const roles = useQuery({
     queryKey: ["settings-roles"],
     queryFn: () => api<Role[]>("/api/settings/roles"),
@@ -689,7 +867,7 @@ export function UsersSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="staff" className="space-y-0">
+      <Tabs value={tab} onValueChange={setTab} className="space-y-0">
         <TabsList aria-label="Users">
           <TabsTrigger value="staff">
             <UserRound />

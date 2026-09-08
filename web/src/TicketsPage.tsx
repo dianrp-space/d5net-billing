@@ -18,7 +18,7 @@ import {
   KanbanOverlay,
   type KanbanCommitMeta,
 } from "./components/ui/kanban";
-import { IconCheck, IconPencil, IconUserCheck } from "./icons";
+import { IconBan, IconCheck, IconPencil, IconTrash, IconUserCheck } from "./icons";
 import { canDispatchOps, type MePermissions } from "./permissions";
 import { toastError, toastSuccess } from "./swal";
 import { ListToolbar, matchesQuery, useDebouncedValue } from "./ListToolbar";
@@ -36,6 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
   Table,
+  Textarea,
 } from "./ui";
 
 type TicketRow = {
@@ -73,6 +74,7 @@ const COLUMNS: { id: string; label: string }[] = [
   { id: "in_progress", label: "Proses" },
   { id: "resolved", label: "Resolved" },
   { id: "closed", label: "Closed" },
+  { id: "cancelled", label: "Batal" },
 ];
 
 const COLUMN_IDS = COLUMNS.map((c) => c.id);
@@ -133,6 +135,7 @@ function priorityVariant(p: string): "default" | "danger" | "outline" | "success
 }
 
 function statusVariant(s: string): "default" | "danger" | "outline" | "success" {
+  if (s === "cancelled") return "danger";
   if (s === "resolved" || s === "closed") return "success";
   if (s === "in_progress") return "default";
   return "outline";
@@ -313,7 +316,7 @@ export function TicketsPage() {
         method: "POST",
         body: JSON.stringify({
           subject: form.subject.trim(),
-          description: form.description.trim() || undefined,
+          description: form.description.trim(),
           category: form.category,
           priority: form.priority,
           customer_id: form.customer_id || undefined,
@@ -379,7 +382,21 @@ export function TicketsPage() {
       setMsg("");
       setPendingImages([]);
       qc.invalidateQueries({ queryKey: ["ticket-messages", detail?.id] });
-      void toastSuccess("Pesan terkirim");
+      qc.invalidateQueries({ queryKey: ["tickets"] });
+      if (detail?.status === "open") {
+        setDetail({ ...detail, status: "in_progress" });
+      }
+      void toastSuccess("Balasan terkirim");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api(`/api/tickets/${id}`, { method: "DELETE" }),
+    onSuccess: (_data, id) => {
+      if (detail?.id === id) setDetail(null);
+      qc.invalidateQueries({ queryKey: ["tickets"] });
+      void toastSuccess("Tiket dihapus");
     },
     onError: (e: Error) => void toastError(e.message),
   });
@@ -423,6 +440,38 @@ export function TicketsPage() {
             }}
           >
             <IconUserCheck />
+          </IconButton>
+        ) : null}
+        {t.status === "open" || t.status === "in_progress" ? (
+          <IconButton
+            label="Batalkan"
+            onClick={async () => {
+              const ok = await confirm({
+                title: "Batalkan tiket",
+                description: `Batalkan "${t.subject}"? Tiket tetap tersimpan dengan status batal.`,
+                confirmLabel: "Batalkan",
+              });
+              if (!ok) return;
+              setStatusMut.mutate({ id: t.id, status: "cancelled" });
+            }}
+          >
+            <IconBan />
+          </IconButton>
+        ) : null}
+        {canDispatch ? (
+          <IconButton
+            label="Hapus"
+            onClick={async () => {
+              const ok = await confirm({
+                title: "Hapus tiket",
+                description: `Hapus "${t.subject}" beserta percakapannya? Tindakan ini tidak bisa dibatalkan.`,
+                confirmLabel: "Hapus",
+              });
+              if (!ok) return;
+              deleteMut.mutate(t.id);
+            }}
+          >
+            <IconTrash />
           </IconButton>
         ) : null}
       </>
@@ -504,7 +553,7 @@ export function TicketsPage() {
               setSearch(v);
               setPage(0);
             }}
-            searchPlaceholder="Subjek atau pelanggan…"
+            searchPlaceholder="Subjek, pelanggan, atau teknisi…"
             filters={[
               {
                 key: "status",
@@ -524,7 +573,7 @@ export function TicketsPage() {
           />
 
           <Table
-            columns={["Subjek", "Pelanggan", "Kategori", "Prioritas", "Status", "SLA", "Aksi"]}
+            columns={["Subjek", "Pelanggan", "Teknisi", "Kategori", "Prioritas", "Status", "SLA", "Aksi"]}
             onRowClick={(i) => openDetail(list[i])}
             rows={list.map((t) => [
               <div key={`${t.id}-sub`} className="max-w-[220px]">
@@ -532,6 +581,7 @@ export function TicketsPage() {
                 <p className="text-xs text-[var(--muted)]">{formatWhen(t.created_at)}</p>
               </div>,
               t.customer_name || "—",
+              t.assignee_name || "—",
               categoryLabels[t.category] || t.category,
               <Badge key={`${t.id}-p`} variant={priorityVariant(t.priority)}>
                 {priorityLabels[t.priority] || t.priority}
@@ -614,6 +664,10 @@ export function TicketsPage() {
           className="grid gap-3 sm:grid-cols-2"
           onSubmit={(e) => {
             e.preventDefault();
+            if (!form.subject.trim() || !form.description.trim()) {
+              setFormErr("Subjek dan deskripsi wajib diisi");
+              return;
+            }
             create.mutate();
           }}
         >
@@ -628,10 +682,12 @@ export function TicketsPage() {
           </div>
           <div className="sm:col-span-2">
             <Label className="mb-1.5 block">Deskripsi</Label>
-            <Input
+            <Textarea
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Detail (opsional)"
+              required
+              rows={4}
+              placeholder="Jelaskan masalah atau permintaan"
             />
           </div>
           <div>
@@ -792,26 +848,71 @@ export function TicketsPage() {
                   Tutup
                 </Button>
               ) : null}
-              {detail.status === "closed" || detail.status === "resolved" ? (
+              {detail.status === "closed" || detail.status === "resolved" || detail.status === "cancelled" ? (
                 <Button type="button" size="sm" variant="secondary" onClick={() => setStatusMut.mutate({ id: detail.id, status: "open" })}>
                   Buka lagi
+                </Button>
+              ) : null}
+              {detail.status === "open" || detail.status === "in_progress" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: "Batalkan tiket",
+                      description: `Batalkan "${detail.subject}"?`,
+                      confirmLabel: "Batalkan",
+                    });
+                    if (!ok) return;
+                    setStatusMut.mutate({ id: detail.id, status: "cancelled" });
+                  }}
+                >
+                  Batalkan
+                </Button>
+              ) : null}
+              {canDispatch ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="danger"
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: "Hapus tiket",
+                      description: `Hapus "${detail.subject}" beserta percakapannya? Tindakan ini tidak bisa dibatalkan.`,
+                      confirmLabel: "Hapus",
+                    });
+                    if (!ok) return;
+                    deleteMut.mutate(detail.id);
+                  }}
+                >
+                  Hapus
                 </Button>
               ) : null}
             </div>
 
             <div>
-              <h4 className="mb-2 text-sm font-semibold">Aktivitas</h4>
-              <div className="mb-3 max-h-56 space-y-2 overflow-y-auto">
-                {messages.length === 0 ? (
-                  <p className="text-sm text-[var(--muted)]">Belum ada aktivitas.</p>
+              <h4 className="mb-2 text-sm font-semibold">Percakapan</h4>
+              <div className="mb-3 max-h-72 space-y-2 overflow-y-auto">
+                {detail.description && !messages.some((m) => m.sender_type === "customer") ? (
+                  <div className="rounded-md border border-[var(--border)] bg-[color-mix(in_srgb,var(--secondary)_10%,transparent)] p-2 text-sm">
+                    <p className="text-xs font-semibold text-[var(--secondary)]">Pelanggan · keluhan awal</p>
+                    <p className="mt-1 whitespace-pre-wrap text-[var(--text)]">{detail.description}</p>
+                  </div>
+                ) : null}
+                {messages.length === 0 && !detail.description ? (
+                  <p className="text-sm text-[var(--muted)]">Belum ada percakapan. Tulis balasan di bawah.</p>
                 ) : (
                   messages.map((m) => {
                     const isStatus = m.sender_type === "system";
+                    const isCustomer = m.sender_type === "customer";
                     const meId = meQ.data?.user_id;
                     const displayName = nameWithSaya(
                       isStatus
                         ? `${m.sender_name || "Sistem"} · pindah status`
-                        : m.sender_name || m.sender_type,
+                        : isCustomer
+                          ? m.sender_name || "Pelanggan"
+                          : m.sender_name || "Staf",
                       m.sender_id,
                       meId,
                     );
@@ -821,12 +922,15 @@ export function TicketsPage() {
                         className={
                           isStatus
                             ? "rounded-md border border-dashed border-[var(--border)] bg-[var(--panel-muted)]/50 px-2 py-1.5 text-sm"
-                            : "rounded-md border border-[var(--border)] p-2 text-sm"
+                            : isCustomer
+                              ? "rounded-md border border-[var(--border)] bg-[color-mix(in_srgb,var(--secondary)_10%,transparent)] p-2 text-sm"
+                              : "rounded-md border border-[var(--accent)]/25 bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] p-2 text-sm"
                         }
                       >
                         <p className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
-                          <UserAvatar name={m.sender_name} avatarUrl={m.avatar_url} />
+                          {!isStatus ? <UserAvatar name={m.sender_name} avatarUrl={m.avatar_url} /> : null}
                           <span className="min-w-0 flex-1 truncate">
+                            {isCustomer ? "Pelanggan · " : isStatus ? "" : "Staf · "}
                             {displayName} · {formatWhen(m.created_at)}
                           </span>
                         </p>
@@ -881,9 +985,11 @@ export function TicketsPage() {
                   sendMsg.mutate();
                 }}
               >
-                <Input
-                  className="min-w-[200px] flex-1"
-                  placeholder="Tulis balasan…"
+                <Label htmlFor="ticket-reply">Balas ke pelanggan</Label>
+                <Textarea
+                  id="ticket-reply"
+                  className="min-h-24"
+                  placeholder="Tulis balasan untuk pelanggan…"
                   value={msg}
                   onChange={(e) => setMsg(e.target.value)}
                 />
@@ -907,7 +1013,7 @@ export function TicketsPage() {
                   }}
                 />
                 <Button type="submit" disabled={sendMsg.isPending || (!msg.trim() && pendingImages.length === 0)}>
-                  Kirim
+                  {sendMsg.isPending ? "Mengirim…" : "Kirim balasan"}
                 </Button>
               </form>
             </div>

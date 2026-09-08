@@ -6,7 +6,7 @@ export type AdminPage =
   | "subscriptions"
   | "invoices"
   | "routers"
-  | "ipam"
+  | "ip-pool"
   | "tickets"
   | "sla-report"
   | "odp"
@@ -15,7 +15,7 @@ export type AdminPage =
   | "accounting"
   | "resellers"
   | "tech"
-  | "branding"
+  | "general"
   | "isolir-template"
   | "jobs"
   | "notifications"
@@ -34,7 +34,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   "subscriptions",
   "invoices",
   "routers",
-  "ipam",
+  "ip-pool",
   "tickets",
   "sla-report",
   "odp",
@@ -43,7 +43,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   "accounting",
   "resellers",
   "tech",
-  "branding",
+  "general",
   "isolir-template",
   "jobs",
   "notifications",
@@ -55,8 +55,14 @@ export const ADMIN_PAGES: AdminPage[] = [
   "backup",
 ];
 
+export function normalizeAdminPage(value: string): string {
+  if (value === "branding") return "general";
+  if (value === "ipam") return "ip-pool";
+  return value;
+}
+
 export function isAdminPage(value: string): value is AdminPage {
-  return (ADMIN_PAGES as string[]).includes(value);
+  return (ADMIN_PAGES as string[]).includes(normalizeAdminPage(value));
 }
 
 export const pageTitles: Record<AdminPage, string> = {
@@ -67,7 +73,7 @@ export const pageTitles: Record<AdminPage, string> = {
   subscriptions: "Secrets",
   invoices: "Tagihan",
   routers: "Router",
-  ipam: "IP Pool",
+  "ip-pool": "IP Pool",
   tickets: "Tiket",
   "sla-report": "Laporan SLA",
   odp: "ODP / FTTH",
@@ -76,7 +82,7 @@ export const pageTitles: Record<AdminPage, string> = {
   accounting: "Akunting",
   resellers: "Reseller & Komisi",
   tech: "Tiket",
-  branding: "Umum",
+  general: "Umum",
   "isolir-template": "Template Isolir",
   jobs: "Cronjob",
   notifications: "Notifikasi",

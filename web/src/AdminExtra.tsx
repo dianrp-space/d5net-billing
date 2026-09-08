@@ -4,10 +4,12 @@ import ReactECharts from "echarts-for-react";
 import { api, apiDownload, getToken } from "./api";
 import { useAppDialog } from "./confirm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconQrCode, IconTrash, IconWrench } from "./icons";
+import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconQrCode, IconTrash } from "./icons";
 import { ListToolbar, matchesQuery } from "./ListToolbar";
 import { toastError, toastSuccess } from "./swal";
 import { QrisPayDialog, type QrisIntent } from "./QrisPayDialog";
+import { PAY_METHOD_TUNAI } from "./payMethod";
+import { usePersistedTab } from "./navPersist";
 import {
   Button,
   Card,
@@ -185,395 +187,10 @@ export function useDashboardSSE() {
   return live;
 }
 
-export function IPAMPage() {
-  const qc = useQueryClient();
-  const { confirm } = useAppDialog();
-  type IpPoolRow = {
-    id: string;
-    name: string;
-    network: string;
-    gateway?: string | null;
-    router_id?: string | null;
-    router_name?: string | null;
-    dns_servers?: string[] | null;
-    used_count?: number;
-  };
-  type RouterOpt = { id: string; name: string; is_active: boolean };
-  type CustomerOpt = { id: string; full_name: string; customer_code: string };
-  type AssignmentRow = {
-    id: string;
-    ip_address: string;
-    mac_address?: string | null;
-    status: string;
-    customer_id?: string | null;
-    customer_name?: string | null;
-  };
-  type PoolForm = { name: string; network: string; gateway: string; router_id: string; dns: string };
-  const emptyForm: PoolForm = {
-    name: "",
-    network: "10.10.0.0/24",
-    gateway: "10.10.0.1",
-    router_id: "",
-    dns: "8.8.8.8, 1.1.1.1",
-  };
-
-  const [form, setForm] = useState<PoolForm>(emptyForm);
-  const [open, setOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [formErr, setFormErr] = useState("");
-  const [assignPool, setAssignPool] = useState<IpPoolRow | null>(null);
-  const [assignForm, setAssignForm] = useState({ ip_address: "", customer_id: "", mac_address: "" });
-  const [assignErr, setAssignErr] = useState("");
-
-  const q = useQuery({
-    queryKey: ["ip-pools"],
-    queryFn: () => api<IpPoolRow[]>("/api/ip-pools"),
-  });
-  const routersQ = useQuery({
-    queryKey: ["routers"],
-    queryFn: () => api<RouterOpt[]>("/api/routers"),
-  });
-  const customersQ = useQuery({
-    queryKey: ["customers"],
-    queryFn: () => api<{ data: CustomerOpt[] }>("/api/customers?limit=500"),
-    enabled: Boolean(assignPool),
-  });
-  const assignmentsQ = useQuery({
-    queryKey: ["ip-assignments", assignPool?.id],
-    queryFn: () => api<AssignmentRow[]>(`/api/ip-pools/${assignPool!.id}/assignments`),
-    enabled: Boolean(assignPool),
-  });
-
-  const list = Array.isArray(q.data) ? q.data : [];
-  const routers = (Array.isArray(routersQ.data) ? routersQ.data : []).filter((r) => r.is_active);
-  const customers = Array.isArray(customersQ.data?.data) ? customersQ.data!.data : [];
-  const assignments = Array.isArray(assignmentsQ.data) ? assignmentsQ.data : [];
-
-  const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["ip-pools"] });
-    if (assignPool) qc.invalidateQueries({ queryKey: ["ip-assignments", assignPool.id] });
-  };
-
-  function parseDNS(s: string) {
-    return s
-      .split(/[,;\s]+/)
-      .map((x) => x.trim())
-      .filter(Boolean);
-  }
-
-  function buildBody() {
-    const body: Record<string, unknown> = {
-      name: form.name.trim(),
-      network: form.network.trim(),
-      dns_servers: parseDNS(form.dns),
-    };
-    body.gateway = form.gateway.trim() || null;
-    body.router_id = form.router_id || null;
-    return body;
-  }
-
-  const save = useMutation({
-    mutationFn: () => {
-      const body = buildBody();
-      if (editId) return api(`/api/ip-pools/${editId}`, { method: "PUT", body: JSON.stringify(body) });
-      return api("/api/ip-pools", { method: "POST", body: JSON.stringify(body) });
-    },
-    onSuccess: () => {
-      const wasEdit = Boolean(editId);
-      closeForm();
-      refresh();
-      void toastSuccess(wasEdit ? "IP Pool diperbarui" : "IP Pool ditambahkan");
-    },
-    onError: (e: Error) => {
-      setFormErr(e.message);
-      void toastError(e.message);
-    },
-  });
-
-  const remove = useMutation({
-    mutationFn: (id: string) => api(`/api/ip-pools/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      if (editId === remove.variables) closeForm();
-      if (assignPool?.id === remove.variables) setAssignPool(null);
-      refresh();
-      void toastSuccess("IP Pool dihapus");
-    },
-    onError: (e: Error) => void toastError(e.message),
-  });
-
-  const assign = useMutation({
-    mutationFn: () =>
-      api(`/api/ip-pools/${assignPool!.id}/assignments`, {
-        method: "POST",
-        body: JSON.stringify({
-          ip_address: assignForm.ip_address.trim(),
-          customer_id: assignForm.customer_id || undefined,
-          mac_address: assignForm.mac_address.trim() || undefined,
-          status: "assigned",
-        }),
-      }),
-    onSuccess: () => {
-      setAssignForm({ ip_address: "", customer_id: "", mac_address: "" });
-      setAssignErr("");
-      refresh();
-      void toastSuccess("IP di-assign");
-    },
-    onError: (e: Error) => {
-      setAssignErr(e.message);
-      void toastError(e.message);
-    },
-  });
-
-  const release = useMutation({
-    mutationFn: (assignmentId: string) =>
-      api(`/api/ip-pools/${assignPool!.id}/assignments/${assignmentId}`, { method: "DELETE" }),
-    onSuccess: () => {
-      refresh();
-      void toastSuccess("IP dilepas");
-    },
-    onError: (e: Error) => void toastError(e.message),
-  });
-
-  function openCreate() {
-    setEditId(null);
-    setForm(emptyForm);
-    setFormErr("");
-    setOpen(true);
-  }
-
-  function openEdit(p: IpPoolRow) {
-    setEditId(p.id);
-    setForm({
-      name: p.name,
-      network: p.network,
-      gateway: p.gateway || "",
-      router_id: p.router_id || "",
-      dns: (p.dns_servers ?? []).join(", "),
-    });
-    setFormErr("");
-    setOpen(true);
-  }
-
-  function closeForm() {
-    setOpen(false);
-    setEditId(null);
-    setForm(emptyForm);
-    setFormErr("");
-  }
-
-  return (
-    <Section
-      title="IP Pool"
-      actions={
-        <Button type="button" onClick={openCreate}>
-          + Tambah
-        </Button>
-      }
-    >
-      <p className="mb-4 text-sm text-[var(--muted)]">
-        Pool CIDR untuk alamat IP pelanggan / hotspot. Pool terhubung ke <strong>router</strong> (MikroTik), bukan ke paket.
-        Paket mengatur bandwidth/profile; voucher hotspot memakai <strong>pool pertama</strong> di router yang sama sebagai{" "}
-        <code className="text-xs">address-pool</code> profil hotspot (IP dinamis, bukan per-kode).
-      </p>
-
-      <Table
-        columns={["Nama", "Network", "Gateway", "Router", "Terpakai", "Aksi"]}
-        rows={list.map((p) => [
-          p.name,
-          p.network,
-          p.gateway || "—",
-          p.router_name || "—",
-          String(p.used_count ?? 0),
-          <span key="act" className="flex flex-wrap items-center gap-1.5">
-            <IconButton label="Kelola assignment" onClick={() => setAssignPool(p)}>
-              <IconWrench />
-            </IconButton>
-            <IconButton label="Edit IP Pool" onClick={() => openEdit(p)}>
-              <IconPencil />
-            </IconButton>
-            <IconButton
-              label="Hapus IP Pool"
-              danger
-              disabled={remove.isPending}
-              onClick={async () => {
-                const ok = await confirm({
-                  title: "Hapus IP Pool",
-                  description: `Hapus pool "${p.name}" (${p.network})? Assignment di dalamnya ikut terhapus.`,
-                  confirmLabel: "Hapus",
-                });
-                if (!ok) return;
-                remove.mutate(p.id);
-              }}
-            >
-              <IconTrash />
-            </IconButton>
-          </span>,
-        ])}
-      />
-
-      <FormDialog open={open} title={editId ? "Edit IP Pool" : "Tambah IP Pool"} onClose={closeForm} wide>
-        <form
-          className="grid gap-3 sm:grid-cols-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            save.mutate();
-          }}
-        >
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label htmlFor="pool-name">Nama pool</Label>
-            <Input
-              id="pool-name"
-              placeholder="mis. Hotspot-Pool / PPPoE-Pool-A"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="pool-net">Network (CIDR)</Label>
-            <Input
-              id="pool-net"
-              placeholder="10.10.0.0/24"
-              value={form.network}
-              onChange={(e) => setForm({ ...form, network: e.target.value })}
-              required
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="pool-gw">Gateway</Label>
-            <Input
-              id="pool-gw"
-              placeholder="10.10.0.1"
-              value={form.gateway}
-              onChange={(e) => setForm({ ...form, gateway: e.target.value })}
-            />
-          </div>
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label>Router terkait</Label>
-            <SearchableSelect
-              allowClear
-              clearLabel="— Tanpa router —"
-              placeholder="Pilih router"
-              searchPlaceholder="Cari router…"
-              value={form.router_id}
-              onValueChange={(v) => setForm({ ...form, router_id: v })}
-              options={routers.map((r) => ({
-                value: r.id,
-                label: r.name,
-                keywords: r.name,
-              }))}
-            />
-          </div>
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label htmlFor="pool-dns">DNS (pisahkan koma)</Label>
-            <Input
-              id="pool-dns"
-              placeholder="8.8.8.8, 1.1.1.1"
-              value={form.dns}
-              onChange={(e) => setForm({ ...form, dns: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Menyimpan…" : "Simpan"}
-            </Button>
-            <Button type="button" variant="secondary" onClick={closeForm}>
-              Batal
-            </Button>
-          </div>
-          {formErr && <p className="text-sm text-[var(--danger)] sm:col-span-2">{formErr}</p>}
-        </form>
-      </FormDialog>
-
-      <FormDialog
-        open={Boolean(assignPool)}
-        wide
-        title={assignPool ? `Assignment · ${assignPool.name}` : "Assignment"}
-        onClose={() => {
-          setAssignPool(null);
-          setAssignErr("");
-          setAssignForm({ ip_address: "", customer_id: "", mac_address: "" });
-        }}
-      >
-        <p className="mb-3 text-sm text-[var(--muted)]">
-          Network {assignPool?.network}
-          {assignPool?.router_name ? ` · Router ${assignPool.router_name}` : ""}
-        </p>
-        <form
-          className="mb-4 grid gap-3 sm:grid-cols-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            assign.mutate();
-          }}
-        >
-          <Input
-            placeholder="IP address"
-            value={assignForm.ip_address}
-            onChange={(e) => setAssignForm({ ...assignForm, ip_address: e.target.value })}
-            required
-          />
-          <SearchableSelect
-            allowClear
-            clearLabel="— Tanpa pelanggan —"
-            placeholder="Pelanggan (opsional)"
-            searchPlaceholder="Cari nama / kode…"
-            value={assignForm.customer_id}
-            onValueChange={(v) => setAssignForm({ ...assignForm, customer_id: v })}
-            options={customers.map((c) => ({
-              value: c.id,
-              label: `${c.full_name} (${c.customer_code})`,
-              keywords: `${c.full_name} ${c.customer_code}`,
-            }))}
-          />
-          <Input
-            placeholder="MAC (opsional)"
-            value={assignForm.mac_address}
-            onChange={(e) => setAssignForm({ ...assignForm, mac_address: e.target.value })}
-          />
-          <div className="sm:col-span-3">
-            <Button type="submit" disabled={assign.isPending}>
-              {assign.isPending ? "Menyimpan…" : "Assign IP"}
-            </Button>
-            {assignErr && <p className="mt-2 text-sm text-[var(--danger)]">{assignErr}</p>}
-          </div>
-        </form>
-        <Table
-          columns={["IP", "Pelanggan", "MAC", "Status", "Aksi"]}
-          rows={assignments.map((a) => [
-            a.ip_address,
-            a.customer_name || "—",
-            a.mac_address || "—",
-            a.status,
-            <IconButton
-              key="del"
-              label="Lepas IP"
-              danger
-              disabled={release.isPending}
-              onClick={async () => {
-                const ok = await confirm({
-                  title: "Lepas IP",
-                  description: `Lepas assignment ${a.ip_address}?`,
-                  confirmLabel: "Lepas",
-                });
-                if (!ok) return;
-                release.mutate(a.id);
-              }}
-            >
-              <IconTrash />
-            </IconButton>,
-          ])}
-        />
-      </FormDialog>
-    </Section>
-  );
-}
-
-
-
 export function AccountingPage() {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
-  const [tab, setTab] = useState("ringkasan");
+  const [tab, setTab] = usePersistedTab("accounting", "ringkasan", ["ringkasan", "beban", "coa"] as const);
   const [expOpen, setExpOpen] = useState(false);
   const [exp, setExp] = useState({
     amount: "",
@@ -606,7 +223,13 @@ export function AccountingPage() {
   const churn = useQuery({
     queryKey: ["churn"],
     queryFn: () =>
-      api<{ canceled_30d?: number; active?: number; churn_ratio?: number; window_days?: number }>("/api/reports/churn"),
+      api<{
+        canceled_30d?: number;
+        dismantled_30d?: number;
+        active?: number;
+        churn_ratio?: number;
+        window_days?: number;
+      }>("/api/reports/churn"),
   });
   const expensesQ = useQuery({
     queryKey: ["expenses"],
@@ -792,7 +415,8 @@ export function AccountingPage() {
               <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel-muted)]/50 p-3 text-sm">
                 <p className="font-medium text-[var(--text)]">Churn</p>
                 <p className="mt-1 text-[var(--muted)]">
-                  {churn.data?.canceled_30d ?? 0} batal / {churn.data?.active ?? 0} aktif (
+                  {churn.data?.dismantled_30d ?? churn.data?.canceled_30d ?? 0} cabut / {churn.data?.active ?? 0}{" "}
+                  pelanggan aktif (
                   {(((churn.data?.churn_ratio ?? 0) as number) * 100).toFixed(1)}%) dalam{" "}
                   {churn.data?.window_days ?? 30} hari.
                 </p>
@@ -1266,7 +890,7 @@ export function InvoiceActions({
   const { confirm } = useAppDialog();
   const unpaid = status !== "paid" && status !== "void" && status !== "cancelled";
   const pay = useMutation({
-    mutationFn: () => api(`/api/invoices/${id}/pay`, { method: "POST", body: JSON.stringify({ method: "manual" }) }),
+    mutationFn: () => api(`/api/invoices/${id}/pay`, { method: "POST", body: JSON.stringify({ method: PAY_METHOD_TUNAI }) }),
     onSuccess: () => {
       void toastSuccess("Pembayaran dicatat");
       onDone?.();

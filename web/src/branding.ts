@@ -11,9 +11,16 @@ export function applyBrandingMeta(opts: {
     document.title = opts.titleSuffix ? `${name} ${sep} ${opts.titleSuffix}` : name;
   }
   const href = opts.faviconUrl?.trim();
+  document
+    .querySelectorAll("link[rel='icon'], link[rel='shortcut icon'], link[rel='apple-touch-icon']")
+    .forEach((el) => {
+      if (!el.hasAttribute("data-drp-brand")) el.remove();
+    });
   let link = document.querySelector<HTMLLinkElement>("link[rel='icon'][data-drp-brand]");
+  let apple = document.querySelector<HTMLLinkElement>("link[rel='apple-touch-icon'][data-drp-brand]");
   if (!href) {
     link?.remove();
+    apple?.remove();
     return;
   }
   if (!link) {
@@ -22,5 +29,18 @@ export function applyBrandingMeta(opts: {
     link.setAttribute("data-drp-brand", "1");
     document.head.appendChild(link);
   }
+  if (!apple) {
+    apple = document.createElement("link");
+    apple.rel = "apple-touch-icon";
+    apple.setAttribute("data-drp-brand", "1");
+    document.head.appendChild(apple);
+  }
+  const lower = href.toLowerCase();
+  if (lower.endsWith(".webp")) link.type = "image/webp";
+  else if (lower.endsWith(".png")) link.type = "image/png";
+  else if (lower.endsWith(".svg")) link.type = "image/svg+xml";
+  else if (lower.endsWith(".ico")) link.type = "image/x-icon";
+  else link.removeAttribute("type");
   link.href = href;
+  apple.href = href;
 }

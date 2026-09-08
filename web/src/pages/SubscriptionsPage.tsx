@@ -60,6 +60,8 @@ export function SubscriptionsPage({
     customer_code: string;
     cluster_id?: string | null;
     cluster_name?: string;
+    service_status?: string;
+    dismantled_at?: string | null;
   };
   type OfferOpt = {
     plan_id: string;
@@ -248,8 +250,12 @@ export function SubscriptionsPage({
         customer_code: customerQ.data.customer_code,
         cluster_id: customerQ.data.cluster_id,
         cluster_name: customerQ.data.cluster_name,
+        service_status: customerQ.data.service_status,
+        dismantled_at: customerQ.data.dismantled_at,
       }
     : null;
+  const customerCabut =
+    lockedCustomer?.service_status === "dismantled" || Boolean(lockedCustomer?.dismantled_at);
   const customers = lockedCustomer ? [lockedCustomer] : [];
   const selectedCustomer = lockedCustomer || customers.find((c) => c.id === form.customer_id);
   const clusterId = selectedCustomer?.cluster_id || "";
@@ -273,8 +279,9 @@ export function SubscriptionsPage({
   useEffect(() => {
     if (createMode) return;
     if (!listQ.isSuccess || listQ.isFetching) return;
+    if (customerCabut) return;
     if ((listQ.data?.data?.length ?? 0) === 0) onOpenCreate();
-  }, [createMode, listQ.isSuccess, listQ.isFetching, listQ.data?.data?.length, onOpenCreate]);
+  }, [createMode, listQ.isSuccess, listQ.isFetching, listQ.data?.data?.length, onOpenCreate, customerCabut]);
 
 
   const offersQ = useQuery({
@@ -691,7 +698,7 @@ export function SubscriptionsPage({
     <Section
       title={sectionTitle}
       actions={
-        createMode ? null : (
+        createMode || customerCabut ? null : (
           <button type="button" className="btn" onClick={onOpenCreate}>
             + Tambah secret
           </button>
@@ -718,6 +725,7 @@ export function SubscriptionsPage({
           <p className="text-sm text-[var(--muted)]">
             {lockedCustomer.customer_code} — {lockedCustomer.full_name}
             {lockedCustomer.cluster_name ? ` · ${lockedCustomer.cluster_name}` : ""}
+            {customerCabut ? " · status cabut" : ""}
           </p>
         ) : null}
       </div>
@@ -725,8 +733,9 @@ export function SubscriptionsPage({
       {!createMode ? (
         <>
           <p className="mb-3 text-sm text-[var(--muted)]">
-            Secret khusus pelanggan ini. Aktifkan dengan tanggal/prorata; ikon kotak{" "}
-            <strong>Ganti paket</strong> untuk hitung selisih harga sisa hari.
+            {customerCabut
+              ? "Pelanggan ini sudah cabut. Secret lama tetap terlihat di sini; tidak bisa ditambah atau diaktifkan lagi."
+              : "Secret khusus pelanggan ini. Aktifkan dengan tanggal/prorata; ikon kotak Ganti paket untuk hitung selisih harga sisa hari."}
           </p>
           <Table
             columns={["Username", "Paket", "ODP / Port", "Status", "Aksi"]}
@@ -736,9 +745,13 @@ export function SubscriptionsPage({
           s.odp_code
             ? `${s.odp_code}${s.port_number != null ? ` · P${s.port_number}` : ""}`
             : "—",
-          s.status,
+          s.status === "cancelled" || s.status === "canceled"
+            ? customerCabut
+              ? "cabut"
+              : "dibatalkan"
+            : s.status,
           <span key={s.id} className="flex flex-wrap items-center gap-1.5">
-            {s.status === "pending" ? (
+            {s.status === "pending" && !customerCabut ? (
               <Button
                 type="button"
                 size="sm"
@@ -752,7 +765,7 @@ export function SubscriptionsPage({
                 Aktifkan
               </Button>
             ) : null}
-            {s.status === "active" || s.status === "suspended" || s.status === "overdue" ? (
+            {(s.status === "active" || s.status === "suspended" || s.status === "overdue") && !customerCabut ? (
               <IconButton label="Ganti paket" onClick={() => openChangePlan(s)}>
                 <IconBox />
               </IconButton>
@@ -793,6 +806,11 @@ export function SubscriptionsPage({
         title={editId ? "Edit langganan" : "Buat secret"}
         onClose={closeForm}
       >
+        {customerCabut && !editId ? (
+          <p className="text-sm text-[var(--muted)]">
+            Pelanggan ini sudah cabut. Tidak bisa menambah secret baru.
+          </p>
+        ) : (
         <form
           className="grid gap-3 sm:grid-cols-2"
           onSubmit={(e) => {
@@ -1056,6 +1074,7 @@ export function SubscriptionsPage({
           </div>
           {formErr && <p className="text-sm text-[var(--danger)] sm:col-span-2">{formErr}</p>}
         </form>
+        )}
       </FormDialog>
 
       <FormDialog

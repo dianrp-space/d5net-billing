@@ -30,10 +30,10 @@ export function Landing({ onGoLogin }: { onGoLogin: () => void }) {
           <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#6b7c90]">Akses per tenant</h2>
           <ul className="mt-4 space-y-3 text-[#c5d0dc]">
             <li>
-              Admin: <code className="landing-code">/admin/&lt;slug&gt;/login</code>
+              Admin: <code className="landing-code">/&lt;slug&gt;/login</code>
             </li>
             <li>
-              Pelanggan: <code className="landing-code">/client/&lt;slug&gt;/login</code>
+              Pelanggan: <code className="landing-code">/&lt;slug&gt;/client/login</code>
             </li>
             <li>
               Superadmin: <code className="landing-code">/login</code>

@@ -4,6 +4,7 @@ import { api } from "./api";
 import { IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { Button, IconButton, Input, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table } from "./ui";
+import { usePersistedTab } from "./navPersist";
 
 type NotifTemplate = {
   id: string;
@@ -15,7 +16,7 @@ type NotifTemplate = {
 
 export function NotificationsPage() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"templates" | "broadcast">("broadcast");
+  const [tab, setTab] = usePersistedTab("notifications", "broadcast", ["broadcast", "templates"] as const);
   const templatesQ = useQuery({
     queryKey: ["notification-templates"],
     queryFn: () => api<NotifTemplate[]>("/api/notifications/templates"),

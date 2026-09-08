@@ -7,6 +7,7 @@ import { Badge } from "./components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IconCheck, IconEye, IconMapPin, IconUserCheck } from "./icons";
 import { canDispatchOps, type MePermissions } from "./permissions";
+import { usePersistedTab } from "./navPersist";
 import { toastError, toastSuccess } from "./swal";
 import {
   Button,
@@ -111,7 +112,7 @@ function readGeo(): Promise<{ lat: number; lng: number }> {
 export function TechPage() {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
-  const [tab, setTab] = useState("orders");
+  const [tab, setTab] = usePersistedTab("tech", "orders", ["orders", "techs"] as const);
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(0);
   const limit = 20;

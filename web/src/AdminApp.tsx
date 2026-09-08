@@ -42,11 +42,11 @@ import {
 } from "./icons";
 import { IconButton } from "./ui";
 import { PanelLeft, PanelLeftClose, Home } from "lucide-react";
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, Component, useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 export type { AdminPage } from "./admin/pages";
-export { isAdminPage } from "./admin/pages";
+export { isAdminPage, normalizeAdminPage } from "./admin/pages";
 
 type Page = AdminPage;
 
@@ -73,7 +73,7 @@ const RoutersPage = lazy(() =>
   import("./pages/RoutersPage").then((m) => ({ default: m.RoutersPage })),
 );
 const OdpPage = lazy(() => import("./pages/OdpPage").then((m) => ({ default: m.OdpPage })));
-const IPAMPage = lazy(() => import("./AdminExtra").then((m) => ({ default: m.IPAMPage })));
+const IPPoolPage = lazy(() => import("./pages/IPPoolPage").then((m) => ({ default: m.IPPoolPage })));
 const TicketsPage = lazy(() => import("./TicketsPage").then((m) => ({ default: m.TicketsPage })));
 const SLAReportPage = lazy(() =>
   import("./SLAReportPage").then((m) => ({ default: m.SLAReportPage })),
@@ -88,8 +88,8 @@ const AccountingPage = lazy(() =>
 const ResellersPage = lazy(() =>
   import("./AdminExtra").then((m) => ({ default: m.ResellersPage })),
 );
-const BrandingSettingsPage = lazy(() =>
-  import("./SettingsPages").then((m) => ({ default: m.BrandingSettingsPage })),
+const GeneralSettingsPage = lazy(() =>
+  import("./SettingsPages").then((m) => ({ default: m.GeneralSettingsPage })),
 );
 const IsolirTemplatePage = lazy(() =>
   import("./IsolirTemplatePage").then((m) => ({ default: m.IsolirTemplatePage })),
@@ -145,7 +145,7 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "clusters", label: "Cluster / POP", icon: <IconMapPin /> },
       { id: "routers", label: "Router", icon: <IconRouter /> },
-      { id: "ipam", label: "IP Pool", icon: <IconServer /> },
+      { id: "ip-pool", label: "IP Pool", icon: <IconServer /> },
       { id: "odp", label: "ODP / FTTH", icon: <IconCable /> },
       { id: "vouchers", label: "Voucher", icon: <IconTicket /> },
     ],
@@ -169,7 +169,7 @@ const navGroups: NavGroup[] = [
   {
     label: "Settings",
     items: [
-      { id: "branding", label: "Umum", icon: <IconSettings /> },
+      { id: "general", label: "Umum", icon: <IconSettings /> },
       { id: "isolir-template", label: "Template Isolir", icon: <IconShield /> },
       { id: "jobs", label: "Cronjob", icon: <IconClock /> },
       { id: "roles", label: "Roles", icon: <IconShieldCheck /> },
@@ -181,6 +181,32 @@ const navGroups: NavGroup[] = [
 
 function PageFallback() {
   return <p className="text-sm text-[var(--muted)]">Memuat halaman…</p>;
+}
+
+class PageErrorBoundary extends Component<{ children: ReactNode; resetKey: string }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-[var(--radius)] border border-[var(--danger)]/30 bg-[var(--panel)] p-4">
+          <p className="text-sm font-semibold text-[var(--danger)]">Halaman gagal dimuat</p>
+          <p className="mt-1 text-sm text-[var(--muted)]">{this.state.error.message}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export function AdminApp({
@@ -406,7 +432,8 @@ export function AdminApp({
             <p className="text-sm text-[var(--danger)]">Gagal memuat izin role. Coba refresh atau login ulang.</p>
           )}
           {meQ.data && canAccessPage(perms, page) && (
-            <Suspense fallback={<PageFallback />}>
+            <PageErrorBoundary resetKey={page}>
+              <Suspense fallback={<PageFallback />}>
               {page === "dashboard" && (
                 <DashboardPage
                   userName={meQ.data?.full_name || meQ.data?.email}
@@ -439,7 +466,7 @@ export function AdminApp({
               {page === "plans" && <PlansPage />}
               {page === "invoices" && <InvoicesPage />}
               {page === "routers" && <RoutersPage />}
-              {page === "ipam" && <IPAMPage />}
+              {page === "ip-pool" && <IPPoolPage tenantSlug={tenantSlug} />}
               {page === "tickets" && <TicketsPage />}
               {page === "sla-report" && <SLAReportPage />}
               {page === "odp" && <OdpPage tenantSlug={tenantSlug} />}
@@ -447,7 +474,7 @@ export function AdminApp({
               {page === "leads" && <LeadsPage />}
               {page === "accounting" && <AccountingPage />}
               {page === "resellers" && <ResellersPage />}
-              {page === "branding" && <BrandingSettingsPage />}
+              {page === "general" && <GeneralSettingsPage />}
               {page === "isolir-template" && <IsolirTemplatePage tenantSlug={tenantSlug} />}
               {page === "jobs" && <JobsSettingsPage />}
               {page === "notifications" && <NotificationsPage />}
@@ -458,6 +485,7 @@ export function AdminApp({
               {page === "messaging-gw" && <MessagingGWPage />}
               {page === "backup" && <BackupRestorePage />}
             </Suspense>
+            </PageErrorBoundary>
           )}
         </main>
       </div>
