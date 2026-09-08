@@ -211,15 +211,6 @@ func (s *Service) tenantMessagingNotifier(ctx context.Context, tenantID xid.ID, 
 	}
 }
 
-// QueueTenantTelegram sends an ops alert to the tenant's configured Telegram chat.
-func (s *Service) QueueTenantTelegram(ctx context.Context, tenantID xid.ID, body string) error {
-	chatID := s.tenantTelegramChatID(ctx, tenantID)
-	if chatID == "" {
-		return fmt.Errorf("telegram tenant chat_id belum dikonfigurasi")
-	}
-	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "telegram", Recipient: chatID, Body: body})
-}
-
 // RenderTemplate loads a tenant template by channel+name (event column), or falls back to hardcoded defaults.
 func (s *Service) RenderTemplate(ctx context.Context, tenantID xid.ID, channel, name string, vars map[string]string) (subject, body string, err error) {
 	var subj *string
@@ -314,6 +305,20 @@ func (s *Service) HandleWhatsAppBot(ctx context.Context, tenantID xid.ID, phone,
 		if err != nil {
 			return "Gagal membuat tiket.", err
 		}
+		var custID *xid.ID
+		lines := []string{"Dari: " + phone, "Prioritas: high", "Kategori: outage"}
+		if cust, lookupErr := s.store.GetCustomerByPhone(ctx, tenantID, phone); lookupErr == nil && cust != nil {
+			id := cust.ID
+			custID = &id
+			who := strings.TrimSpace(cust.FullName)
+			if who == "" {
+				who = cust.CustomerCode
+			}
+			if who != "" {
+				lines = append(lines, "Pelanggan: "+who)
+			}
+		}
+		_ = s.QueueTicketTelegram(ctx, tenantID, custID, "Laporan gangguan via WhatsApp", lines...)
 		return "Tiket gangguan telah dibuat. Tim kami akan segera menghubungi Anda.", nil
 	default:
 		return "Perintah: tagihan, status, gangguan", nil

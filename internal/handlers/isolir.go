@@ -40,10 +40,7 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 		if ten != nil {
 			slug = ten.Slug
 		}
-		isolirURL := ""
-		if net.PortalBaseURL != "" && slug != "" {
-			isolirURL = net.PortalBaseURL + "/isolir/" + slug
-		}
+		isolirURL := store.IsolirPortalURL(net.PortalBaseURL, slug)
 		out := &struct {
 			Body struct {
 				Network   store.IsolirNetworkSettings `json:"network"`
@@ -88,7 +85,7 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 			return nil, httpx.BadRequest("pilih router isolir")
 		}
 		if net.IPPoolID == nil || xid.IsNil(*net.IPPoolID) {
-			return nil, httpx.BadRequest("pilih IP pool isolir dari IPAM")
+			return nil, httpx.BadRequest("pilih IP pool isolir")
 		}
 		if strings.TrimSpace(net.PortalBaseURL) == "" {
 			return nil, httpx.BadRequest("portal_base_url wajib")
@@ -109,10 +106,7 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 		if ten != nil {
 			slug = ten.Slug
 		}
-		isolirURL := ""
-		if net.PortalBaseURL != "" && slug != "" {
-			isolirURL = net.PortalBaseURL + "/isolir/" + slug
-		}
+		isolirURL := store.IsolirPortalURL(net.PortalBaseURL, slug)
 		out := &struct {
 			Body struct {
 				Network   store.IsolirNetworkSettings `json:"network"`
@@ -192,24 +186,24 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 
 func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 	if isolirURL == "" {
-		isolirURL = "{portal_base_url}/isolir/{tenantSlug}"
+		isolirURL = "{portal_base_url}/{tenantSlug}/client"
 	}
 	pool := net.PoolRanges
 	if pool == "" {
-		pool = "(pilih IP pool dari IPAM)"
+		pool = "(pilih IP pool isolir)"
 	}
 	name := net.PoolName
 	if name == "" {
 		name = "isolir"
 	}
 	return "URL isolir (Web Proxy redirect-to):\n" + isolirURL +
-		"\n\nRouter + IP pool IPAM → sync hanya ke router terpilih." +
+		"\n\nPool isolir dipakai saat worker mengisolir langganan di router masing-masing." +
 		"\nPool: " + name + " · " + pool +
 		"\n\nSetting di RouterOS (IP → Web Proxy):\n" +
 		"1. /ip proxy: enabled=yes, port=8080\n" +
-		"2. /ip proxy access: allow host billing; deny + redirect-to URL di atas\n" +
+		"2. /ip proxy access: allow host billing; ROS7 action=redirect action-data=URL (ROS6: deny + redirect-to)\n" +
 		"3. NAT: tcp/80 dari pool → redirect ke port 8080\n" +
-		"4. Filter: allow DNS + host billing\n" +
+		"4. Filter: allow DNS; HTTPS portal via address-list FQDN (bukan IP publik)\n" +
 		"Comment: drp-isolir:* · Secret isolir: prefix \"ISOLIR \""
 }
 
@@ -237,10 +231,7 @@ func registerPublicIsolir(api huma.API, d *Deps) {
 				logoURL = *brand.Effective.LogoURL
 			}
 		}
-		loginURL := "/isolir/" + ten.Slug
-		if net.PortalBaseURL != "" {
-			loginURL = net.PortalBaseURL + "/isolir/" + ten.Slug
-		}
+		loginURL := store.IsolirPortalURL(net.PortalBaseURL, ten.Slug)
 		body := custom
 		if strings.TrimSpace(body) == "" {
 			body = store.DefaultIsolirHTML(appName, logoURL, loginURL)

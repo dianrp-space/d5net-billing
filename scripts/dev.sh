@@ -74,6 +74,13 @@ echo "==> starting API…"
 go run ./cmd/api &
 API_PID=$!
 
+WORKER_PID=""
+if [[ "${WORKER_ENABLED:-true}" == "true" ]]; then
+  echo "==> starting worker…"
+  go run ./cmd/worker &
+  WORKER_PID=$!
+fi
+
 # Wait until THIS API process is ready (not a leftover listener).
 echo "==> waiting for API on 127.0.0.1:${API_PORT}"
 for i in $(seq 1 90); do

@@ -12,18 +12,20 @@ const jobsSettingKey = "jobs.schedule"
 
 // JobScheduleSettings configures which worker tasks run for a tenant and when.
 type JobScheduleSettings struct {
-	BillingEnabled           bool  `json:"billing_enabled"`
-	IsolirEnabled            bool  `json:"isolir_enabled"`
-	DunningEnabled           bool  `json:"dunning_enabled"`
-	DunningOffsets           []int `json:"dunning_offsets"`
-	OdpOutageEnabled         bool  `json:"odp_outage_enabled"`
-	WeeklyReconcileEnabled   bool  `json:"weekly_reconcile_enabled"`
-	WeeklyReconcileWeekday   int   `json:"weekly_reconcile_weekday"` // 0=Sunday … 6=Saturday
-	WeeklyReconcileHour      int   `json:"weekly_reconcile_hour"`    // 0–23 local
-	MonthlyReportEnabled     bool  `json:"monthly_report_enabled"`
-	MonthlyReportDay         int   `json:"monthly_report_day"`  // 1–28
-	MonthlyReportHour        int   `json:"monthly_report_hour"` // 0–23 local
-	NotifyBatchSize          int   `json:"notify_batch_size"`
+	BillingEnabled         bool  `json:"billing_enabled"`
+	IsolirEnabled          bool  `json:"isolir_enabled"`
+	DunningEnabled         bool  `json:"dunning_enabled"`
+	DunningOffsets         []int `json:"dunning_offsets,omitempty"`
+	OdpOutageEnabled       bool  `json:"odp_outage_enabled,omitempty"`
+	WeeklyReconcileEnabled bool  `json:"weekly_reconcile_enabled"`
+	WeeklyReconcileWeekday int   `json:"weekly_reconcile_weekday"` // 0=Sunday … 6=Saturday
+	WeeklyReconcileHour    int   `json:"weekly_reconcile_hour"`    // 0–23 local
+	MonthlyReportEnabled   bool  `json:"monthly_report_enabled"`
+	MonthlyReportDay       int   `json:"monthly_report_day"`  // 1–28
+	MonthlyReportHour      int   `json:"monthly_report_hour"` // 0–23 local
+	NotifyBatchSize        int   `json:"notify_batch_size"`
+	// CycleIntervalSeconds is how often this tenant's worker tasks run (billing, isolir, dunning).
+	CycleIntervalSeconds int `json:"cycle_interval_seconds"`
 }
 
 func DefaultJobScheduleSettings() JobScheduleSettings {
@@ -32,7 +34,7 @@ func DefaultJobScheduleSettings() JobScheduleSettings {
 		IsolirEnabled:          true,
 		DunningEnabled:         true,
 		DunningOffsets:         []int{-7, -3, 0, 1, 3},
-		OdpOutageEnabled:       true,
+		OdpOutageEnabled:       false,
 		WeeklyReconcileEnabled: true,
 		WeeklyReconcileWeekday: 0,
 		WeeklyReconcileHour:    3,
@@ -40,6 +42,7 @@ func DefaultJobScheduleSettings() JobScheduleSettings {
 		MonthlyReportDay:       1,
 		MonthlyReportHour:      8,
 		NotifyBatchSize:        100,
+		CycleIntervalSeconds:   60,
 	}
 }
 
@@ -82,6 +85,19 @@ func NormalizeJobScheduleSettings(cfg JobScheduleSettings) JobScheduleSettings {
 	if cfg.NotifyBatchSize > 500 {
 		cfg.NotifyBatchSize = 500
 	}
+	if cfg.CycleIntervalSeconds < 60 {
+		cfg.CycleIntervalSeconds = def.CycleIntervalSeconds
+	}
+	if cfg.CycleIntervalSeconds > 3600 {
+		cfg.CycleIntervalSeconds = 3600
+	}
+	// Snap to whole minutes so the Jobs UI (menit) round-trips cleanly.
+	if rest := cfg.CycleIntervalSeconds % 60; rest != 0 {
+		cfg.CycleIntervalSeconds -= rest
+		if cfg.CycleIntervalSeconds < 60 {
+			cfg.CycleIntervalSeconds = 60
+		}
+	}
 	// Dedup / clamp dunning offsets to [-30, 30]
 	seen := map[int]struct{}{}
 	offsets := make([]int, 0, len(cfg.DunningOffsets))
@@ -99,6 +115,7 @@ func NormalizeJobScheduleSettings(cfg JobScheduleSettings) JobScheduleSettings {
 		offsets = def.DunningOffsets
 	}
 	cfg.DunningOffsets = offsets
+	cfg.OdpOutageEnabled = false
 	return cfg
 }
 

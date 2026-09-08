@@ -17,6 +17,19 @@ import (
 
 const DefaultDRPBaseURL = "https://payment.dianrp.com"
 
+const DefaultQRISExpiresMinutes = 15
+const MaxQRISExpiresMinutes = 1440
+
+func ClampQRISExpiresMinutes(n int) int {
+	if n < 1 {
+		return DefaultQRISExpiresMinutes
+	}
+	if n > MaxQRISExpiresMinutes {
+		return MaxQRISExpiresMinutes
+	}
+	return n
+}
+
 type DRPProvider struct {
 	BaseURL          string
 	APIKey           string
@@ -34,7 +47,7 @@ func NewDRPProvider(baseURL, apiKey, webhookSecret string) *DRPProvider {
 		BaseURL:          baseURL,
 		APIKey:           strings.TrimSpace(apiKey),
 		WebhookSecret:    webhookSecret,
-		ExpiresInMinutes: 15,
+		ExpiresInMinutes: DefaultQRISExpiresMinutes,
 		HTTP:             &http.Client{Timeout: 20 * time.Second},
 	}
 }
@@ -49,13 +62,7 @@ func (p *DRPProvider) client() *http.Client {
 }
 
 func (p *DRPProvider) ttl() int {
-	if p.ExpiresInMinutes < 1 {
-		return 15
-	}
-	if p.ExpiresInMinutes > 1440 {
-		return 1440
-	}
-	return p.ExpiresInMinutes
+	return ClampQRISExpiresMinutes(p.ExpiresInMinutes)
 }
 
 type drpCreateRequest struct {

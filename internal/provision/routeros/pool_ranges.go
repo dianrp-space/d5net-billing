@@ -82,6 +82,10 @@ func CIDRToPoolRanges(network string, gateway *string) (string, error) {
 			}
 		}
 	}
+	// No gateway stored: first usable host is the router local-address (.1 on /24).
+	if gw == nil {
+		gw = dupIP(start)
+	}
 
 	// If gateway == first host (.1), start after gateway (.2); same for last host.
 	if gw != nil && ipNet.Contains(gw) {
@@ -100,6 +104,35 @@ func CIDRToPoolRanges(network string, gateway *string) (string, error) {
 		return start.String(), nil
 	}
 	return start.String() + "-" + end.String(), nil
+}
+
+// CIDRLocalAddress is the router IP on this network (explicit gateway, else first host).
+func CIDRLocalAddress(network string, gateway *string) string {
+	if gateway != nil {
+		if h := HostIP(*gateway); h != "" {
+			return h
+		}
+	}
+	network = strings.TrimSpace(network)
+	_, ipNet, err := net.ParseCIDR(network)
+	if err != nil {
+		return ""
+	}
+	ip := ipNet.IP.To4()
+	if ip == nil {
+		return ""
+	}
+	ones, bits := ipNet.Mask.Size()
+	if bits != 32 || ones >= 31 {
+		return ip.String()
+	}
+	mask := ipNet.Mask
+	host := make(net.IP, 4)
+	for i := 0; i < 4; i++ {
+		host[i] = ip[i] & mask[i]
+	}
+	incIP(host)
+	return host.String()
 }
 
 func dupIP(ip net.IP) net.IP {

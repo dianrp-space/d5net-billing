@@ -121,25 +121,39 @@ func (s *Store) LogRouterCommand(ctx context.Context, tenantID xid.ID, routerID 
 }
 
 type IPPool struct {
-	ID         xid.ID   `json:"id"`
-	TenantID   xid.ID   `json:"tenant_id"`
-	RouterID   *xid.ID  `json:"router_id,omitempty"`
-	RouterName *string  `json:"router_name,omitempty"`
-	Name       string   `json:"name"`
-	Network    string   `json:"network"`
-	Gateway    *string  `json:"gateway,omitempty"`
-	DNSServers []string `json:"dns_servers,omitempty"`
-	UsedCount  int      `json:"used_count"`
+	ID          xid.ID   `json:"id"`
+	TenantID    xid.ID   `json:"tenant_id"`
+	ClusterID   *xid.ID  `json:"cluster_id,omitempty"`
+	ClusterName string   `json:"cluster_name,omitempty"`
+	RouterID    *xid.ID  `json:"router_id,omitempty"`
+	RouterName  *string  `json:"router_name,omitempty"`
+	Name        string   `json:"name"`
+	Network     string   `json:"network"`
+	Gateway     *string  `json:"gateway,omitempty"`
+	DNSServers  []string `json:"dns_servers,omitempty"`
+	UsedCount   int      `json:"used_count"`
+}
+
+const ipPoolSelect = `
+			SELECT p.id, p.tenant_id, p.cluster_id, COALESCE(s.name, ''), p.router_id, r.name,
+			       p.name, p.network::text, host(p.gateway), p.dns_servers,
+			       COALESCE((SELECT COUNT(*) FROM ip_assignments a WHERE a.pool_id = p.id), 0)
+			FROM ip_pools p
+			LEFT JOIN routers r ON r.id = p.router_id
+			LEFT JOIN sites s ON s.id = p.cluster_id
+`
+
+func scanIPPool(scan func(dest ...any) error) (IPPool, error) {
+	var p IPPool
+	err := scan(&p.ID, &p.TenantID, &p.ClusterID, &p.ClusterName, &p.RouterID, &p.RouterName,
+		&p.Name, &p.Network, &p.Gateway, &p.DNSServers, &p.UsedCount)
+	return p, err
 }
 
 func (s *Store) ListIPPools(ctx context.Context, tenantID xid.ID) ([]IPPool, error) {
 	var list []IPPool
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
-			SELECT p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, host(p.gateway), p.dns_servers,
-			       COALESCE((SELECT COUNT(*) FROM ip_assignments a WHERE a.pool_id = p.id), 0)
-			FROM ip_pools p
-			LEFT JOIN routers r ON r.id = p.router_id
+		rows, err := tx.Query(ctx, ipPoolSelect+`
 			WHERE p.tenant_id = $1
 			ORDER BY p.name
 		`, tenantID)
@@ -148,8 +162,8 @@ func (s *Store) ListIPPools(ctx context.Context, tenantID xid.ID) ([]IPPool, err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var p IPPool
-			if err := rows.Scan(&p.ID, &p.TenantID, &p.RouterID, &p.RouterName, &p.Name, &p.Network, &p.Gateway, &p.DNSServers, &p.UsedCount); err != nil {
+			p, err := scanIPPool(rows.Scan)
+			if err != nil {
 				return err
 			}
 			list = append(list, p)
@@ -162,18 +176,18 @@ func (s *Store) ListIPPools(ctx context.Context, tenantID xid.ID) ([]IPPool, err
 func (s *Store) GetIPPool(ctx context.Context, tenantID, id xid.ID) (*IPPool, error) {
 	var p IPPool
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, `
-			SELECT p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, host(p.gateway), p.dns_servers,
-			       COALESCE((SELECT COUNT(*) FROM ip_assignments a WHERE a.pool_id = p.id), 0)
-			FROM ip_pools p
-			LEFT JOIN routers r ON r.id = p.router_id
+		row := tx.QueryRow(ctx, ipPoolSelect+`
 			WHERE p.tenant_id = $1 AND p.id = $2
 		`, tenantID, id)
-		err := row.Scan(&p.ID, &p.TenantID, &p.RouterID, &p.RouterName, &p.Name, &p.Network, &p.Gateway, &p.DNSServers, &p.UsedCount)
+		got, err := scanIPPool(row.Scan)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		p = got
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -184,20 +198,20 @@ func (s *Store) GetIPPool(ctx context.Context, tenantID, id xid.ID) (*IPPool, er
 func (s *Store) GetFirstIPPoolForRouter(ctx context.Context, tenantID, routerID xid.ID) (*IPPool, error) {
 	var p IPPool
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, `
-			SELECT p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, host(p.gateway), p.dns_servers,
-			       COALESCE((SELECT COUNT(*) FROM ip_assignments a WHERE a.pool_id = p.id), 0)
-			FROM ip_pools p
-			LEFT JOIN routers r ON r.id = p.router_id
+		row := tx.QueryRow(ctx, ipPoolSelect+`
 			WHERE p.tenant_id = $1 AND p.router_id = $2
 			ORDER BY p.name
 			LIMIT 1
 		`, tenantID, routerID)
-		err := row.Scan(&p.ID, &p.TenantID, &p.RouterID, &p.RouterName, &p.Name, &p.Network, &p.Gateway, &p.DNSServers, &p.UsedCount)
+		got, err := scanIPPool(row.Scan)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		p = got
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -206,20 +220,24 @@ func (s *Store) GetFirstIPPoolForRouter(ctx context.Context, tenantID, routerID 
 }
 
 func (s *Store) CreateIPPool(ctx context.Context, p *IPPool) error {
-	return s.withTenant(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.withTenant(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-			INSERT INTO ip_pools (tenant_id, router_id, name, network, gateway, dns_servers)
-			VALUES ($1,$2,$3,$4::cidr,$5::inet,$6) RETURNING id
-		`, p.TenantID, p.RouterID, p.Name, p.Network, p.Gateway, p.DNSServers).Scan(&p.ID)
+			INSERT INTO ip_pools (tenant_id, cluster_id, router_id, name, network, gateway, dns_servers)
+			VALUES ($1,$2,$3,$4,$5::cidr,$6::inet,$7) RETURNING id
+		`, p.TenantID, p.ClusterID, p.RouterID, p.Name, p.Network, p.Gateway, p.DNSServers).Scan(&p.ID)
 	})
+	if IsUniqueViolation(err) {
+		return ErrConflict
+	}
+	return err
 }
 
 func (s *Store) UpdateIPPool(ctx context.Context, p *IPPool) error {
-	return s.withTenant(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.withTenant(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
-			UPDATE ip_pools SET router_id=$3, name=$4, network=$5::cidr, gateway=$6::inet, dns_servers=$7
+			UPDATE ip_pools SET cluster_id=$3, router_id=$4, name=$5, network=$6::cidr, gateway=$7::inet, dns_servers=$8
 			WHERE tenant_id=$1 AND id=$2
-		`, p.TenantID, p.ID, p.RouterID, p.Name, p.Network, p.Gateway, p.DNSServers)
+		`, p.TenantID, p.ID, p.ClusterID, p.RouterID, p.Name, p.Network, p.Gateway, p.DNSServers)
 		if err != nil {
 			return err
 		}
@@ -228,6 +246,10 @@ func (s *Store) UpdateIPPool(ctx context.Context, p *IPPool) error {
 		}
 		return nil
 	})
+	if IsUniqueViolation(err) {
+		return ErrConflict
+	}
+	return err
 }
 
 func (s *Store) DeleteIPPool(ctx context.Context, tenantID, id xid.ID) error {
@@ -264,6 +286,32 @@ func (s *Store) ListIPAssignments(ctx context.Context, tenantID xid.ID, poolID x
 			WHERE a.tenant_id = $1 AND a.pool_id = $2
 			ORDER BY a.ip_address
 		`, tenantID, poolID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var a IPAssignment
+			if err := rows.Scan(&a.ID, &a.TenantID, &a.PoolID, &a.CustomerID, &a.CustomerName, &a.IPAddress, &a.MACAddress, &a.Status); err != nil {
+				return err
+			}
+			list = append(list, a)
+		}
+		return rows.Err()
+	})
+	return list, err
+}
+
+func (s *Store) ListIPAssignmentsByCustomer(ctx context.Context, tenantID, customerID xid.ID) ([]IPAssignment, error) {
+	var list []IPAssignment
+	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT a.id, a.tenant_id, a.pool_id, a.customer_id, c.full_name, host(a.ip_address), a.mac_address::text, a.status
+			FROM ip_assignments a
+			LEFT JOIN customers c ON c.id = a.customer_id
+			WHERE a.tenant_id = $1 AND a.customer_id = $2
+			ORDER BY a.ip_address
+		`, tenantID, customerID)
 		if err != nil {
 			return err
 		}
@@ -337,18 +385,20 @@ func (s *Store) GetAssignedIPForCustomer(ctx context.Context, tenantID, customer
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
 			SELECT host(a.ip_address),
-			       p.id, p.tenant_id, p.router_id, r.name, p.name, p.network::text, host(p.gateway), p.dns_servers,
+			       p.id, p.tenant_id, p.cluster_id, COALESCE(s.name, ''), p.router_id, r.name, p.name, p.network::text, host(p.gateway), p.dns_servers,
 			       COALESCE((SELECT COUNT(*) FROM ip_assignments x WHERE x.pool_id = p.id), 0)
 			FROM ip_assignments a
 			JOIN ip_pools p ON p.id = a.pool_id AND p.tenant_id = a.tenant_id
 			LEFT JOIN routers r ON r.id = p.router_id
+			LEFT JOIN sites s ON s.id = p.cluster_id
 			WHERE a.tenant_id = $1 AND a.customer_id = $2 AND a.status = 'assigned'
 			ORDER BY a.id DESC
 			LIMIT 1
 		`, tenantID, customerID)
 		err := row.Scan(
 			&out.IPAddress,
-			&out.Pool.ID, &out.Pool.TenantID, &out.Pool.RouterID, &out.Pool.RouterName,
+			&out.Pool.ID, &out.Pool.TenantID, &out.Pool.ClusterID, &out.Pool.ClusterName,
+			&out.Pool.RouterID, &out.Pool.RouterName,
 			&out.Pool.Name, &out.Pool.Network, &out.Pool.Gateway, &out.Pool.DNSServers, &out.Pool.UsedCount,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {

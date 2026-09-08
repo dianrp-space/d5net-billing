@@ -183,13 +183,11 @@ func (e *Engine) ProcessOverdueSuspensions(ctx context.Context, tenantID xid.ID)
 	if err != nil {
 		return nil, err
 	}
-	var suspended []xid.ID
+	var ids []xid.ID
 	for _, sub := range subs {
-		if err := e.store.UpdateSubscriptionStatus(ctx, tenantID, sub.ID, "suspended"); err == nil {
-			suspended = append(suspended, sub.ID)
-		}
+		ids = append(ids, sub.ID)
 	}
-	return suspended, nil
+	return ids, nil
 }
 
 func ProrateAmount(fullPrice int64, daysUsed, daysInPeriod int) int64 {
@@ -392,4 +390,3 @@ func (e *Engine) ApplyPlanChange(ctx context.Context, tenantID, subscriptionID, 
 	}
 	return q, inv, nil
 }
-

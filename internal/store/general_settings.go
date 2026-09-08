@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -11,16 +12,34 @@ import (
 
 const generalSettingKey = "tenant.general"
 
+var hexColorRE = regexp.MustCompile(`(?i)^#?[0-9A-F]{6}$`)
+
 type GeneralSettings struct {
 	Timezone          string  `json:"timezone"`
 	DefaultTaxPercent float64 `json:"default_tax_percent"`
+	PrimaryColor      string  `json:"primary_color,omitempty"`
 }
 
 func DefaultGeneralSettings() GeneralSettings {
 	return GeneralSettings{
 		Timezone:          "Asia/Jakarta",
 		DefaultTaxPercent: 0,
+		PrimaryColor:      "",
 	}
+}
+
+func NormalizeHexColor(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if !hexColorRE.MatchString(s) {
+		return ""
+	}
+	if s[0] != '#' {
+		s = "#" + s
+	}
+	return "#" + strings.ToUpper(s[1:])
 }
 
 func NormalizeGeneralSettings(g GeneralSettings) GeneralSettings {
@@ -39,6 +58,7 @@ func NormalizeGeneralSettings(g GeneralSettings) GeneralSettings {
 	if g.DefaultTaxPercent > 100 {
 		g.DefaultTaxPercent = 100
 	}
+	g.PrimaryColor = NormalizeHexColor(g.PrimaryColor)
 	return g
 }
 

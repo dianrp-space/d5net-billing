@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/smtp"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -79,7 +81,24 @@ func (n *TelegramNotifier) Send(ctx context.Context, msg Message) error {
 		return err
 	}
 	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+	if resp.StatusCode >= 400 {
+		if desc := telegramAPIDesc(raw); desc != "" {
+			return fmt.Errorf("telegram API error: %d %s", resp.StatusCode, desc)
+		}
+		return fmt.Errorf("telegram API error: %d", resp.StatusCode)
+	}
 	return nil
+}
+
+func telegramAPIDesc(raw []byte) string {
+	var body struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(body.Description)
 }
 
 type EmailNotifier struct {

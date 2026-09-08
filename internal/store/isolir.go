@@ -16,12 +16,13 @@ const (
 // IsolirNetworkSettings controls RouterOS isolir pool/profile/web-proxy redirect.
 // RouterID + IPPoolID bind the config to a specific router via IPAM.
 type IsolirNetworkSettings struct {
-	ProfileName   string  `json:"profile_name"`
-	RouterID      *xid.ID `json:"router_id,omitempty"`
-	IPPoolID      *xid.ID `json:"ip_pool_id,omitempty"`
+	ProfileName string  `json:"profile_name"`
+	RouterID    *xid.ID `json:"router_id,omitempty"`
+	IPPoolID    *xid.ID `json:"ip_pool_id,omitempty"`
 	// Derived / legacy fields kept for RouterOS sync & older saved settings.
 	PoolName      string `json:"pool_name,omitempty"`
 	PoolRanges    string `json:"pool_ranges,omitempty"`
+	PoolGateway   string `json:"pool_gateway,omitempty"`
 	PortalBaseURL string `json:"portal_base_url"`
 	RedirectMode  string `json:"redirect_mode,omitempty"` // always web-proxy; kept for compat
 }
@@ -31,6 +32,46 @@ func DefaultIsolirNetworkSettings() IsolirNetworkSettings {
 		ProfileName:  "isolir",
 		RedirectMode: "web-proxy",
 	}
+}
+
+// IsolirProfileName is the PPP/hotspot profile used when suspending a subscription.
+func IsolirProfileName(cfg IsolirNetworkSettings, plan *Plan) string {
+	if plan != nil && plan.IsolirProfile != nil {
+		if n := strings.TrimSpace(*plan.IsolirProfile); n != "" {
+			return n
+		}
+	}
+	if n := strings.TrimSpace(cfg.ProfileName); n != "" {
+		return n
+	}
+	return "isolir"
+}
+
+// IsolirPoolName is the RouterOS /ip/pool bound to the isolir profile.
+func IsolirPoolName(cfg IsolirNetworkSettings) string {
+	if n := strings.TrimSpace(cfg.PoolName); n != "" {
+		return n
+	}
+	return "isolir"
+}
+
+// IsolirClientPath is the customer portal path used for captive redirect.
+func IsolirClientPath(slug string) string {
+	slug = strings.Trim(strings.TrimSpace(slug), "/")
+	if slug == "" {
+		return "/client"
+	}
+	return "/" + slug + "/client"
+}
+
+// IsolirPortalURL builds {base}/{slug}/client for Web Proxy redirect.
+func IsolirPortalURL(base, slug string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	path := IsolirClientPath(slug)
+	if base == "" {
+		return path
+	}
+	return base + path
 }
 
 func (s *Store) GetIsolirNetworkSettings(ctx context.Context, tenantID xid.ID) (IsolirNetworkSettings, error) {
@@ -75,6 +116,11 @@ func (s *Store) ResolveIsolirPool(ctx context.Context, tenantID xid.ID, cfg *Iso
 	// Prefer stored network CIDR; EnsureIsolirInfra converts CIDR → ranges when needed.
 	if pool.Network != "" {
 		cfg.PoolRanges = pool.Network
+	}
+	if pool.Gateway != nil {
+		if g := strings.TrimSpace(*pool.Gateway); g != "" {
+			cfg.PoolGateway = g
+		}
 	}
 	return nil
 }

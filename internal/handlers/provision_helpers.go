@@ -9,6 +9,7 @@ import (
 
 	"github.com/dianrp/drp-billing/internal/payment"
 	"github.com/dianrp/drp-billing/internal/provision"
+	"github.com/dianrp/drp-billing/internal/provision/routeros"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/xid"
 )
@@ -31,6 +32,60 @@ func planProfileName(plan *store.Plan) string {
 		}
 	}
 	return plan.Code
+}
+
+func removeSubscriptionFromRouter(ctx context.Context, d *Deps, tid xid.ID, sub *store.Subscription) {
+	if sub == nil || sub.RouterID == nil {
+		return
+	}
+	r, err := d.Store.GetRouter(ctx, tid, *sub.RouterID)
+	if err != nil {
+		return
+	}
+	prov, err := d.Provisioner.Get(r.Provisioner)
+	if err != nil {
+		return
+	}
+	password := ""
+	if sub.Password != nil {
+		password = *sub.Password
+	}
+	if err := prov.Remove(ctx, &provision.ServiceSpec{
+		TenantID: tid, SubscriptionID: sub.ID, RouterID: *sub.RouterID,
+		Username: sub.Username, Password: password, ServiceType: sub.ServiceType,
+	}); err != nil {
+		slog.Warn("remove subscription from router", "sub_id", sub.ID, "err", err)
+	}
+}
+
+func dismantleCustomerServices(ctx context.Context, d *Deps, tid xid.ID, customerID xid.ID) error {
+	subs, _, err := d.Store.ListSubscriptions(ctx, tid, "", &customerID, 500, 0)
+	if err != nil {
+		return err
+	}
+	for _, row := range subs {
+		sub, gerr := d.Store.GetSubscription(ctx, tid, row.ID)
+		if gerr != nil {
+			continue
+		}
+		removeSubscriptionFromRouter(ctx, d, tid, sub)
+		_ = d.Store.ReleaseODPPortBySubscription(ctx, tid, sub.ID)
+	}
+	if err := d.Store.CancelCustomerSubscriptions(ctx, tid, customerID); err != nil {
+		return err
+	}
+	asgs, err := d.Store.ListIPAssignmentsByCustomer(ctx, tid, customerID)
+	if err != nil {
+		return err
+	}
+	for _, a := range asgs {
+		pool, perr := d.Store.GetIPPool(ctx, tid, a.PoolID)
+		if perr == nil {
+			clearCustomerStaticIPOnRouter(ctx, d, pool, customerID)
+		}
+		_ = d.Store.DeleteIPAssignment(ctx, tid, a.PoolID, a.ID)
+	}
+	return nil
 }
 
 // applyPlanHotspotLimits copies quota / uptime / shared-users from plan onto a ServiceSpec.
@@ -169,6 +224,27 @@ func syncSubscriptionToRouter(
 	}
 	// Keep suspended state on router after rewrite
 	if sub.Status == "suspended" {
+		isolirCfg, _ := d.Store.GetIsolirNetworkSettings(ctx, sub.TenantID)
+		_ = d.Store.ResolveIsolirPool(ctx, sub.TenantID, &isolirCfg)
+		spec.IsolirProfile = store.IsolirProfileName(isolirCfg, plan)
+		isolirCfg.ProfileName = spec.IsolirProfile
+		spec.IPAddress = ""
+		spec.AddressPool = ""
+		local := strings.TrimSpace(isolirCfg.PoolGateway)
+		if local == "" {
+			local = routeros.CIDRLocalAddress(isolirCfg.PoolRanges, nil)
+		}
+		spec.LocalAddress = local
+		if ensurer, ok := prov.(provision.IsolirEnsurer); ok && isolirCfg.PoolRanges != "" && isolirCfg.PortalBaseURL != "" {
+			ten, _ := d.Store.GetTenant(ctx, sub.TenantID)
+			slug := ""
+			if ten != nil {
+				slug = ten.Slug
+			}
+			if err := ensurer.EnsureIsolirInfra(ctx, sub.TenantID, *newRouter, isolirCfg, slug); err != nil {
+				slog.Warn("ensure isolir infra after sync", "sub_id", sub.ID, "err", err)
+			}
+		}
 		if err := prov.Suspend(ctx, spec); err != nil {
 			slog.Warn("re-suspend after sync", "sub_id", sub.ID, "err", err)
 		}
@@ -357,10 +433,7 @@ func resumeSubscription(ctx context.Context, d *Deps, tenantID xid.ID, subID xid
 	if err != nil {
 		return
 	}
-	profile := ""
-	if plan.ProfileName != nil {
-		profile = *plan.ProfileName
-	}
+	profile := planProfileName(plan)
 	spec := &provision.ServiceSpec{
 		TenantID:       tenantID,
 		SubscriptionID: subID,
@@ -370,8 +443,35 @@ func resumeSubscription(ctx context.Context, d *Deps, tenantID xid.ID, subID xid
 		ProfileName:    profile,
 		Comment:        ownershipComment(ctx, d, tenantID, sub.CustomerCode, sub.CustomerName),
 	}
+	if sub.Password != nil {
+		spec.Password = *sub.Password
+	}
+	applyStaticIPAMToSpec(ctx, d, sub, spec)
 	if err := prov.Resume(ctx, spec); err != nil {
 		slog.Error("resume subscription after payment", "sub_id", subID, "err", err)
+		return
+	}
+	if err := d.Store.ClearSubscriptionSuspendedAt(ctx, tenantID, subID); err != nil {
+		slog.Warn("clear suspended_at after resume", "sub_id", subID, "err", err)
+	}
+}
+
+// applyStaticIPAMToSpec pins a static assignment on resume. Dynamic users leave
+// remote/local empty so the PPP profile (not the isolir pool) assigns addresses.
+func applyStaticIPAMToSpec(ctx context.Context, d *Deps, sub *store.Subscription, spec *provision.ServiceSpec) {
+	if sub == nil || spec == nil {
+		return
+	}
+	asg, err := d.Store.GetAssignedIPForCustomer(ctx, sub.TenantID, sub.CustomerID)
+	if err != nil || asg == nil {
+		return
+	}
+	if asg.Pool.RouterID != nil && sub.RouterID != nil && *asg.Pool.RouterID != *sub.RouterID {
+		return
+	}
+	spec.IPAddress = strings.TrimSpace(asg.IPAddress)
+	if asg.Pool.Gateway != nil {
+		spec.LocalAddress = strings.TrimSpace(*asg.Pool.Gateway)
 	}
 }
 
@@ -416,7 +516,8 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 		CustomerID: pi.CustomerID,
 		InvoiceID:  invoiceID,
 		Amount:     amount,
-		Method:     provider,
+		Method:     payment.MethodFromProvider(provider),
+		Status:     "paid",
 		Reference:  &ref,
 	}
 	if err := d.Store.RecordPayment(ctx, p); err != nil {

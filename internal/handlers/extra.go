@@ -16,6 +16,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/dianrp/drp-billing/internal/httpx"
 	"github.com/dianrp/drp-billing/internal/invoice"
+	"github.com/dianrp/drp-billing/internal/notify"
 	"github.com/dianrp/drp-billing/internal/provision"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/xid"
@@ -479,8 +480,22 @@ func registerAdvanced(api huma.API, d *Deps) {
 		}
 		full, err := d.Store.GetWorkOrder(ctx, tid, wo.ID)
 		if err != nil {
+			_ = d.Notify.QueueTenantTelegram(ctx, tid, notify.OpsMsg("wo", wo.Type, "Status: "+wo.Status))
 			return &struct{ Body store.WorkOrder }{Body: wo}, nil
 		}
+		who := strings.TrimSpace(full.CustomerName)
+		if who == "" {
+			who = "tanpa pelanggan"
+		}
+		tech := strings.TrimSpace(full.TechnicianName)
+		if tech == "" {
+			tech = "belum ditugaskan"
+		}
+		_ = d.Notify.QueueTenantTelegram(ctx, tid, notify.OpsMsg("wo", full.Type,
+			"Status: "+full.Status,
+			"Pelanggan: "+who,
+			"Teknisi: "+tech,
+		))
 		return &struct{ Body store.WorkOrder }{Body: *full}, nil
 	})
 
@@ -1460,13 +1475,23 @@ func registerOpsExtra(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "create-outbound-webhook", Method: http.MethodPost, Path: "/api/outbound-webhooks",
 		Tags: []string{"Webhooks"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, input *struct{ Body store.OutboundWebhook }) (*struct{ Body store.OutboundWebhook }, error) {
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			URL    string   `json:"url"`
+			Secret *string  `json:"secret,omitempty"`
+			Events []string `json:"events"`
+		}
+	}) (*struct{ Body store.OutboundWebhook }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		w := input.Body
-		w.TenantID = tid
+		w := store.OutboundWebhook{
+			TenantID: tid,
+			URL:      strings.TrimSpace(input.Body.URL),
+			Secret:   input.Body.Secret,
+			Events:   input.Body.Events,
+		}
 		if err := d.Store.CreateOutboundWebhook(ctx, &w); err != nil {
 			return nil, httpx.Internal(err)
 		}

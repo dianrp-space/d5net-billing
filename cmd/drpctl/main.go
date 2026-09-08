@@ -98,8 +98,8 @@ func createTenant(ctx context.Context, st *store.Store, args []string) {
 		log.Fatal(err)
 	}
 	fmt.Printf("Created tenant id=%s user id=%s\n", tid, uid)
-	fmt.Printf("Admin login: /admin/%s/login\n", *slug)
-	fmt.Printf("Client login: /client/%s/login\n", *slug)
+	fmt.Printf("Admin login: /%s/login\n", *slug)
+	fmt.Printf("Client login: /%s/client/login\n", *slug)
 }
 
 func createPlatformAdmin(ctx context.Context, st *store.Store, args []string) {

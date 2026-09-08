@@ -9,10 +9,17 @@ import (
 	"github.com/dianrp/drp-billing/internal/db"
 	"github.com/dianrp/drp-billing/internal/xid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrNotFound = errors.New("not found")
+var ErrConflict = errors.New("conflict")
+
+func IsUniqueViolation(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "23505"
+}
 
 type Store struct {
 	Pool *pgxpool.Pool

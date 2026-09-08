@@ -17,12 +17,13 @@ const (
 	isolirRuleCommentNATProxy  = "drp-isolir:nat-to-proxy"
 	isolirProxyAllowComment    = "drp-isolir:proxy-allow-portal"
 	isolirProxyRedirectComment = "drp-isolir:proxy-redirect"
+	isolirPortalAddressList    = "drp-isolir-portal"
 	isolirDefaultProxyPort     = "8080"
 )
 
 // EnsureIsolirInfra creates pool + PPP/hotspot isolir profile + Web Proxy redirect + NAT/filter.
 func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.ID, cfg store.IsolirNetworkSettings, tenantSlug string) error {
-	poolName := cfg.PoolName
+	poolName := store.IsolirPoolName(cfg)
 	if poolName == "" {
 		poolName = "isolir"
 	}
@@ -34,14 +35,22 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 	if rawRanges == "" {
 		return fmt.Errorf("isolir pool (IPAM) wajib dipilih")
 	}
+	var gw *string
+	if g := strings.TrimSpace(cfg.PoolGateway); g != "" {
+		gw = &g
+	}
 	ranges := rawRanges
+	src := rawRanges
 	if strings.Contains(rawRanges, "/") {
-		converted, err := CIDRToPoolRanges(rawRanges, nil)
+		converted, err := CIDRToPoolRanges(rawRanges, gw)
 		if err != nil {
 			return fmt.Errorf("isolir pool network: %w", err)
 		}
 		ranges = converted
+	} else {
+		src = rangesToSrcMatch(ranges)
 	}
+	localAddr := CIDRLocalAddress(rawRanges, gw)
 
 	comment := c.brandComment(ctx, tenantID)
 	if err := c.run(ctx, tenantID, routerID, nil, "/ip/pool/set", func(cl *routeros.Client) (*routeros.Reply, error) {
@@ -50,12 +59,16 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 		return fmt.Errorf("isolir pool: %w", err)
 	}
 
+	pppProps := []string{
+		"=remote-address=" + poolName,
+		"=rate-limit=1M/1M",
+		"=comment=" + comment + " isolir",
+	}
+	if localAddr != "" {
+		pppProps = append(pppProps, "=local-address="+localAddr)
+	}
 	if err := c.run(ctx, tenantID, routerID, nil, "/ppp/profile/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-		return upsertByName(cl, "/ppp/profile", profileName, []string{
-			"=remote-address=" + poolName,
-			"=rate-limit=1M/1M",
-			"=comment=" + comment + " isolir",
-		})
+		return upsertByName(cl, "/ppp/profile", profileName, pppProps)
 	}); err != nil {
 		return fmt.Errorf("isolir ppp profile: %w", err)
 	}
@@ -67,12 +80,11 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 		})
 	})
 
-	portalHost, portalPath := isolirPortalHostPath(cfg.PortalBaseURL, tenantSlug)
+	portalHost, _ := isolirPortalHostPath(cfg.PortalBaseURL, tenantSlug)
 	if portalHost == "" {
 		return fmt.Errorf("portal_base_url wajib diisi untuk redirect isolir")
 	}
-	isolirURL := strings.TrimRight(strings.TrimSpace(cfg.PortalBaseURL), "/") + portalPath
-	src := rangesToSrcMatch(ranges)
+	isolirURL := store.IsolirPortalURL(cfg.PortalBaseURL, tenantSlug)
 
 	return c.run(ctx, tenantID, routerID, nil, "/ip/proxy/set", func(cl *routeros.Client) (*routeros.Reply, error) {
 		if err := upsertFirewallFilterByComment(cl, isolirRuleCommentDNS, []string{
@@ -93,15 +105,11 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 			"=action=accept",
 			"=comment=" + isolirRuleCommentDNS + "-tcp",
 		})
-		_ = upsertFirewallFilterByComment(cl, isolirRuleCommentPortal, []string{
-			"=chain=forward",
-			"=src-address=" + src,
-			"=dst-address=" + portalHost,
-			"=action=accept",
-			"=comment=" + isolirRuleCommentPortal,
-		})
+		if err := upsertIsolirPortalAllow(cl, src, portalHost); err != nil {
+			return nil, fmt.Errorf("allow portal: %w", err)
+		}
 
-		if _, err := cl.Run("/ip/proxy/set", "=enabled=yes", "=port="+isolirDefaultProxyPort); err != nil {
+		if err := ensureProxyEnabled(cl, isolirDefaultProxyPort); err != nil {
 			return nil, fmt.Errorf("enable web proxy: %w", err)
 		}
 		if err := upsertProxyAccessByComment(cl, isolirProxyAllowComment, []string{
@@ -112,12 +120,7 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 		}); err != nil {
 			return nil, fmt.Errorf("proxy allow portal: %w", err)
 		}
-		if err := upsertProxyAccessByComment(cl, isolirProxyRedirectComment, []string{
-			"=src-address=" + src,
-			"=action=deny",
-			"=redirect-to=" + isolirURL,
-			"=comment=" + isolirProxyRedirectComment,
-		}); err != nil {
+		if err := upsertProxyIsolirRedirect(cl, src, isolirURL); err != nil {
 			return nil, fmt.Errorf("proxy redirect: %w", err)
 		}
 		if err := upsertFirewallNATByComment(cl, isolirRuleCommentNATProxy, []string{
@@ -136,7 +139,7 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 }
 
 func isolirPortalHostPath(baseURL, tenantSlug string) (host, path string) {
-	path = "/isolir/" + strings.TrimSpace(tenantSlug)
+	path = store.IsolirClientPath(tenantSlug)
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
 		return "", path
@@ -162,6 +165,83 @@ func upsertFirewallFilterByComment(cl *routeros.Client, comment string, props []
 	return upsertByComment(cl, "/ip/firewall/filter", comment, props)
 }
 
+// upsertIsolirPortalAllow lets isolir clients reach the billing site over HTTP/HTTPS.
+// dst-address on a filter is an IP prefix; putting a hostname there makes RouterOS
+// resolve once and freeze a public IP (breaks Cloudflare/CDN). Address-list keeps the FQDN
+// and refreshes A/AAAA records via DNS.
+func upsertIsolirPortalAllow(cl *routeros.Client, src, portalHost string) error {
+	if err := upsertAddressListFQDN(cl, isolirPortalAddressList, portalHost, isolirRuleCommentPortal); err != nil {
+		return err
+	}
+	props := []string{
+		"=chain=forward",
+		"=src-address=" + src,
+		"=dst-address-list=" + isolirPortalAddressList,
+		"=protocol=tcp",
+		"=dst-port=80,443",
+		"=action=accept",
+		"=comment=" + isolirRuleCommentPortal,
+	}
+	reply, err := cl.Run("/ip/firewall/filter/print")
+	if err == nil && reply != nil {
+		for _, re := range reply.Re {
+			id := re.Map[".id"]
+			if id == "" || strings.TrimSpace(re.Map["comment"]) != isolirRuleCommentPortal {
+				continue
+			}
+			if rowMatchesProps(re.Map, props) && !fieldFilled(re.Map, "dst-address") {
+				return nil
+			}
+			args := append([]string{"/ip/firewall/filter/set", "=numbers=" + id}, props...)
+			if _, err = cl.Run(args...); err != nil {
+				return err
+			}
+			if fieldFilled(re.Map, "dst-address") {
+				_, _ = cl.Run("/ip/firewall/filter/unset", "=numbers="+id, "=value-name=dst-address")
+			}
+			return nil
+		}
+	}
+	args := append([]string{"/ip/firewall/filter/add"}, props...)
+	_, err = cl.Run(args...)
+	return err
+}
+
+func upsertAddressListFQDN(cl *routeros.Client, list, address, comment string) error {
+	list = strings.TrimSpace(list)
+	address = strings.TrimSpace(address)
+	comment = strings.TrimSpace(comment)
+	if list == "" || address == "" {
+		return fmt.Errorf("address-list portal wajib")
+	}
+	props := []string{
+		"=list=" + list,
+		"=address=" + address,
+		"=comment=" + comment,
+	}
+	reply, err := cl.Run("/ip/firewall/address-list/print")
+	if err == nil && reply != nil {
+		for _, re := range reply.Re {
+			id := re.Map[".id"]
+			if id == "" || isROSTrue(re.Map["dynamic"]) {
+				continue
+			}
+			if strings.TrimSpace(re.Map["comment"]) != comment {
+				continue
+			}
+			if rowMatchesProps(re.Map, props) {
+				return nil
+			}
+			args := append([]string{"/ip/firewall/address-list/set", "=numbers=" + id}, props...)
+			_, err = cl.Run(args...)
+			return err
+		}
+	}
+	args := append([]string{"/ip/firewall/address-list/add"}, props...)
+	_, err = cl.Run(args...)
+	return err
+}
+
 func upsertFirewallNATByComment(cl *routeros.Client, comment string, props []string) error {
 	return upsertByComment(cl, "/ip/firewall/nat", comment, props)
 }
@@ -170,21 +250,36 @@ func upsertProxyAccessByComment(cl *routeros.Client, comment string, props []str
 	return upsertByComment(cl, "/ip/proxy/access", comment, props)
 }
 
-func upsertByComment(cl *routeros.Client, basePath, comment string, props []string) error {
-	reply, err := cl.Run(basePath+"/print", "=.proplist=.id,comment")
-	if err == nil && reply != nil {
-		for _, re := range reply.Re {
-			id := re.Map[".id"]
-			cmt := re.Map["comment"]
-			if id == "" || !strings.Contains(cmt, comment) {
-				continue
-			}
-			args := append([]string{basePath + "/set", "=numbers=" + id}, props...)
-			_, err = cl.Run(args...)
-			return err
-		}
+// proxyRedirectPropSets: RouterOS 7 uses action=redirect + action-data;
+// v6 uses action=deny + redirect-to (removed in v7).
+func proxyRedirectPropSets(src, isolirURL string) [][]string {
+	return [][]string{
+		{
+			"=src-address=" + src,
+			"=action=redirect",
+			"=action-data=" + isolirURL,
+			"=comment=" + isolirProxyRedirectComment,
+		},
+		{
+			"=src-address=" + src,
+			"=action=deny",
+			"=redirect-to=" + isolirURL,
+			"=comment=" + isolirProxyRedirectComment,
+		},
 	}
-	args := append([]string{basePath + "/add"}, props...)
-	_, err = cl.Run(args...)
-	return err
+}
+
+func upsertProxyIsolirRedirect(cl *routeros.Client, src, isolirURL string) error {
+	var last error
+	for _, props := range proxyRedirectPropSets(src, isolirURL) {
+		if err := upsertProxyAccessByComment(cl, isolirProxyRedirectComment, props); err != nil {
+			last = err
+			continue
+		}
+		return nil
+	}
+	if last == nil {
+		return fmt.Errorf("tidak ada aturan proxy redirect")
+	}
+	return last
 }

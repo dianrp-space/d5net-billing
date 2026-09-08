@@ -32,6 +32,9 @@ func TestDRPCreateIntent(t *testing.T) {
 		if req.ReferenceID == "" || req.Amount != 25000 {
 			t.Fatalf("bad request %+v", req)
 		}
+		if req.ExpiresInMinutes != DefaultQRISExpiresMinutes {
+			t.Fatalf("ttl %d", req.ExpiresInMinutes)
+		}
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"transactionId":   "tx-1",
@@ -58,6 +61,46 @@ func TestDRPCreateIntent(t *testing.T) {
 	}
 	if !strings.HasPrefix(res.ExternalID, "drp-") {
 		t.Fatalf("external id %q", res.ExternalID)
+	}
+}
+
+func TestClampQRISExpiresMinutes(t *testing.T) {
+	if got := ClampQRISExpiresMinutes(0); got != 15 {
+		t.Fatalf("zero = %d", got)
+	}
+	if got := ClampQRISExpiresMinutes(1440); got != 1440 {
+		t.Fatalf("max = %d", got)
+	}
+	if got := ClampQRISExpiresMinutes(2000); got != 1440 {
+		t.Fatalf("over = %d", got)
+	}
+}
+
+func TestDRPCreateIntentCustomTTL(t *testing.T) {
+	iid := xid.MustParse("22222222-2222-2222-2222-222222222222")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req drpCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		if req.ExpiresInMinutes != 1440 {
+			t.Fatalf("ttl %d", req.ExpiresInMinutes)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"transactionId": "tx-ttl",
+			"referenceId":   req.ReferenceID,
+			"status":        "PENDING",
+			"amount":        req.Amount,
+			"qrisString":    "00020101",
+			"expiresAt":     time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+		})
+	}))
+	t.Cleanup(srv.Close)
+	p := NewDRPProvider(srv.URL, "k", "s")
+	p.ExpiresInMinutes = 1440
+	if _, err := p.CreateIntent(t.Context(), IntentRequest{InvoiceID: iid, Amount: 1000}); err != nil {
+		t.Fatal(err)
 	}
 }
 

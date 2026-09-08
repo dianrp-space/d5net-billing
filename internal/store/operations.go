@@ -45,7 +45,7 @@ type TicketMessage struct {
 }
 
 var ticketStatuses = map[string]bool{
-	"open": true, "in_progress": true, "resolved": true, "closed": true,
+	"open": true, "in_progress": true, "resolved": true, "closed": true, "cancelled": true,
 }
 
 func NormalizeTicketStatus(s string) string {
@@ -59,16 +59,23 @@ func NormalizeTicketStatus(s string) string {
 func TicketStatusLabel(status string) string {
 	switch NormalizeTicketStatus(status) {
 	case "open":
-		return "Open"
+		return "Menunggu"
 	case "in_progress":
-		return "In progress"
+		return "Sedang diproses"
 	case "resolved":
-		return "Resolved"
+		return "Selesai"
 	case "closed":
-		return "Closed"
+		return "Ditutup"
+	case "cancelled":
+		return "Dibatalkan"
 	default:
 		return status
 	}
+}
+
+func TicketAllowsCustomerReply(status string) bool {
+	st := NormalizeTicketStatus(status)
+	return st == "open" || st == "in_progress"
 }
 
 func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status, search string, assignedTo *xid.ID, limit, offset int) ([]Ticket, int64, error) {
@@ -88,12 +95,13 @@ func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status, search
 	if q := strings.TrimSpace(search); q != "" {
 		args = append(args, "%"+q+"%")
 		n := len(args)
-		where += fmt.Sprintf(" AND (t.subject ILIKE $%d OR COALESCE(c.full_name,'') ILIKE $%d)", n, n)
+		where += fmt.Sprintf(" AND (t.subject ILIKE $%d OR COALESCE(c.full_name,'') ILIKE $%d OR COALESCE(u.full_name,'') ILIKE $%d)", n, n, n)
 	}
 	var total int64
 	if err := s.Pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM tickets t
 		LEFT JOIN customers c ON c.id = t.customer_id
+		LEFT JOIN users u ON u.id = t.assigned_to
 		`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -126,6 +134,52 @@ func (s *Store) ListTickets(ctx context.Context, tenantID xid.ID, status, search
 		list = append(list, t)
 	}
 	return list, total, rows.Err()
+}
+
+func (s *Store) ListTicketsByCustomers(ctx context.Context, tenantID xid.ID, customerIDs []xid.ID, limit int) ([]Ticket, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	if len(customerIDs) == 0 {
+		return []Ticket{}, nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	args := []any{tenantID}
+	phold := make([]string, 0, len(customerIDs))
+	for _, id := range customerIDs {
+		args = append(args, id)
+		phold = append(phold, "$"+itoa(len(args)))
+	}
+	args = append(args, limit)
+	rows, err := s.Pool.Query(ctx, `
+		SELECT t.id, t.tenant_id, t.customer_id, COALESCE(c.full_name,''), t.subject, t.description,
+		       t.category, t.priority, t.status, t.assigned_to, COALESCE(u.full_name,''),
+		       t.sla_due_at, t.resolved_at, t.created_at
+		FROM tickets t
+		LEFT JOIN customers c ON c.id = t.customer_id
+		LEFT JOIN users u ON u.id = t.assigned_to
+		WHERE t.tenant_id = $1 AND t.customer_id IN (`+strings.Join(phold, ",")+`)
+		ORDER BY t.created_at DESC
+		LIMIT $`+itoa(len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []Ticket
+	for rows.Next() {
+		var t Ticket
+		if err := rows.Scan(
+			&t.ID, &t.TenantID, &t.CustomerID, &t.CustomerName, &t.Subject, &t.Description,
+			&t.Category, &t.Priority, &t.Status, &t.AssignedTo, &t.AssigneeName,
+			&t.SLADueAt, &t.ResolvedAt, &t.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		list = append(list, t)
+	}
+	return list, rows.Err()
 }
 
 func (s *Store) GetTicket(ctx context.Context, tenantID, id xid.ID) (*Ticket, error) {
@@ -161,6 +215,9 @@ func (s *Store) CreateTicket(ctx context.Context, t *Ticket) error {
 	}
 	if strings.TrimSpace(t.Subject) == "" {
 		return fmt.Errorf("subjek wajib")
+	}
+	if t.Description == nil || strings.TrimSpace(*t.Description) == "" {
+		return fmt.Errorf("deskripsi wajib")
 	}
 	if t.Status == "" {
 		t.Status = "open"
@@ -216,15 +273,32 @@ func (s *Store) AssignTicket(ctx context.Context, tenantID, id xid.ID, assignedT
 	return nil
 }
 
+func (s *Store) DeleteTicket(ctx context.Context, tenantID, id xid.ID) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	tag, err := s.Pool.Exec(ctx, `DELETE FROM tickets WHERE tenant_id=$1 AND id=$2`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListTicketMessages(ctx context.Context, tenantID, ticketID xid.ID) ([]TicketMessage, error) {
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, err
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT m.id, m.ticket_id, m.sender_type, m.sender_id, COALESCE(u.full_name,''), u.avatar_url, m.message,
+		SELECT m.id, m.ticket_id, m.sender_type, m.sender_id,
+		       COALESCE(NULLIF(TRIM(u.full_name), ''), COALESCE(c.full_name, ''), ''),
+		       u.avatar_url, m.message,
 		       COALESCE(m.image_urls, '[]'::jsonb), m.created_at
 		FROM ticket_messages m
 		LEFT JOIN users u ON u.id = m.sender_id
+		LEFT JOIN customers c ON c.id = m.sender_id
 		WHERE m.tenant_id=$1 AND m.ticket_id=$2
 		ORDER BY m.created_at ASC
 	`, tenantID, ticketID)
@@ -278,6 +352,9 @@ func (s *Store) AddTicketMessage(ctx context.Context, tenantID, ticketID xid.ID,
 	_ = json.Unmarshal(raw, &m.ImageURLs)
 	if senderID != nil {
 		_ = s.Pool.QueryRow(ctx, `SELECT COALESCE(full_name,''), avatar_url FROM users WHERE id=$1`, *senderID).Scan(&m.SenderName, &m.AvatarURL)
+		if strings.TrimSpace(m.SenderName) == "" {
+			_ = s.Pool.QueryRow(ctx, `SELECT COALESCE(full_name,'') FROM customers WHERE id=$1`, *senderID).Scan(&m.SenderName)
+		}
 	}
 	return &m, nil
 }
@@ -413,24 +490,24 @@ func (s *Store) UpdateTechnician(ctx context.Context, t *Technician) error {
 }
 
 type WorkOrder struct {
-	ID              xid.ID     `json:"id"`
-	TenantID        xid.ID     `json:"tenant_id"`
-	CustomerID      *xid.ID    `json:"customer_id,omitempty"`
-	CustomerName    string     `json:"customer_name,omitempty"`
-	CustomerCode    string     `json:"customer_code,omitempty"`
-	TechnicianID    *xid.ID    `json:"technician_id,omitempty"`
-	TechnicianName  string     `json:"technician_name,omitempty"`
-	Type            string     `json:"type"`
-	Status          string     `json:"status"`
-	ScheduledAt     *time.Time `json:"scheduled_at,omitempty"`
-	CheckInAt       *time.Time `json:"check_in_at,omitempty"`
-	CheckInLat      *float64   `json:"check_in_lat,omitempty"`
-	CheckInLng      *float64   `json:"check_in_lng,omitempty"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
-	Notes           *string    `json:"notes,omitempty"`
-	Photos          []string   `json:"photos"`
-	CreatedAt       time.Time  `json:"created_at,omitempty"`
-	UpdatedAt       time.Time  `json:"updated_at,omitempty"`
+	ID             xid.ID     `json:"id"`
+	TenantID       xid.ID     `json:"tenant_id"`
+	CustomerID     *xid.ID    `json:"customer_id,omitempty"`
+	CustomerName   string     `json:"customer_name,omitempty"`
+	CustomerCode   string     `json:"customer_code,omitempty"`
+	TechnicianID   *xid.ID    `json:"technician_id,omitempty"`
+	TechnicianName string     `json:"technician_name,omitempty"`
+	Type           string     `json:"type"`
+	Status         string     `json:"status"`
+	ScheduledAt    *time.Time `json:"scheduled_at,omitempty"`
+	CheckInAt      *time.Time `json:"check_in_at,omitempty"`
+	CheckInLat     *float64   `json:"check_in_lat,omitempty"`
+	CheckInLng     *float64   `json:"check_in_lng,omitempty"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	Notes          *string    `json:"notes,omitempty"`
+	Photos         []string   `json:"photos"`
+	CreatedAt      time.Time  `json:"created_at,omitempty"`
+	UpdatedAt      time.Time  `json:"updated_at,omitempty"`
 }
 
 var workOrderStatuses = map[string]bool{
@@ -1259,7 +1336,7 @@ func (s *Store) RecordPaymentJournal(ctx context.Context, tenantID xid.ID, amoun
 func (s *Store) DashboardStats(ctx context.Context, tenantID xid.ID) (map[string]any, error) {
 	stats := make(map[string]any)
 	var activeCustomers, activeSubs, unpaidInvoices, monthlyRevenue int64
-	_ = s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM customers WHERE tenant_id=$1 AND is_active=true`, tenantID).Scan(&activeCustomers)
+	_ = s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM customers WHERE tenant_id=$1 AND is_active=true AND dismantled_at IS NULL`, tenantID).Scan(&activeCustomers)
 	_ = s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM subscriptions WHERE tenant_id=$1 AND status='active'`, tenantID).Scan(&activeSubs)
 	_ = s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM invoices WHERE tenant_id=$1 AND status IN ('issued','partial','overdue')`, tenantID).Scan(&unpaidInvoices)
 	_ = s.Pool.QueryRow(ctx, `
@@ -1335,31 +1412,31 @@ type TicketSLASample struct {
 
 // TicketSLAReport aggregates ticket/outage SLA metrics for management.
 type TicketSLAReport struct {
-	Days                 int                `json:"days"`
-	From                 time.Time          `json:"from"`
-	To                   time.Time          `json:"to"`
-	Total                int64              `json:"total"`
-	OpenCount            int64              `json:"open_count"`
-	InProgressCount      int64              `json:"in_progress_count"`
-	ResolvedCount        int64              `json:"resolved_count"`
-	ClosedCount          int64              `json:"closed_count"`
-	OutageCount          int64              `json:"outage_count"`
-	OutagePct            float64            `json:"outage_pct"`
-	ByCategory           map[string]int64   `json:"by_category"`
-	ByPriority           map[string]int64   `json:"by_priority"`
-	ByStatus             map[string]int64   `json:"by_status"`
-	SLAApplicable        int64              `json:"sla_applicable"`
-	SLAMet               int64              `json:"sla_met"`
-	SLABreached          int64              `json:"sla_breached"`
-	SLAMetPct            float64            `json:"sla_met_pct"`
-	OpenBreaching        int64              `json:"open_breaching"`
-	AvgResolveHours      float64            `json:"avg_resolve_hours"`
-	MedianResolveHours   float64            `json:"median_resolve_hours"`
-	P95ResolveHours      float64            `json:"p95_resolve_hours"`
-	AvgByCategoryHours   map[string]float64 `json:"avg_by_category_hours"`
-	AvgByPriorityHours   map[string]float64 `json:"avg_by_priority_hours"`
-	SlowestResolved      []TicketSLASample  `json:"slowest_resolved"`
-	OpenBreachingList    []TicketSLASample  `json:"open_breaching_list"`
+	Days               int                `json:"days"`
+	From               time.Time          `json:"from"`
+	To                 time.Time          `json:"to"`
+	Total              int64              `json:"total"`
+	OpenCount          int64              `json:"open_count"`
+	InProgressCount    int64              `json:"in_progress_count"`
+	ResolvedCount      int64              `json:"resolved_count"`
+	ClosedCount        int64              `json:"closed_count"`
+	OutageCount        int64              `json:"outage_count"`
+	OutagePct          float64            `json:"outage_pct"`
+	ByCategory         map[string]int64   `json:"by_category"`
+	ByPriority         map[string]int64   `json:"by_priority"`
+	ByStatus           map[string]int64   `json:"by_status"`
+	SLAApplicable      int64              `json:"sla_applicable"`
+	SLAMet             int64              `json:"sla_met"`
+	SLABreached        int64              `json:"sla_breached"`
+	SLAMetPct          float64            `json:"sla_met_pct"`
+	OpenBreaching      int64              `json:"open_breaching"`
+	AvgResolveHours    float64            `json:"avg_resolve_hours"`
+	MedianResolveHours float64            `json:"median_resolve_hours"`
+	P95ResolveHours    float64            `json:"p95_resolve_hours"`
+	AvgByCategoryHours map[string]float64 `json:"avg_by_category_hours"`
+	AvgByPriorityHours map[string]float64 `json:"avg_by_priority_hours"`
+	SlowestResolved    []TicketSLASample  `json:"slowest_resolved"`
+	OpenBreachingList  []TicketSLASample  `json:"open_breaching_list"`
 }
 
 func pct(part, total int64) float64 {

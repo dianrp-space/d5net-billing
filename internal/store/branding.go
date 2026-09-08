@@ -12,27 +12,35 @@ import (
 )
 
 type Branding struct {
-	AppName    string  `json:"app_name"`
-	LogoURL    *string `json:"logo_url,omitempty"`
-	FaviconURL *string `json:"favicon_url,omitempty"`
+	AppName            string  `json:"app_name"`
+	LogoURL            *string `json:"logo_url,omitempty"`
+	FaviconURL         *string `json:"favicon_url,omitempty"`
+	MapPopIconURL      *string `json:"map_pop_icon_url,omitempty"`
+	MapODPIconURL      *string `json:"map_odp_icon_url,omitempty"`
+	MapCustomerIconURL *string `json:"map_customer_icon_url,omitempty"`
 }
 
 type TenantBrandingView struct {
 	Overrides Branding `json:"overrides"`
 	Effective Branding `json:"effective"`
 	FromOwner struct {
-		AppName    bool `json:"app_name"`
-		LogoURL    bool `json:"logo_url"`
-		FaviconURL bool `json:"favicon_url"`
+		AppName            bool `json:"app_name"`
+		LogoURL            bool `json:"logo_url"`
+		FaviconURL         bool `json:"favicon_url"`
+		MapPopIconURL      bool `json:"map_pop_icon_url"`
+		MapODPIconURL      bool `json:"map_odp_icon_url"`
+		MapCustomerIconURL bool `json:"map_customer_icon_url"`
 	} `json:"from_owner"`
 }
 
 func (s *Store) GetPlatformBranding(ctx context.Context) (*Branding, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT app_name, logo_url, favicon_url FROM platform_branding WHERE id = 1
+		SELECT app_name, logo_url, favicon_url,
+		       map_pop_icon_url, map_odp_icon_url, map_customer_icon_url
+		FROM platform_branding WHERE id = 1
 	`)
 	var b Branding
-	err := row.Scan(&b.AppName, &b.LogoURL, &b.FaviconURL)
+	err := row.Scan(&b.AppName, &b.LogoURL, &b.FaviconURL, &b.MapPopIconURL, &b.MapODPIconURL, &b.MapCustomerIconURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return &Branding{AppName: "drp-billing"}, nil
 	}
@@ -51,23 +59,29 @@ func (s *Store) UpdatePlatformBranding(ctx context.Context, b *Branding) error {
 		name = "drp-billing"
 	}
 	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO platform_branding (id, app_name, logo_url, favicon_url, updated_at)
-		VALUES (1, $1, $2, $3, NOW())
+		INSERT INTO platform_branding (id, app_name, logo_url, favicon_url,
+			map_pop_icon_url, map_odp_icon_url, map_customer_icon_url, updated_at)
+		VALUES (1, $1, $2, $3, $4, $5, $6, NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			app_name = EXCLUDED.app_name,
 			logo_url = EXCLUDED.logo_url,
 			favicon_url = EXCLUDED.favicon_url,
+			map_pop_icon_url = EXCLUDED.map_pop_icon_url,
+			map_odp_icon_url = EXCLUDED.map_odp_icon_url,
+			map_customer_icon_url = EXCLUDED.map_customer_icon_url,
 			updated_at = NOW()
-	`, name, b.LogoURL, b.FaviconURL)
+	`, name, b.LogoURL, b.FaviconURL, b.MapPopIconURL, b.MapODPIconURL, b.MapCustomerIconURL)
 	return err
 }
 
 func (s *Store) GetTenantBrandingRaw(ctx context.Context, tenantID xid.ID) (*Branding, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT COALESCE(app_name, ''), logo_url, favicon_url FROM tenants WHERE id = $1
+		SELECT COALESCE(app_name, ''), logo_url, favicon_url,
+		       map_pop_icon_url, map_odp_icon_url, map_customer_icon_url
+		FROM tenants WHERE id = $1
 	`, tenantID)
 	var b Branding
-	err := row.Scan(&b.AppName, &b.LogoURL, &b.FaviconURL)
+	err := row.Scan(&b.AppName, &b.LogoURL, &b.FaviconURL, &b.MapPopIconURL, &b.MapODPIconURL, &b.MapCustomerIconURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -81,9 +95,10 @@ func (s *Store) UpdateTenantBranding(ctx context.Context, tenantID xid.ID, b *Br
 		namePtr = &name
 	}
 	tag, err := s.Pool.Exec(ctx, `
-		UPDATE tenants SET app_name=$2, logo_url=$3, favicon_url=$4, updated_at=NOW()
+		UPDATE tenants SET app_name=$2, logo_url=$3, favicon_url=$4,
+			map_pop_icon_url=$5, map_odp_icon_url=$6, map_customer_icon_url=$7, updated_at=NOW()
 		WHERE id=$1
-	`, tenantID, namePtr, b.LogoURL, b.FaviconURL)
+	`, tenantID, namePtr, b.LogoURL, b.FaviconURL, b.MapPopIconURL, b.MapODPIconURL, b.MapCustomerIconURL)
 	if err != nil {
 		return err
 	}
@@ -134,11 +149,45 @@ func (s *Store) ResolveTenantBranding(ctx context.Context, tenantID xid.ID) (*Te
 	app, fromApp := coalesceDisplayName(raw.AppName, tenantName, owner.AppName, "drp-billing")
 	logo, fromLogo := coalescePtr(raw.LogoURL, owner.LogoURL)
 	fav, fromFav := coalescePtr(raw.FaviconURL, owner.FaviconURL)
-	view.Effective = Branding{AppName: app, LogoURL: logo, FaviconURL: fav}
+	popIcon, fromPopIcon := coalescePtr(raw.MapPopIconURL, owner.MapPopIconURL)
+	odpIcon, fromOdpIcon := coalescePtr(raw.MapODPIconURL, owner.MapODPIconURL)
+	custIcon, fromCustIcon := coalescePtr(raw.MapCustomerIconURL, owner.MapCustomerIconURL)
+	view.Effective = Branding{
+		AppName:            app,
+		LogoURL:            logo,
+		FaviconURL:         fav,
+		MapPopIconURL:      popIcon,
+		MapODPIconURL:      odpIcon,
+		MapCustomerIconURL: custIcon,
+	}
 	view.FromOwner.AppName = fromApp
 	view.FromOwner.LogoURL = fromLogo
 	view.FromOwner.FaviconURL = fromFav
+	view.FromOwner.MapPopIconURL = fromPopIcon
+	view.FromOwner.MapODPIconURL = fromOdpIcon
+	view.FromOwner.MapCustomerIconURL = fromCustIcon
 	return view, nil
+}
+
+// MapIcons carries the tenant-effective custom icon URLs for FTTH map markers.
+// A nil field means "use the built-in SVG marker" for that kind.
+type MapIcons struct {
+	Pop      *string `json:"pop,omitempty"`
+	ODP      *string `json:"odp,omitempty"`
+	Customer *string `json:"customer,omitempty"`
+}
+
+// EffectiveMapIcons returns the tenant-effective custom map icon URLs.
+func (s *Store) EffectiveMapIcons(ctx context.Context, tenantID xid.ID) (MapIcons, error) {
+	view, err := s.ResolveTenantBranding(ctx, tenantID)
+	if err != nil {
+		return MapIcons{}, err
+	}
+	return MapIcons{
+		Pop:      view.Effective.MapPopIconURL,
+		ODP:      view.Effective.MapODPIconURL,
+		Customer: view.Effective.MapCustomerIconURL,
+	}, nil
 }
 
 func (s *Store) EffectiveAppName(ctx context.Context, tenantID xid.ID) (string, error) {

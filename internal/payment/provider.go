@@ -84,10 +84,16 @@ type Registry struct {
 
 // NewRegistry always registers Manual. DRP Payment is registered when apiKey is non-empty.
 func NewRegistry(drpAPIKey, drpWebhookSecret, drpBaseURL string) *Registry {
+	return NewRegistryWithTTL(drpAPIKey, drpWebhookSecret, drpBaseURL, DefaultQRISExpiresMinutes)
+}
+
+func NewRegistryWithTTL(drpAPIKey, drpWebhookSecret, drpBaseURL string, expiresInMinutes int) *Registry {
 	r := &Registry{providers: make(map[string]Provider)}
 	r.Register(&ManualProvider{})
 	if strings.TrimSpace(drpAPIKey) != "" {
-		r.Register(NewDRPProvider(drpBaseURL, drpAPIKey, drpWebhookSecret))
+		p := NewDRPProvider(drpBaseURL, drpAPIKey, drpWebhookSecret)
+		p.ExpiresInMinutes = ClampQRISExpiresMinutes(expiresInMinutes)
+		r.Register(p)
 	}
 	return r
 }

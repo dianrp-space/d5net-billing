@@ -702,6 +702,39 @@ func (s *Store) GetLatestPendingPaymentIntent(ctx context.Context, tenantID, inv
 	return pi, err
 }
 
+func (s *Store) ListCustomerOpenPaymentIntents(ctx context.Context, tenantID, customerID xid.ID, limit int) ([]PaymentIntent, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT `+paymentIntentSelectCols()+`
+		FROM payment_intents
+		WHERE tenant_id=$1 AND customer_id=$2
+		  AND LOWER(status) NOT IN ('paid','success')
+		ORDER BY created_at DESC
+		LIMIT $3
+	`, tenantID, customerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []PaymentIntent
+	for rows.Next() {
+		pi, err := scanPaymentIntent(rows)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, *pi)
+	}
+	return list, rows.Err()
+}
+
+func (s *Store) InvoiceNumberByID(ctx context.Context, tenantID, invoiceID xid.ID) string {
+	var num string
+	_ = s.Pool.QueryRow(ctx, `SELECT invoice_number FROM invoices WHERE tenant_id=$1 AND id=$2`, tenantID, invoiceID).Scan(&num)
+	return num
+}
+
 // ClaimJob inserts a unique job_runs row; returns true if this caller claimed the job.
 func (s *Store) ClaimJob(ctx context.Context, tenantID xid.ID, jobName, jobKey string) (bool, error) {
 	var id xid.ID
@@ -845,25 +878,26 @@ func (s *Store) ListVoucherCodes(ctx context.Context, tenantID xid.ID, batchID x
 }
 
 func (s *Store) ChurnReport(ctx context.Context, tenantID xid.ID) (map[string]any, error) {
-	var canceled, active int64
+	var dismantled, active int64
 	_ = s.Pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM subscriptions
-		WHERE tenant_id=$1 AND status IN ('canceled','cancelled')
-		  AND updated_at >= NOW() - INTERVAL '30 days'
-	`, tenantID).Scan(&canceled)
+		SELECT COUNT(*) FROM customers
+		WHERE tenant_id=$1 AND dismantled_at >= NOW() - INTERVAL '30 days'
+	`, tenantID).Scan(&dismantled)
 	_ = s.Pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM subscriptions WHERE tenant_id=$1 AND status='active'
+		SELECT COUNT(*) FROM customers
+		WHERE tenant_id=$1 AND is_active=true AND dismantled_at IS NULL
 	`, tenantID).Scan(&active)
 	ratio := 0.0
-	denom := canceled + active
+	denom := dismantled + active
 	if denom > 0 {
-		ratio = float64(canceled) / float64(denom)
+		ratio = float64(dismantled) / float64(denom)
 	}
 	return map[string]any{
-		"canceled_30d": canceled,
-		"active":       active,
-		"churn_ratio":  ratio,
-		"window_days":  30,
+		"dismantled_30d": dismantled,
+		"canceled_30d":   dismantled, // alias lama (sebelumnya dari langganan)
+		"active":         active,
+		"churn_ratio":    ratio,
+		"window_days":    30,
 	}, nil
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/dianrp/drp-billing/internal/dbbackup"
 	"github.com/dianrp/drp-billing/internal/handlers"
 	"github.com/dianrp/drp-billing/internal/httpx"
+	"github.com/dianrp/drp-billing/internal/job"
 	"github.com/dianrp/drp-billing/internal/monitor"
 	"github.com/dianrp/drp-billing/internal/notify"
 	"github.com/dianrp/drp-billing/internal/payment"
@@ -69,8 +70,9 @@ func main() {
 
 	billingEngine := billing.New(st)
 	notifySvc := notify.NewService(st).WithDecryptor(encryptor.DecryptString).WithWhatsApp(waMgr)
-	payments := payment.NewRegistryFromEnv(cfg.DRPPaymentAPIKey, cfg.DRPPaymentWebhookSecret, cfg.DRPPaymentBaseURL)
+	payments := payment.NewRegistryWithTTL(cfg.DRPPaymentAPIKey, cfg.DRPPaymentWebhookSecret, cfg.DRPPaymentBaseURL, cfg.DRPPaymentExpiresInMinutes)
 	provReg := provisioner.NewRegistry(st, encryptor)
+	jobsWorker := job.NewWorker(st, billingEngine, notifySvc, monitor.NewPoller(st, encryptor, 0).WithNotify(notifySvc), provReg)
 
 	srv := httpx.NewServer(cfg.CORSOrigins, tenant.Middleware(tokens), requireAPIAuth)
 
@@ -78,6 +80,7 @@ func main() {
 		Store: st, Tokens: tokens, Encryptor: encryptor,
 		Billing: billingEngine, Notify: notifySvc, Payments: payments,
 		Provisioner: provReg, Config: cfg, WA: waMgr, DBBackup: dbBackup,
+		Jobs: jobsWorker,
 	}
 	handlers.RegisterAll(srv.API, deps)
 	handlers.MountStaticAndUploads(srv.Router, deps)

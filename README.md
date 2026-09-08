@@ -38,10 +38,10 @@ go run ./cmd/drpctl create-tenant --slug demo --name "ISP Demo" --email admin@de
 |------|--------|
 | `/` | Landing |
 | `/login` | Superadmin (kelola tenant) |
-| `/admin/<slug>/login` | Login admin tenant |
-| `/client/<slug>/login` | Portal pelanggan tenant |
+| `/<slug>/login` | Login admin tenant |
+| `/<slug>/client/login` | Portal pelanggan tenant |
 
-Contoh: `/admin/demo/login`, `/client/demo/login`
+Contoh: `/demo/login`, `/demo/client/login`
 
 ## Produksi (aaPanel)
 
@@ -60,7 +60,7 @@ Template lengkap: [`deploy/nginx/drp-billing.conf`](deploy/nginx/drp-billing.con
 
 | Lokasi | Peran |
 |--------|--------|
-| `/` | Static SPA (`web/dist` → `root`); `try_files` fallback ke `index.html` untuk `/admin/...` dan `/client/...` |
+| `/` | Static SPA (`web/dist` → `root`); `try_files` fallback ke `index.html` untuk `/&lt;slug&gt;/...` |
 | `/api/` | Reverse proxy ke API Go (`127.0.0.1:8080`) |
 | `/uploads/` | Reverse proxy file branding (logo/favicon) ke API |
 | `/events/` | Reverse proxy SSE monitoring (buffering off) |

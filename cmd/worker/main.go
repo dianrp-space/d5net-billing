@@ -54,7 +54,7 @@ func main() {
 
 	billingEngine := billing.New(st)
 	notifySvc := notify.NewService(st).WithDecryptor(encryptor.DecryptString).WithWhatsApp(waMgr)
-	poller := monitor.NewPoller(st, encryptor, 0)
+	poller := monitor.NewPoller(st, encryptor, 0).WithNotify(notifySvc)
 	provReg := provisioner.NewRegistry(st, encryptor)
 	worker := job.NewWorker(st, billingEngine, notifySvc, poller, provReg)
 

@@ -12,37 +12,59 @@ import (
 )
 
 type Customer struct {
-	ID             xid.ID    `json:"id"`
-	TenantID       xid.ID    `json:"tenant_id"`
-	ClusterID      *xid.ID   `json:"cluster_id,omitempty"`
-	CustomerCode   string    `json:"customer_code"`
-	FullName       string    `json:"full_name"`
-	Email          *string   `json:"email,omitempty"`
-	Phone          string    `json:"phone"`
-	Address        *string   `json:"address,omitempty"`
-	Latitude       *float64  `json:"latitude,omitempty"`
-	Longitude      *float64  `json:"longitude,omitempty"`
-	IdentityType   *string   `json:"identity_type,omitempty"`
-	IdentityNumber *string   `json:"identity_number,omitempty"`
-	IsActive       bool      `json:"is_active"`
-	PortalEnabled  bool      `json:"portal_enabled"`
-	PasswordHash   string    `json:"-"`
-	CreatedAt      time.Time `json:"created_at"`
-	ClusterName    string    `json:"cluster_name,omitempty"`
-	ClusterCode    string    `json:"cluster_code,omitempty"`
-	ResellerID     *xid.ID   `json:"reseller_id,omitempty"`
-	ResellerName   string    `json:"reseller_name,omitempty"`
-	SalesUserID    *xid.ID   `json:"sales_user_id,omitempty"`
-	SalesUserName  string    `json:"sales_user_name,omitempty"`
+	ID             xid.ID     `json:"id"`
+	TenantID       xid.ID     `json:"tenant_id"`
+	ClusterID      *xid.ID    `json:"cluster_id,omitempty"`
+	CustomerCode   string     `json:"customer_code"`
+	FullName       string     `json:"full_name"`
+	Email          *string    `json:"email,omitempty"`
+	Phone          string     `json:"phone"`
+	Address        *string    `json:"address,omitempty"`
+	Latitude       *float64   `json:"latitude,omitempty"`
+	Longitude      *float64   `json:"longitude,omitempty"`
+	IdentityType   *string    `json:"identity_type,omitempty"`
+	IdentityNumber *string    `json:"identity_number,omitempty"`
+	IsActive       bool       `json:"is_active"`
+	PortalEnabled  bool       `json:"portal_enabled"`
+	DismantledAt   *time.Time `json:"dismantled_at,omitempty"`
+	ServiceStatus  string     `json:"service_status"`
+	PasswordHash   string     `json:"-"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ClusterName    string     `json:"cluster_name,omitempty"`
+	ClusterCode    string     `json:"cluster_code,omitempty"`
+	ResellerID     *xid.ID    `json:"reseller_id,omitempty"`
+	ResellerName   string     `json:"reseller_name,omitempty"`
+	SalesUserID    *xid.ID    `json:"sales_user_id,omitempty"`
+	SalesUserName  string     `json:"sales_user_name,omitempty"`
+}
+
+func (c *Customer) IsDismantled() bool {
+	return c != nil && c.DismantledAt != nil
+}
+
+func (c *Customer) FillServiceStatus() {
+	if c == nil {
+		return
+	}
+	if c.DismantledAt != nil {
+		c.ServiceStatus = "dismantled"
+		return
+	}
+	if c.IsActive {
+		c.ServiceStatus = "active"
+		return
+	}
+	c.ServiceStatus = "inactive"
 }
 
 type CustomerFilter struct {
-	TenantID  xid.ID
-	ClusterID *xid.ID
-	Search    string
-	IsActive  *bool
-	Limit     int
-	Offset    int
+	TenantID      xid.ID
+	ClusterID     *xid.ID
+	Search        string
+	IsActive      *bool
+	ServiceStatus string
+	Limit         int
+	Offset        int
 }
 
 func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer, int64, error) {
@@ -57,10 +79,21 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 		args = append(args, *f.ClusterID)
 		n++
 	}
-	if f.IsActive != nil {
-		where += fmt.Sprintf(" AND c.is_active = $%d", n)
-		args = append(args, *f.IsActive)
-		n++
+	switch strings.ToLower(strings.TrimSpace(f.ServiceStatus)) {
+	case "dismantled", "cabut":
+		where += " AND c.dismantled_at IS NOT NULL"
+	case "active", "aktif":
+		where += " AND c.is_active = true AND c.dismantled_at IS NULL"
+	case "inactive", "nonaktif":
+		where += " AND c.is_active = false AND c.dismantled_at IS NULL"
+	default:
+		if f.IsActive != nil {
+			if *f.IsActive {
+				where += " AND c.is_active = true AND c.dismantled_at IS NULL"
+			} else {
+				where += " AND c.is_active = false"
+			}
+		}
 	}
 	if f.Search != "" {
 		where += fmt.Sprintf(" AND (c.full_name ILIKE $%d OR c.phone ILIKE $%d OR c.customer_code ILIKE $%d OR COALESCE(c.email,'') ILIKE $%d)", n, n, n, n)
@@ -75,15 +108,7 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 	if limit <= 0 {
 		limit = 20
 	}
-	q := fmt.Sprintf(`
-		SELECT c.id, c.tenant_id, c.cluster_id, c.customer_code, c.full_name, c.email, c.phone, c.address,
-		       c.latitude, c.longitude, c.identity_type, c.identity_number, c.is_active, c.portal_enabled, c.created_at,
-		       COALESCE(s.name, ''), COALESCE(s.code, ''),
-		       c.reseller_id, COALESCE(r.name, ''), c.sales_user_id, COALESCE(u.full_name, '')
-		FROM customers c
-		LEFT JOIN sites s ON s.id = c.cluster_id
-		LEFT JOIN resellers r ON r.id = c.reseller_id
-		LEFT JOIN users u ON u.id = c.sales_user_id
+	q := customerSelect + fmt.Sprintf(`
 		%s ORDER BY c.created_at DESC LIMIT %d OFFSET %d
 	`, where, limit, f.Offset)
 	rows, err := s.Pool.Query(ctx, q, args...)
@@ -93,34 +118,39 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 	defer rows.Close()
 	var list []Customer
 	for rows.Next() {
-		var c Customer
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
-			&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode,
-			&c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName); err != nil {
+		c, err := scanCustomer(rows)
+		if err != nil {
 			return nil, 0, err
 		}
-		list = append(list, c)
+		list = append(list, *c)
 	}
 	return list, total, rows.Err()
 }
 
-func scanCustomer(row pgx.Row) (*Customer, error) {
+func customerScanDest(c *Customer) []any {
+	return []any{
+		&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
+		&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.DismantledAt, &c.CreatedAt,
+		&c.ClusterName, &c.ClusterCode, &c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName,
+	}
+}
+
+func scanCustomer(row interface{ Scan(dest ...any) error }) (*Customer, error) {
 	var c Customer
-	err := row.Scan(&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
-		&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode,
-		&c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName)
+	err := row.Scan(customerScanDest(&c)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	c.FillServiceStatus()
 	return &c, nil
 }
 
 const customerSelect = `
 	SELECT c.id, c.tenant_id, c.cluster_id, c.customer_code, c.full_name, c.email, c.phone, c.address,
-	       c.latitude, c.longitude, c.identity_type, c.identity_number, c.is_active, c.portal_enabled, c.created_at,
+	       c.latitude, c.longitude, c.identity_type, c.identity_number, c.is_active, c.portal_enabled, c.dismantled_at, c.created_at,
 	       COALESCE(s.name, ''), COALESCE(s.code, ''),
 	       c.reseller_id, COALESCE(r.name, ''), c.sales_user_id, COALESCE(u.full_name, '')
 	FROM customers c
@@ -136,6 +166,61 @@ func (s *Store) GetCustomer(ctx context.Context, tenantID xid.ID, id xid.ID) (*C
 	return scanCustomer(s.Pool.QueryRow(ctx, customerSelect+`
 		WHERE c.tenant_id = $1 AND c.id = $2
 	`, tenantID, id))
+}
+
+func formatSiteLabel(name, code string) string {
+	name = strings.TrimSpace(name)
+	code = strings.TrimSpace(code)
+	switch {
+	case name != "" && code != "" && !strings.EqualFold(name, code):
+		return name + " (" + code + ")"
+	case name != "":
+		return name
+	default:
+		return code
+	}
+}
+
+// CustomerNetworkLabels returns the customer's cluster and NAS/router names for ops alerts.
+// Cluster prefers the customer's site; if empty, falls back to the subscription router's site.
+// Router comes from the latest provisionable subscription that has a router_id.
+func (s *Store) CustomerNetworkLabels(ctx context.Context, tenantID, customerID xid.ID) (cluster, router string, err error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return "", "", err
+	}
+	var clusterName, clusterCode, routerName, routerClusterName, routerClusterCode string
+	err = s.Pool.QueryRow(ctx, `
+		SELECT COALESCE(site.name, ''), COALESCE(site.code, ''),
+		       COALESCE(r.name, ''), COALESCE(rsite.name, ''), COALESCE(rsite.code, '')
+		FROM customers c
+		LEFT JOIN sites site ON site.id = c.cluster_id
+		LEFT JOIN LATERAL (
+			SELECT s.router_id
+			FROM subscriptions s
+			WHERE s.tenant_id = c.tenant_id AND s.customer_id = c.id AND s.router_id IS NOT NULL
+			ORDER BY CASE s.status
+				WHEN 'active' THEN 0
+				WHEN 'overdue' THEN 1
+				WHEN 'suspended' THEN 2
+				ELSE 3
+			END, s.id DESC
+			LIMIT 1
+		) sub ON true
+		LEFT JOIN routers r ON r.id = sub.router_id AND r.tenant_id = c.tenant_id
+		LEFT JOIN sites rsite ON rsite.id = r.site_id
+		WHERE c.tenant_id = $1 AND c.id = $2
+	`, tenantID, customerID).Scan(&clusterName, &clusterCode, &routerName, &routerClusterName, &routerClusterCode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	cluster = formatSiteLabel(clusterName, clusterCode)
+	if cluster == "" {
+		cluster = formatSiteLabel(routerClusterName, routerClusterCode)
+	}
+	return cluster, strings.TrimSpace(routerName), nil
 }
 
 func (s *Store) CreateCustomer(ctx context.Context, c *Customer) error {
@@ -242,13 +327,11 @@ func (s *Store) ListCustomersByPhone(ctx context.Context, tenantID xid.ID, phone
 	defer rows.Close()
 	var list []Customer
 	for rows.Next() {
-		var c Customer
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
-			&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode,
-			&c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName); err != nil {
+		c, err := scanCustomer(rows)
+		if err != nil {
 			return nil, err
 		}
-		list = append(list, c)
+		list = append(list, *c)
 	}
 	return list, rows.Err()
 }
@@ -277,13 +360,29 @@ func (s *Store) ListCustomersWithCoords(ctx context.Context, tenantID xid.ID) ([
 	defer rows.Close()
 	var list []Customer
 	for rows.Next() {
-		var c Customer
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
-			&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.CreatedAt, &c.ClusterName, &c.ClusterCode,
-			&c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName); err != nil {
+		c, err := scanCustomer(rows)
+		if err != nil {
 			return nil, err
 		}
-		list = append(list, c)
+		list = append(list, *c)
 	}
 	return list, rows.Err()
+}
+
+func (s *Store) DismantleCustomer(ctx context.Context, tenantID, id xid.ID) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE customers
+		SET is_active = false, portal_enabled = false, dismantled_at = NOW(), updated_at = NOW()
+		WHERE tenant_id = $1 AND id = $2 AND dismantled_at IS NULL
+	`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

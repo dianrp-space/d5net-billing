@@ -267,6 +267,108 @@ func (c *Client) applySimpleQueue(ctx context.Context, spec *provision.ServiceSp
 	})
 }
 
+func setNamedRow(cl *routeros.Client, printPath, setPath, name string, props []string) (*routeros.Reply, bool, error) {
+	reply, err := cl.Run(printPath, "?name="+name)
+	if err != nil {
+		return nil, false, err
+	}
+	id := ""
+	var row map[string]string
+	if reply != nil {
+		for _, re := range reply.Re {
+			if v := re.Map[".id"]; v != "" {
+				id = v
+				row = re.Map
+				break
+			}
+		}
+	}
+	if id == "" {
+		return nil, false, fmt.Errorf("%s %q tidak ditemukan", printPath, name)
+	}
+	if rowMatchesProps(row, props) {
+		return reply, false, nil
+	}
+	args := append([]string{setPath, "=numbers=" + id}, props...)
+	reply, err = cl.Run(args...)
+	return reply, true, err
+}
+
+func lookupNamedID(cl *routeros.Client, printPath, name string) (string, error) {
+	reply, err := cl.Run(printPath, "?name="+name, "=.proplist=.id")
+	if err != nil {
+		return "", err
+	}
+	if reply != nil {
+		for _, re := range reply.Re {
+			if v := re.Map[".id"]; v != "" {
+				return v, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("%s %q tidak ditemukan", printPath, name)
+}
+
+func unsetPPPSecretFields(cl *routeros.Client, id string, fields ...string) error {
+	var last error
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		_, err := cl.Run("/ppp/secret/unset", "=numbers="+id, "=value-name="+f)
+		if err != nil {
+			_, err2 := cl.Run("/ppp/secret/unset", "=.id="+id, "=value-name="+f)
+			if err2 != nil {
+				last = err
+			}
+		}
+	}
+	return last
+}
+
+func setPPPSecret(cl *routeros.Client, username string, props []string, unsetFields []string) (*routeros.Reply, bool, error) {
+	reply, err := cl.Run("/ppp/secret/print", "?name="+username)
+	if err != nil {
+		return nil, false, err
+	}
+	id := ""
+	row := map[string]string{}
+	if reply != nil {
+		for _, re := range reply.Re {
+			if v := re.Map[".id"]; v != "" {
+				id = v
+				row = re.Map
+				break
+			}
+		}
+	}
+	if id == "" {
+		return nil, false, fmt.Errorf("%s %q tidak ditemukan", "/ppp/secret/print", username)
+	}
+	needSet := !rowMatchesProps(row, props)
+	var pendingUnset []string
+	for _, f := range unsetFields {
+		if fieldFilled(row, f) {
+			pendingUnset = append(pendingUnset, f)
+		}
+	}
+	if !needSet && len(pendingUnset) == 0 {
+		return reply, false, nil
+	}
+	if needSet {
+		args := append([]string{"/ppp/secret/set", "=numbers=" + id}, props...)
+		reply, err = cl.Run(args...)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	if err := unsetPPPSecretFields(cl, id, pendingUnset...); err != nil {
+		return reply, true, fmt.Errorf("hapus %s secret: %w", strings.Join(pendingUnset, ","), err)
+	}
+	return reply, true, nil
+}
+
 func (c *Client) Suspend(ctx context.Context, spec *provision.ServiceSpec) error {
 	profile := spec.IsolirProfile
 	if profile == "" {
@@ -275,11 +377,19 @@ func (c *Client) Suspend(ctx context.Context, spec *provision.ServiceSpec) error
 	comment := provision.WithIsolirComment(commentTag(spec))
 	switch spec.ServiceType {
 	case "hotspot":
+		changed := false
 		err := c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/user/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-			return cl.Run("/ip/hotspot/user/set", "=numbers="+spec.Username, "=profile="+profile, "=disabled=no", "=comment="+comment)
+			reply, did, err := setNamedRow(cl, "/ip/hotspot/user/print", "/ip/hotspot/user/set", spec.Username, []string{
+				"=profile=" + profile, "=disabled=no", "=comment=" + comment,
+			})
+			changed = did
+			return reply, err
 		})
 		if err != nil {
 			return err
+		}
+		if !changed {
+			return nil
 		}
 		// Best-effort kick hotspot active session
 		_ = c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/active/remove", func(cl *routeros.Client) (*routeros.Reply, error) {
@@ -296,13 +406,26 @@ func (c *Client) Suspend(ctx context.Context, spec *provision.ServiceSpec) error
 		})
 		return nil
 	default:
+		changed := false
 		err := c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ppp/secret/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-			return cl.Run("/ppp/secret/set", "=numbers="+spec.Username, "=profile="+profile, "=disabled=no", "=comment="+comment)
+			// Secret remote-address must be an IP (or empty). Pool names belong on the PPP profile.
+			props := []string{"=profile=" + profile, "=disabled=no", "=comment=" + comment}
+			unset := []string{"remote-address"}
+			if local := HostIP(spec.LocalAddress); local != "" {
+				props = append(props, "=local-address="+local)
+			} else {
+				unset = append(unset, "local-address")
+			}
+			reply, did, err := setPPPSecret(cl, spec.Username, props, unset)
+			changed = did
+			return reply, err
 		})
 		if err != nil {
 			return err
 		}
-		_ = c.Disconnect(ctx, spec)
+		if changed {
+			_ = c.Disconnect(ctx, spec)
+		}
 		return nil
 	}
 }
@@ -311,15 +434,21 @@ func (c *Client) Resume(ctx context.Context, spec *provision.ServiceSpec) error 
 	comment := provision.WithoutIsolirComment(commentTag(spec))
 	switch spec.ServiceType {
 	case "hotspot":
+		changed := false
 		err := c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/user/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-			args := []string{"/ip/hotspot/user/set", "=numbers=" + spec.Username, "=disabled=no", "=comment=" + comment}
+			props := []string{"=disabled=no", "=comment=" + comment}
 			if spec.ProfileName != "" {
-				args = append(args, "=profile="+spec.ProfileName)
+				props = append(props, "=profile="+spec.ProfileName)
 			}
-			return cl.Run(args...)
+			reply, did, err := setNamedRow(cl, "/ip/hotspot/user/print", "/ip/hotspot/user/set", spec.Username, props)
+			changed = did
+			return reply, err
 		})
 		if err != nil {
 			return err
+		}
+		if !changed {
+			return nil
 		}
 		_ = c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ip/hotspot/active/remove", func(cl *routeros.Client) (*routeros.Reply, error) {
 			reply, err := cl.Run("/ip/hotspot/active/print", "?user="+spec.Username)
@@ -335,17 +464,33 @@ func (c *Client) Resume(ctx context.Context, spec *provision.ServiceSpec) error 
 		})
 		return nil
 	default:
+		changed := false
 		err := c.run(ctx, spec.TenantID, spec.RouterID, nil, "/ppp/secret/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-			args := []string{"/ppp/secret/set", "=numbers=" + spec.Username, "=disabled=no", "=comment=" + comment}
+			props := []string{"=disabled=no", "=comment=" + comment}
+			unset := []string{}
 			if spec.ProfileName != "" {
-				args = append(args, "=profile="+spec.ProfileName)
+				props = append(props, "=profile="+spec.ProfileName)
 			}
-			return cl.Run(args...)
+			if ip := HostIP(spec.IPAddress); ip != "" {
+				props = append(props, "=remote-address="+ip)
+			} else {
+				unset = append(unset, "remote-address")
+			}
+			if local := HostIP(spec.LocalAddress); local != "" {
+				props = append(props, "=local-address="+local)
+			} else {
+				unset = append(unset, "local-address")
+			}
+			reply, did, err := setPPPSecret(cl, spec.Username, props, unset)
+			changed = did
+			return reply, err
 		})
 		if err != nil {
 			return err
 		}
-		_ = c.Disconnect(ctx, spec)
+		if changed {
+			_ = c.Disconnect(ctx, spec)
+		}
 		return nil
 	}
 }
@@ -365,6 +510,89 @@ func (c *Client) Remove(ctx context.Context, spec *provision.ServiceSpec) error 
 	return c.run(ctx, spec.TenantID, spec.RouterID, nil, path, func(cl *routeros.Client) (*routeros.Reply, error) {
 		return cl.Run(path, "=numbers="+spec.Username)
 	})
+}
+
+func (c *Client) GetServiceSecret(ctx context.Context, tenantID, routerID xid.ID, username, serviceType string) (*provision.SecretState, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, fmt.Errorf("username wajib")
+	}
+	var found *provision.SecretState
+	path := "/ppp/secret/print"
+	if strings.EqualFold(strings.TrimSpace(serviceType), "hotspot") {
+		path = "/ip/hotspot/user/print"
+	}
+	err := c.run(ctx, tenantID, routerID, nil, path, func(cl *routeros.Client) (*routeros.Reply, error) {
+		reply, err := cl.Run(path, "?name="+username)
+		if err != nil {
+			return nil, err
+		}
+		for _, re := range reply.Re {
+			name := strings.TrimSpace(re.Map["name"])
+			if name == "" {
+				continue
+			}
+			st := "pppoe"
+			if path == "/ip/hotspot/user/print" {
+				st = "hotspot"
+			}
+			sec := provision.SecretState{
+				Username:    name,
+				Profile:     re.Map["profile"],
+				Comment:     re.Map["comment"],
+				ServiceType: st,
+			}
+			found = &sec
+			break
+		}
+		return reply, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return found, nil
+}
+
+func (c *Client) ListServiceSecrets(ctx context.Context, tenantID, routerID xid.ID) ([]provision.SecretState, error) {
+	var out []provision.SecretState
+	err := c.run(ctx, tenantID, routerID, nil, "/ppp/secret/print", func(cl *routeros.Client) (*routeros.Reply, error) {
+		reply, err := cl.Run("/ppp/secret/print")
+		if err != nil {
+			return nil, err
+		}
+		for _, re := range reply.Re {
+			name := strings.TrimSpace(re.Map["name"])
+			if name == "" {
+				continue
+			}
+			out = append(out, provision.SecretState{
+				Username:    name,
+				Profile:     re.Map["profile"],
+				Comment:     re.Map["comment"],
+				ServiceType: "pppoe",
+			})
+		}
+		hs, hsErr := cl.Run("/ip/hotspot/user/print")
+		if hsErr == nil {
+			for _, re := range hs.Re {
+				name := strings.TrimSpace(re.Map["name"])
+				if name == "" {
+					continue
+				}
+				out = append(out, provision.SecretState{
+					Username:    name,
+					Profile:     re.Map["profile"],
+					Comment:     re.Map["comment"],
+					ServiceType: "hotspot",
+				})
+			}
+		}
+		return reply, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) Disconnect(ctx context.Context, spec *provision.ServiceSpec) error {

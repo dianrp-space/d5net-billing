@@ -40,6 +40,24 @@ type Session struct {
 	StartedAt  time.Time `json:"started_at"`
 }
 
+// SecretState is a PPP secret or hotspot user as stored on the router.
+type SecretState struct {
+	Username    string `json:"username"`
+	Profile     string `json:"profile"`
+	Comment     string `json:"comment"`
+	ServiceType string `json:"service_type,omitempty"`
+}
+
+// SecretReader optionally lists PPP/hotspot accounts for desired-state resume.
+type SecretReader interface {
+	ListServiceSecrets(ctx context.Context, tenantID, routerID xid.ID) ([]SecretState, error)
+}
+
+// SecretGetter looks up one PPP/hotspot account without listing the whole table.
+type SecretGetter interface {
+	GetServiceSecret(ctx context.Context, tenantID, routerID xid.ID, username, serviceType string) (*SecretState, error)
+}
+
 type Caps struct {
 	PPPoE   bool `json:"pppoe"`
 	Hotspot bool `json:"hotspot"`

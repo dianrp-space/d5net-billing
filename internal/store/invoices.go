@@ -39,18 +39,19 @@ type InvoiceItem struct {
 }
 
 type Payment struct {
-	ID           xid.ID     `json:"id"`
-	TenantID     xid.ID     `json:"tenant_id"`
-	CustomerID   xid.ID     `json:"customer_id"`
-	InvoiceID    *xid.ID    `json:"invoice_id,omitempty"`
-	Amount       int64      `json:"amount"`
-	Method       string     `json:"method"`
-	Reference    *string    `json:"reference,omitempty"`
-	Status       string     `json:"status"`
-	PaidAt       *time.Time `json:"paid_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	CustomerName string     `json:"customer_name,omitempty"`
-	CustomerCode string     `json:"customer_code,omitempty"`
+	ID            xid.ID     `json:"id"`
+	TenantID      xid.ID     `json:"tenant_id"`
+	CustomerID    xid.ID     `json:"customer_id"`
+	InvoiceID     *xid.ID    `json:"invoice_id,omitempty"`
+	Amount        int64      `json:"amount"`
+	Method        string     `json:"method"`
+	Reference     *string    `json:"reference,omitempty"`
+	Status        string     `json:"status"`
+	PaidAt        *time.Time `json:"paid_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	CustomerName  string     `json:"customer_name,omitempty"`
+	CustomerCode  string     `json:"customer_code,omitempty"`
+	InvoiceNumber string     `json:"invoice_number,omitempty"`
 }
 
 func (s *Store) NextInvoiceNumber(ctx context.Context, tenantID xid.ID) (string, error) {
@@ -190,6 +191,14 @@ func (s *Store) RecordPayment(ctx context.Context, p *Payment) error {
 	if err := s.SetTenantContext(ctx, p.TenantID); err != nil {
 		return err
 	}
+	method := strings.TrimSpace(p.Method)
+	if method == "" {
+		return fmt.Errorf("metode pembayaran wajib")
+	}
+	status := strings.ToLower(strings.TrimSpace(p.Status))
+	if status == "" {
+		status = "paid"
+	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -197,17 +206,22 @@ func (s *Store) RecordPayment(ctx context.Context, p *Payment) error {
 	defer tx.Rollback(ctx)
 
 	now := time.Now()
+	var paidAt *time.Time
+	if status == "paid" || status == "success" {
+		paidAt = &now
+	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO payments (tenant_id, customer_id, invoice_id, amount, method, reference, status, paid_at)
-		VALUES ($1,$2,$3,$4,$5,$6,'paid',$7) RETURNING id, created_at
-	`, p.TenantID, p.CustomerID, p.InvoiceID, p.Amount, p.Method, p.Reference, now).Scan(&p.ID, &p.CreatedAt)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at
+	`, p.TenantID, p.CustomerID, p.InvoiceID, p.Amount, method, p.Reference, status, paidAt).Scan(&p.ID, &p.CreatedAt)
 	if err != nil {
 		return err
 	}
-	p.Status = "paid"
-	p.PaidAt = &now
+	p.Method = method
+	p.Status = status
+	p.PaidAt = paidAt
 
-	if p.InvoiceID != nil {
+	if p.InvoiceID != nil && (status == "paid" || status == "success") {
 		_, err = tx.Exec(ctx, `
 			UPDATE invoices SET paid_amount = paid_amount + $3,
 				status = CASE WHEN paid_amount + $3 >= total_amount THEN 'paid' ELSE 'partial' END,
@@ -342,9 +356,12 @@ func (s *Store) ListCustomerPayments(ctx context.Context, tenantID xid.ID, custo
 		limit = 20
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT id, tenant_id, customer_id, invoice_id, amount, method, reference, status, paid_at, created_at
-		FROM payments WHERE tenant_id = $1 AND customer_id = $2
-		ORDER BY COALESCE(paid_at, created_at) DESC LIMIT $3
+		SELECT p.id, p.tenant_id, p.customer_id, p.invoice_id, p.amount, p.method, p.reference, p.status, p.paid_at, p.created_at,
+		       COALESCE(i.invoice_number, '')
+		FROM payments p
+		LEFT JOIN invoices i ON i.id = p.invoice_id AND i.tenant_id = p.tenant_id
+		WHERE p.tenant_id = $1 AND p.customer_id = $2
+		ORDER BY COALESCE(p.paid_at, p.created_at) DESC LIMIT $3
 	`, tenantID, customerID, limit)
 	if err != nil {
 		return nil, err
@@ -353,7 +370,7 @@ func (s *Store) ListCustomerPayments(ctx context.Context, tenantID xid.ID, custo
 	var list []Payment
 	for rows.Next() {
 		var p Payment
-		if err := rows.Scan(&p.ID, &p.TenantID, &p.CustomerID, &p.InvoiceID, &p.Amount, &p.Method, &p.Reference, &p.Status, &p.PaidAt, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.CustomerID, &p.InvoiceID, &p.Amount, &p.Method, &p.Reference, &p.Status, &p.PaidAt, &p.CreatedAt, &p.InvoiceNumber); err != nil {
 			return nil, err
 		}
 		list = append(list, p)

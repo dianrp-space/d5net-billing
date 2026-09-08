@@ -146,6 +146,30 @@ func WithIsolirComment(comment string) string {
 	return IsolirCommentPrefix + c
 }
 
+// SecretLooksIsolir reports whether a PPP/hotspot account is still on the isolir profile
+// (or still tagged ISOLIR in the comment). planProfile avoids false positives when the
+// paket profile happens to share the isolir profile name.
+func SecretLooksIsolir(profile, comment, isolirProfile, planProfile string) bool {
+	c := strings.TrimSpace(comment)
+	upper := strings.ToUpper(c)
+	if strings.HasPrefix(upper, "ISOLIR ") || upper == "ISOLIR" {
+		return true
+	}
+	p := strings.TrimSpace(profile)
+	iso := strings.TrimSpace(isolirProfile)
+	plan := strings.TrimSpace(planProfile)
+	if iso == "" || p == "" {
+		return false
+	}
+	if !strings.EqualFold(p, iso) {
+		return false
+	}
+	if plan != "" && strings.EqualFold(iso, plan) {
+		return false
+	}
+	return true
+}
+
 // WithoutIsolirComment strips a leading "ISOLIR " prefix from a secret comment.
 func WithoutIsolirComment(comment string) string {
 	c := strings.TrimSpace(comment)

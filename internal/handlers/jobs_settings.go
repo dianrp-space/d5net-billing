@@ -4,9 +4,11 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/dianrp/drp-billing/internal/httpx"
+	"github.com/dianrp/drp-billing/internal/job"
 	"github.com/dianrp/drp-billing/internal/store"
 )
 
@@ -90,6 +92,29 @@ func registerJobsSettings(api huma.API, d *Deps) {
 		out.Body.Data = list
 		return out, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "run-jobs-now", Method: http.MethodPost, Path: "/api/settings/jobs/run",
+		Summary: "Run worker cycle now for this tenant", Tags: []string{"Settings"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Body job.TenantCycleResult
+	}, error) {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		if d.Jobs == nil {
+			return nil, httpx.BadRequest("worker tidak tersedia di proses API")
+		}
+		runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		res, err := d.Jobs.RunTenantNow(runCtx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body job.TenantCycleResult }{Body: res}, nil
+	})
 }
 
 type jobCatalogItem struct {
@@ -100,11 +125,10 @@ type jobCatalogItem struct {
 
 func jobsCatalog() []jobCatalogItem {
 	items := []jobCatalogItem{
-		{ID: "billing", Label: "Generate tagihan", Description: "Buat invoice untuk langganan yang jatuh tempo (tiap siklus worker ~1 menit)."},
-		{ID: "isolir", Label: "Auto isolir", Description: "Suspend langganan yang tagihannya lewat jatuh tempo + grace paket."},
+		{ID: "billing", Label: "Generate tagihan", Description: "Buat invoice untuk langganan yang jatuh tempo (mengikuti interval worker di halaman ini)."},
+		{ID: "isolir", Label: "Auto isolir", Description: "Suspend langganan yang tagihannya lewat jatuh tempo + grace. Setelah lunas, retry resume ke profil paket jika router sempat gagal/offline."},
 		{ID: "dunning", Label: "Pengingat tagihan (dunning)", Description: "Kirim reminder WhatsApp/email pada offset hari relatif jatuh tempo."},
-		{ID: "odp_outage", Label: "Deteksi gangguan ODP", Description: "Cek rasio offline pelanggan per ODP dan buat alert."},
-		{ID: "weekly_reconcile", Label: "Reconcile mingguan", Description: "Dry-run drift RouterOS vs data billing (sekali per jadwal)."},
+		{ID: "weekly_reconcile", Label: "Reconcile mingguan", Description: "Dry-run drift RouterOS vs data billing (sekali per jadwal). Alert Telegram ops jika ada drift."},
 		{ID: "monthly_report", Label: "Laporan bulanan", Description: "Email ringkas statistik bisnis ke email tenant."},
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })

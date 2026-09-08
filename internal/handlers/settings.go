@@ -58,6 +58,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			TenantName        string  `json:"tenant_name"`
 			Timezone          string  `json:"timezone"`
 			DefaultTaxPercent float64 `json:"default_tax_percent"`
+			PrimaryColor      string  `json:"primary_color"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -82,12 +83,14 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				TenantName        string  `json:"tenant_name"`
 				Timezone          string  `json:"timezone"`
 				DefaultTaxPercent float64 `json:"default_tax_percent"`
+				PrimaryColor      string  `json:"primary_color"`
 			}
 		}{}
 		out.Body.TenantBrandingView = *view
 		out.Body.TenantName = ten.Name
 		out.Body.Timezone = gen.Timezone
 		out.Body.DefaultTaxPercent = gen.DefaultTaxPercent
+		out.Body.PrimaryColor = gen.PrimaryColor
 		return out, nil
 	})
 
@@ -96,14 +99,21 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		Tags: []string{"Settings"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			TenantName        string  `json:"tenant_name"`
-			AppName           string  `json:"app_name"`
-			Timezone          string  `json:"timezone"`
-			DefaultTaxPercent float64 `json:"default_tax_percent"`
-			LogoURL           *string `json:"logo_url,omitempty"`
-			FaviconURL        *string `json:"favicon_url,omitempty"`
-			ClearLogo         bool    `json:"clear_logo,omitempty"`
-			ClearFavicon      bool    `json:"clear_favicon,omitempty"`
+			TenantName           string  `json:"tenant_name"`
+			AppName              string  `json:"app_name,omitempty"`
+			Timezone             string  `json:"timezone"`
+			DefaultTaxPercent    float64 `json:"default_tax_percent"`
+			PrimaryColor         string  `json:"primary_color"`
+			LogoURL              *string `json:"logo_url,omitempty"`
+			FaviconURL           *string `json:"favicon_url,omitempty"`
+			MapPopIconURL        *string `json:"map_pop_icon_url,omitempty"`
+			MapODPIconURL        *string `json:"map_odp_icon_url,omitempty"`
+			MapCustomerIconURL   *string `json:"map_customer_icon_url,omitempty"`
+			ClearLogo            bool    `json:"clear_logo,omitempty"`
+			ClearFavicon         bool    `json:"clear_favicon,omitempty"`
+			ClearMapPopIcon      bool    `json:"clear_map_pop_icon,omitempty"`
+			ClearMapODPIcon      bool    `json:"clear_map_odp_icon,omitempty"`
+			ClearMapCustomerIcon bool    `json:"clear_map_customer_icon,omitempty"`
 		}
 	}) (*struct {
 		Body struct {
@@ -111,6 +121,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			TenantName        string  `json:"tenant_name"`
 			Timezone          string  `json:"timezone"`
 			DefaultTaxPercent float64 `json:"default_tax_percent"`
+			PrimaryColor      string  `json:"primary_color"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -130,26 +141,18 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		b := &store.Branding{AppName: tenantName}
-		if input.Body.ClearLogo {
-			b.LogoURL = nil
-		} else if input.Body.LogoURL != nil {
-			b.LogoURL = input.Body.LogoURL
-		} else {
-			b.LogoURL = raw.LogoURL
-		}
-		if input.Body.ClearFavicon {
-			b.FaviconURL = nil
-		} else if input.Body.FaviconURL != nil {
-			b.FaviconURL = input.Body.FaviconURL
-		} else {
-			b.FaviconURL = raw.FaviconURL
-		}
+		b.LogoURL = pickBrandingURL(input.Body.ClearLogo, input.Body.LogoURL, raw.LogoURL)
+		b.FaviconURL = pickBrandingURL(input.Body.ClearFavicon, input.Body.FaviconURL, raw.FaviconURL)
+		b.MapPopIconURL = pickBrandingURL(input.Body.ClearMapPopIcon, input.Body.MapPopIconURL, raw.MapPopIconURL)
+		b.MapODPIconURL = pickBrandingURL(input.Body.ClearMapODPIcon, input.Body.MapODPIconURL, raw.MapODPIconURL)
+		b.MapCustomerIconURL = pickBrandingURL(input.Body.ClearMapCustomerIcon, input.Body.MapCustomerIconURL, raw.MapCustomerIconURL)
 		if err := d.Store.UpdateTenantBranding(ctx, tid, b); err != nil {
 			return nil, httpx.Internal(err)
 		}
 		gen := store.NormalizeGeneralSettings(store.GeneralSettings{
 			Timezone:          input.Body.Timezone,
 			DefaultTaxPercent: input.Body.DefaultTaxPercent,
+			PrimaryColor:      input.Body.PrimaryColor,
 		})
 		if err := d.Store.UpsertGeneralSettings(ctx, tid, gen); err != nil {
 			return nil, httpx.Internal(err)
@@ -168,12 +171,14 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				TenantName        string  `json:"tenant_name"`
 				Timezone          string  `json:"timezone"`
 				DefaultTaxPercent float64 `json:"default_tax_percent"`
+				PrimaryColor      string  `json:"primary_color"`
 			}
 		}{}
 		out.Body.TenantBrandingView = *view
 		out.Body.TenantName = ten.Name
 		out.Body.Timezone = gen.Timezone
 		out.Body.DefaultTaxPercent = gen.DefaultTaxPercent
+		out.Body.PrimaryColor = gen.PrimaryColor
 		return out, nil
 	})
 }
@@ -198,11 +203,17 @@ func registerPlatformBranding(api huma.API, d *Deps) {
 		Tags: []string{"Platform"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			AppName      string  `json:"app_name"`
-			LogoURL      *string `json:"logo_url,omitempty"`
-			FaviconURL   *string `json:"favicon_url,omitempty"`
-			ClearLogo    bool    `json:"clear_logo,omitempty"`
-			ClearFavicon bool    `json:"clear_favicon,omitempty"`
+			AppName              string  `json:"app_name"`
+			LogoURL              *string `json:"logo_url,omitempty"`
+			FaviconURL           *string `json:"favicon_url,omitempty"`
+			MapPopIconURL        *string `json:"map_pop_icon_url,omitempty"`
+			MapODPIconURL        *string `json:"map_odp_icon_url,omitempty"`
+			MapCustomerIconURL   *string `json:"map_customer_icon_url,omitempty"`
+			ClearLogo            bool    `json:"clear_logo,omitempty"`
+			ClearFavicon         bool    `json:"clear_favicon,omitempty"`
+			ClearMapPopIcon      bool    `json:"clear_map_pop_icon,omitempty"`
+			ClearMapODPIcon      bool    `json:"clear_map_odp_icon,omitempty"`
+			ClearMapCustomerIcon bool    `json:"clear_map_customer_icon,omitempty"`
 		}
 	}) (*struct{ Body store.Branding }, error) {
 		if err := requirePlatform(ctx); err != nil {
@@ -216,20 +227,11 @@ func registerPlatformBranding(api huma.API, d *Deps) {
 		if b.AppName == "" {
 			b.AppName = "drp-billing"
 		}
-		if input.Body.ClearLogo {
-			b.LogoURL = nil
-		} else if input.Body.LogoURL != nil {
-			b.LogoURL = input.Body.LogoURL
-		} else {
-			b.LogoURL = cur.LogoURL
-		}
-		if input.Body.ClearFavicon {
-			b.FaviconURL = nil
-		} else if input.Body.FaviconURL != nil {
-			b.FaviconURL = input.Body.FaviconURL
-		} else {
-			b.FaviconURL = cur.FaviconURL
-		}
+		b.LogoURL = pickBrandingURL(input.Body.ClearLogo, input.Body.LogoURL, cur.LogoURL)
+		b.FaviconURL = pickBrandingURL(input.Body.ClearFavicon, input.Body.FaviconURL, cur.FaviconURL)
+		b.MapPopIconURL = pickBrandingURL(input.Body.ClearMapPopIcon, input.Body.MapPopIconURL, cur.MapPopIconURL)
+		b.MapODPIconURL = pickBrandingURL(input.Body.ClearMapODPIcon, input.Body.MapODPIconURL, cur.MapODPIconURL)
+		b.MapCustomerIconURL = pickBrandingURL(input.Body.ClearMapCustomerIcon, input.Body.MapCustomerIconURL, cur.MapCustomerIconURL)
 		if err := d.Store.UpdatePlatformBranding(ctx, b); err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -248,8 +250,14 @@ func MountStaticAndUploads(r chi.Router, d *Deps) {
 
 	r.Post("/api/settings/branding/logo", uploadHandler(d, false, "logo"))
 	r.Post("/api/settings/branding/favicon", uploadHandler(d, false, "favicon"))
+	r.Post("/api/settings/branding/map-pop", uploadHandler(d, false, "map-pop"))
+	r.Post("/api/settings/branding/map-odp", uploadHandler(d, false, "map-odp"))
+	r.Post("/api/settings/branding/map-customer", uploadHandler(d, false, "map-customer"))
 	r.Post("/api/platform/branding/logo", uploadHandler(d, true, "logo"))
 	r.Post("/api/platform/branding/favicon", uploadHandler(d, true, "favicon"))
+	r.Post("/api/platform/branding/map-pop", uploadHandler(d, true, "map-pop"))
+	r.Post("/api/platform/branding/map-odp", uploadHandler(d, true, "map-odp"))
+	r.Post("/api/platform/branding/map-customer", uploadHandler(d, true, "map-customer"))
 	r.Post("/api/work-orders/{id}/photos", workOrderPhotoUpload(d))
 	r.Post("/api/leads/{id}/comments/photos", leadCommentPhotoUpload(d))
 	r.Post("/api/leads/{id}/documents/photos", leadDocumentPhotoUpload(d))
@@ -626,11 +634,7 @@ func uploadHandler(d *Deps, platform bool, kind string) http.HandlerFunc {
 			if cur == nil {
 				cur = &store.Branding{AppName: "drp-billing"}
 			}
-			if kind == "logo" {
-				cur.LogoURL = &url
-			} else {
-				cur.FaviconURL = &url
-			}
+			setBrandingURL(cur, kind, &url)
 			_ = d.Store.UpdatePlatformBranding(ctx, cur)
 		} else {
 			raw, err := d.Store.GetTenantBrandingRaw(ctx, tid)
@@ -638,16 +642,43 @@ func uploadHandler(d *Deps, platform bool, kind string) http.HandlerFunc {
 				http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 				return
 			}
-			if kind == "logo" {
-				raw.LogoURL = &url
-			} else {
-				raw.FaviconURL = &url
-			}
+			setBrandingURL(raw, kind, &url)
 			_ = d.Store.UpdateTenantBranding(ctx, tid, raw)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
 	}
+}
+
+// pickBrandingURL returns the URL to persist for a branding field, honouring clear/override/keep.
+func pickBrandingURL(clear bool, given, current *string) *string {
+	if clear {
+		return nil
+	}
+	if given != nil {
+		return given
+	}
+	return current
+}
+
+// setBrandingURL assigns an uploaded URL to the matching branding field for kind.
+func setBrandingURL(b *store.Branding, kind string, url *string) {
+	switch kind {
+	case "logo":
+		b.LogoURL = url
+	case "favicon":
+		b.FaviconURL = url
+	case "map-pop":
+		b.MapPopIconURL = url
+	case "map-odp":
+		b.MapODPIconURL = url
+	case "map-customer":
+		b.MapCustomerIconURL = url
+	}
+}
+
+func isMapIconKind(kind string) bool {
+	return kind == "map-pop" || kind == "map-odp" || kind == "map-customer"
 }
 
 func saveUpload(d *Deps, tenantID xid.ID, platform bool, kind string, src io.Reader, filename string, size int64) (string, error) {
@@ -656,7 +687,13 @@ func saveUpload(d *Deps, tenantID xid.ID, platform bool, kind string, src io.Rea
 		subdir = tenantID.String()
 	}
 	dir := filepath.Join(d.Config.UploadDir, subdir)
-	name, err := upload.SaveImageAsWebP(dir, kind, src, filename, size)
+	var name string
+	var err error
+	if isMapIconKind(kind) {
+		name, err = upload.SaveMapIconAsWebP(dir, kind, src, filename, size)
+	} else {
+		name, err = upload.SaveImageAsWebP(dir, kind, src, filename, size)
+	}
 	if err != nil {
 		return "", err
 	}

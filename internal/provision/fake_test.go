@@ -69,6 +69,24 @@ func TestFakeProvisionerApply(t *testing.T) {
 	}
 }
 
+func TestSecretLooksIsolir(t *testing.T) {
+	if !SecretLooksIsolir("isolir", "ISOLIR Acme:KODE", "isolir", "10Mbps") {
+		t.Fatal("comment prefix")
+	}
+	if !SecretLooksIsolir("isolir", "Acme:KODE", "isolir", "10Mbps") {
+		t.Fatal("profile isolir")
+	}
+	if SecretLooksIsolir("10Mbps", "Acme:KODE", "isolir", "10Mbps") {
+		t.Fatal("already on plan")
+	}
+	if SecretLooksIsolir("isolir", "Acme:KODE", "isolir", "isolir") {
+		t.Fatal("plan profile same name as isolir, no comment")
+	}
+	if !SecretLooksIsolir("isolir", "ISOLIR Acme:KODE", "isolir", "isolir") {
+		t.Fatal("same name still isolir via comment")
+	}
+}
+
 func TestIsolirComment(t *testing.T) {
 	got := WithIsolirComment("Acme:KODE Nama")
 	if got != "ISOLIR Acme:KODE Nama" {

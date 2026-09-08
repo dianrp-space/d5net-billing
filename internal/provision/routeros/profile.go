@@ -56,20 +56,3 @@ func (c *Client) EnsureBandwidthProfile(ctx context.Context, tenantID, routerID 
 		})
 	}
 }
-
-// upsertByName sets properties on an existing named row, or adds it if missing.
-func upsertByName(cl *routeros.Client, basePath, name string, props []string) (*routeros.Reply, error) {
-	reply, err := cl.Run(basePath+"/print", "?name="+name, "=.proplist=.id")
-	if err == nil && reply != nil {
-		for _, re := range reply.Re {
-			id := re.Map[".id"]
-			if id == "" {
-				continue
-			}
-			args := append([]string{basePath + "/set", "=numbers=" + id}, props...)
-			return cl.Run(args...)
-		}
-	}
-	args := append([]string{basePath + "/add", "=name=" + name}, props...)
-	return cl.Run(args...)
-}

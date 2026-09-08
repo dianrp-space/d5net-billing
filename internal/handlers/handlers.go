@@ -23,6 +23,7 @@ import (
 	"github.com/dianrp/drp-billing/internal/config"
 	"github.com/dianrp/drp-billing/internal/dbbackup"
 	"github.com/dianrp/drp-billing/internal/httpx"
+	"github.com/dianrp/drp-billing/internal/job"
 	"github.com/dianrp/drp-billing/internal/notify"
 	"github.com/dianrp/drp-billing/internal/payment"
 	"github.com/dianrp/drp-billing/internal/provision"
@@ -44,6 +45,12 @@ type Deps struct {
 	Config      *config.Config
 	WA          *wa.Manager
 	DBBackup    *dbbackup.Service
+	Jobs        JobRunner
+}
+
+// JobRunner runs a tenant worker cycle on demand (API process; no ticker).
+type JobRunner interface {
+	RunTenantNow(ctx context.Context, tenantID xid.ID) (job.TenantCycleResult, error)
 }
 
 func RegisterAll(api huma.API, d *Deps) {
@@ -677,6 +684,7 @@ func registerCustomers(api huma.API, d *Deps) {
 		Search    string `query:"search"`
 		ClusterID string `query:"cluster_id"`
 		IsActive  string `query:"is_active"`
+		Status    string `query:"status"`
 		Limit     int    `query:"limit" minimum:"1" maximum:"1000"`
 		Offset    int    `query:"offset" minimum:"0"`
 	}) (*struct {
@@ -703,7 +711,8 @@ func registerCustomers(api huma.API, d *Deps) {
 			isActive = &v
 		}
 		list, total, err := d.Store.ListCustomers(ctx, store.CustomerFilter{
-			TenantID: tid, ClusterID: clusterID, Search: input.Search, IsActive: isActive, Limit: input.Limit, Offset: input.Offset,
+			TenantID: tid, ClusterID: clusterID, Search: input.Search, IsActive: isActive,
+			ServiceStatus: strings.TrimSpace(input.Status), Limit: input.Limit, Offset: input.Offset,
 		})
 		if err != nil {
 			return nil, httpx.Internal(err)
@@ -829,6 +838,48 @@ func registerCustomers(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "dismantle-customer", Method: http.MethodPost, Path: "/api/customers/{id}/dismantle",
+		Summary: "Cabut pelanggan (hentikan layanan)", Tags: []string{"Customers"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body store.Customer }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		c, err := d.Store.GetCustomer(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("customer not found")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if c.IsDismantled() {
+			return nil, httpx.BadRequest("pelanggan sudah cabut")
+		}
+		if err := dismantleCustomerServices(ctx, d, tid, c.ID); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := d.Store.DismantleCustomer(ctx, tid, c.ID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.BadRequest("pelanggan sudah cabut")
+			}
+			return nil, httpx.Internal(err)
+		}
+		if d.Notify != nil {
+			_ = d.Notify.QueueTenantTelegram(ctx, tid, notify.OpsMsg("cabut", "Pelanggan cabut",
+				c.CustomerCode+" — "+c.FullName,
+			))
+		}
+		out, err := d.Store.GetCustomer(ctx, tid, c.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.Customer }{Body: *out}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "update-customer", Method: http.MethodPut, Path: "/api/customers/{id}",
 		Tags: []string{"Customers"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
@@ -885,8 +936,13 @@ func registerCustomers(api huma.API, d *Deps) {
 		existing.Longitude = input.Body.Longitude
 		existing.IdentityType = normalizeIdentityType(input.Body.IdentityType)
 		existing.IdentityNumber = trimPtr(input.Body.IdentityNumber)
-		existing.IsActive = input.Body.IsActive
-		existing.PortalEnabled = input.Body.PortalEnabled
+		if existing.IsDismantled() {
+			existing.IsActive = false
+			existing.PortalEnabled = false
+		} else {
+			existing.IsActive = input.Body.IsActive
+			existing.PortalEnabled = input.Body.PortalEnabled
+		}
 		existing.ResellerID, existing.SalesUserID = store.NormalizeAttribution(input.Body.ResellerID, input.Body.SalesUserID)
 		if phoneChanged {
 			hash, err := auth.HashPassword(phone)
@@ -930,6 +986,7 @@ func registerCustomers(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ClusterID string `query:"cluster_id"`
 		IsActive  string `query:"is_active"`
+		Status    string `query:"status"`
 	}) (*struct {
 		ContentType        string `header:"Content-Type"`
 		ContentDisposition string `header:"Content-Disposition"`
@@ -953,7 +1010,7 @@ func registerCustomers(api huma.API, d *Deps) {
 			isActive = &v
 		}
 		list, _, err := d.Store.ListCustomers(ctx, store.CustomerFilter{
-			TenantID: tid, ClusterID: clusterID, IsActive: isActive, Limit: 100000, Offset: 0,
+			TenantID: tid, ClusterID: clusterID, IsActive: isActive, ServiceStatus: strings.TrimSpace(input.Status), Limit: 100000, Offset: 0,
 		})
 		if err != nil {
 			return nil, httpx.Internal(err)
@@ -961,7 +1018,7 @@ func registerCustomers(api huma.API, d *Deps) {
 		var buf bytes.Buffer
 		w := csv.NewWriter(&buf)
 		_ = w.Write([]string{"customer_code", "full_name", "phone", "email", "address", "cluster_code",
-			"latitude", "longitude", "identity_type", "identity_number", "is_active", "portal_enabled"})
+			"latitude", "longitude", "identity_type", "identity_number", "is_active", "portal_enabled", "service_status"})
 		for _, c := range list {
 			email, addr, ccode := "", "", ""
 			if c.Email != nil {
@@ -988,7 +1045,7 @@ func registerCustomers(api huma.API, d *Deps) {
 				idNum = *c.IdentityNumber
 			}
 			_ = w.Write([]string{c.CustomerCode, c.FullName, c.Phone, email, addr, ccode, lat, lng,
-				idType, idNum, strconv.FormatBool(c.IsActive), strconv.FormatBool(c.PortalEnabled)})
+				idType, idNum, strconv.FormatBool(c.IsActive), strconv.FormatBool(c.PortalEnabled), c.ServiceStatus})
 		}
 		w.Flush()
 		if err := w.Error(); err != nil {
@@ -1524,6 +1581,7 @@ func registerPlans(api huma.API, d *Deps) {
 			GraceDays     *int     `json:"grace_days,omitempty"`
 			TaxPercent    *float64 `json:"tax_percent,omitempty"`
 			IsActive      *bool    `json:"is_active,omitempty"`
+			PortalVisible *bool    `json:"portal_visible,omitempty"`
 		}
 	}) (*struct{ Body store.Plan }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -1573,6 +1631,9 @@ func registerPlans(api huma.API, d *Deps) {
 		if input.Body.IsActive != nil {
 			p.IsActive = *input.Body.IsActive
 		}
+		if input.Body.PortalVisible != nil {
+			p.PortalVisible = *input.Body.PortalVisible
+		}
 		if p.ProfileName == nil || strings.TrimSpace(*p.ProfileName) == "" {
 			pn := code
 			p.ProfileName = &pn
@@ -1603,6 +1664,7 @@ func registerPlans(api huma.API, d *Deps) {
 			GraceDays     *int     `json:"grace_days,omitempty"`
 			TaxPercent    *float64 `json:"tax_percent,omitempty"`
 			IsActive      *bool    `json:"is_active,omitempty"`
+			PortalVisible *bool    `json:"portal_visible,omitempty"`
 		}
 	}) (*struct{ Body store.Plan }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -1665,6 +1727,9 @@ func registerPlans(api huma.API, d *Deps) {
 		}
 		if input.Body.IsActive != nil {
 			existing.IsActive = *input.Body.IsActive
+		}
+		if input.Body.PortalVisible != nil {
+			existing.PortalVisible = *input.Body.PortalVisible
 		}
 		if err := d.Store.UpdatePlan(ctx, existing); errors.Is(err, store.ErrNotFound) {
 			return nil, httpx.NotFound("plan not found")
@@ -2068,6 +2133,9 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		if cust.IsDismantled() {
+			return nil, httpx.BadRequest("pelanggan sudah cabut — tidak bisa menambah secret")
+		}
 		plan, err := d.Store.GetPlan(ctx, tid, input.Body.PlanID)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, httpx.BadRequest("plan not found")
@@ -2380,19 +2448,7 @@ func registerSubscriptions(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		if sub.RouterID != nil {
-			r, err := d.Store.GetRouter(ctx, tid, *sub.RouterID)
-			if err == nil {
-				if prov, err := d.Provisioner.Get(r.Provisioner); err == nil {
-					password := ""
-					if sub.Password != nil {
-						password = *sub.Password
-					}
-					_ = prov.Remove(ctx, &provision.ServiceSpec{
-						TenantID: tid, SubscriptionID: sub.ID, RouterID: *sub.RouterID,
-						Username: sub.Username, Password: password, ServiceType: sub.ServiceType,
-					})
-				}
-			}
+			removeSubscriptionFromRouter(ctx, d, tid, sub)
 		}
 		if err := d.Store.DeleteSubscription(ctx, tid, input.ID); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
@@ -2429,6 +2485,9 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		sub, err := d.Store.GetSubscription(ctx, tid, input.ID)
 		if err != nil {
 			return nil, httpx.NotFound("subscription not found")
+		}
+		if cust, cerr := d.Store.GetCustomer(ctx, tid, sub.CustomerID); cerr == nil && cust.IsDismantled() {
+			return nil, httpx.BadRequest("pelanggan sudah cabut — tidak bisa mengaktifkan secret")
 		}
 		plan, err := d.Store.GetPlan(ctx, tid, sub.PlanID)
 		if err != nil {
@@ -2600,14 +2659,8 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		if cust.ClusterID != nil {
-			offer, err := d.Store.GetPlanOfferByPlanCluster(ctx, tid, input.Body.PlanID, *cust.ClusterID)
-			if errors.Is(err, store.ErrNotFound) || (err == nil && !offer.IsActive) {
-				return nil, httpx.BadRequest("paket belum ditawarkan di cluster pelanggan")
-			}
-			if err != nil {
-				return nil, httpx.Internal(err)
-			}
+		if err := ensurePlanOfferedForCustomer(ctx, d, tid, input.Body.PlanID, cust); err != nil {
+			return nil, err
 		}
 		q, _, _, _, err := d.Billing.QuotePlanChange(ctx, tid, input.ID, input.Body.PlanID, time.Now())
 		if err != nil {
@@ -2652,39 +2705,13 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		if cust.ClusterID != nil {
-			offer, err := d.Store.GetPlanOfferByPlanCluster(ctx, tid, input.Body.PlanID, *cust.ClusterID)
-			if errors.Is(err, store.ErrNotFound) || (err == nil && !offer.IsActive) {
-				return nil, httpx.BadRequest("paket belum ditawarkan di cluster pelanggan")
-			}
-			if err != nil {
-				return nil, httpx.Internal(err)
-			}
-		}
-		oldUsername := sub.Username
-		oldRouterID := sub.RouterID
-
-		q, inv, err := d.Billing.ApplyPlanChange(ctx, tid, input.ID, input.Body.PlanID)
-		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				return nil, httpx.NotFound(err.Error())
-			}
-			return nil, httpx.BadRequest(err.Error())
+		if err := ensurePlanOfferedForCustomer(ctx, d, tid, input.Body.PlanID, cust); err != nil {
+			return nil, err
 		}
 
-		outSub, err := d.Store.GetSubscription(ctx, tid, input.ID)
+		q, inv, outSub, err := applyPlanChangeToRouter(ctx, d, tid, sub, cust, input.Body.PlanID)
 		if err != nil {
-			return nil, httpx.Internal(err)
-		}
-		newPlan, err := d.Store.GetPlan(ctx, tid, input.Body.PlanID)
-		if err != nil {
-			return nil, httpx.Internal(err)
-		}
-		outSub.CustomerName = cust.FullName
-		outSub.CustomerCode = cust.CustomerCode
-		outSub.PlanName = newPlan.Name
-		if err := syncSubscriptionToRouter(ctx, d, outSub, newPlan, oldUsername, oldRouterID); err != nil {
-			slog.Warn("change-plan: sync router failed", "err", err, "subscription_id", input.ID)
+			return nil, err
 		}
 
 		return &struct {
@@ -2983,10 +3010,14 @@ func registerInvoices(api huma.API, d *Deps) {
 		if amount == 0 {
 			amount = inv.TotalAmount - inv.PaidAmount
 		}
+		method := payment.NormalizeMethod(input.Body.Method)
+		if method == "" {
+			return nil, httpx.BadRequest("metode pembayaran wajib")
+		}
 		ref := input.Body.Reference
-		p := &store.Payment{TenantID: tid, CustomerID: inv.CustomerID, InvoiceID: &input.ID, Amount: amount, Method: input.Body.Method, Reference: &ref}
-		if p.Method == "" {
-			p.Method = "manual"
+		p := &store.Payment{
+			TenantID: tid, CustomerID: inv.CustomerID, InvoiceID: &input.ID,
+			Amount: amount, Method: method, Status: "paid", Reference: &ref,
 		}
 		if err := d.Store.RecordPayment(ctx, p); err != nil {
 			return nil, httpx.Internal(err)
@@ -3076,12 +3107,11 @@ func registerTickets(api huma.API, d *Deps) {
 			return nil, httpx.BadRequest("subjek wajib")
 		}
 		desc := strings.TrimSpace(input.Body.Description)
-		var descPtr *string
-		if desc != "" {
-			descPtr = &desc
+		if desc == "" {
+			return nil, httpx.BadRequest("deskripsi wajib")
 		}
 		t := &store.Ticket{
-			TenantID: tid, CustomerID: input.Body.CustomerID, Subject: subject, Description: descPtr,
+			TenantID: tid, CustomerID: input.Body.CustomerID, Subject: subject, Description: &desc,
 			Category: input.Body.Category, Priority: input.Body.Priority, Status: "open",
 		}
 		if t.Category == "" {
@@ -3106,8 +3136,21 @@ func registerTickets(api huma.API, d *Deps) {
 		}
 		full, _ := d.Store.GetTicket(ctx, tid, t.ID)
 		if full != nil {
+			who := strings.TrimSpace(full.CustomerName)
+			if who == "" {
+				who = "tanpa pelanggan"
+			}
+			_ = d.Notify.QueueTicketTelegram(ctx, tid, full.CustomerID, full.Subject,
+				"Prioritas: "+full.Priority,
+				"Kategori: "+full.Category,
+				"Pelanggan: "+who,
+			)
 			return &struct{ Body store.Ticket }{Body: *full}, nil
 		}
+		_ = d.Notify.QueueTicketTelegram(ctx, tid, t.CustomerID, t.Subject,
+			"Prioritas: "+t.Priority,
+			"Kategori: "+t.Category,
+		)
 		return &struct{ Body store.Ticket }{Body: *t}, nil
 	})
 
@@ -3279,7 +3322,35 @@ func registerTickets(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.BadRequest(err.Error())
 		}
+		if store.NormalizeTicketStatus(cur.Status) == "open" {
+			if err := d.Store.UpdateTicketStatus(ctx, tid, input.ID, "in_progress"); err == nil {
+				msg := fmt.Sprintf("Status: %s → %s", store.TicketStatusLabel("open"), store.TicketStatusLabel("in_progress"))
+				_, _ = d.Store.AddTicketMessage(ctx, tid, input.ID, "system", senderID, msg, nil)
+			}
+		}
 		return &struct{ Body store.TicketMessage }{Body: *m}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-ticket", Method: http.MethodDelete, Path: "/api/tickets/{id}",
+		Tags: []string{"Tickets"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body map[string]string }, error) {
+		if err := requireDispatchOps(ctx, d); err != nil {
+			return nil, err
+		}
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.DeleteTicket(ctx, tid, input.ID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound("tiket tidak ditemukan")
+			}
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "deleted"}}, nil
 	})
 }
 
@@ -3709,6 +3780,7 @@ func registerODP(api huma.API, d *Deps) {
 			ODPs      []store.ODP      `json:"odps"`
 			Customers []store.Customer `json:"customers"`
 			Clusters  []store.Cluster  `json:"clusters"`
+			Icons     store.MapIcons   `json:"icons"`
 		}
 	}, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -3727,16 +3799,22 @@ func registerODP(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		icons, err := d.Store.EffectiveMapIcons(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
 		out := &struct {
 			Body struct {
 				ODPs      []store.ODP      `json:"odps"`
 				Customers []store.Customer `json:"customers"`
 				Clusters  []store.Cluster  `json:"clusters"`
+				Icons     store.MapIcons   `json:"icons"`
 			}
 		}{}
 		out.Body.ODPs = odps
 		out.Body.Customers = custs
 		out.Body.Clusters = clusters
+		out.Body.Icons = icons
 		return out, nil
 	})
 
@@ -4243,6 +4321,47 @@ func registerSearch(api huma.API, d *Deps) {
 	})
 }
 
+func ensurePlanOfferedForCustomer(ctx context.Context, d *Deps, tid, planID xid.ID, cust *store.Customer) error {
+	if cust == nil || cust.ClusterID == nil || xid.IsNil(*cust.ClusterID) {
+		return nil
+	}
+	offer, err := d.Store.GetPlanOfferByPlanCluster(ctx, tid, planID, *cust.ClusterID)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !offer.IsActive) {
+		return httpx.BadRequest("paket belum ditawarkan di cluster pelanggan")
+	}
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	return nil
+}
+
+func applyPlanChangeToRouter(ctx context.Context, d *Deps, tid xid.ID, sub *store.Subscription, cust *store.Customer, newPlanID xid.ID) (*billing.PlanChangeQuote, *store.Invoice, *store.Subscription, error) {
+	oldUsername := sub.Username
+	oldRouterID := sub.RouterID
+	q, inv, err := d.Billing.ApplyPlanChange(ctx, tid, sub.ID, newPlanID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, nil, nil, httpx.NotFound(err.Error())
+		}
+		return nil, nil, nil, httpx.BadRequest(err.Error())
+	}
+	outSub, err := d.Store.GetSubscription(ctx, tid, sub.ID)
+	if err != nil {
+		return nil, nil, nil, httpx.Internal(err)
+	}
+	newPlan, err := d.Store.GetPlan(ctx, tid, newPlanID)
+	if err != nil {
+		return nil, nil, nil, httpx.Internal(err)
+	}
+	outSub.CustomerName = cust.FullName
+	outSub.CustomerCode = cust.CustomerCode
+	outSub.PlanName = newPlan.Name
+	if err := syncSubscriptionToRouter(ctx, d, outSub, newPlan, oldUsername, oldRouterID); err != nil {
+		slog.Warn("change-plan: sync router failed", "err", err, "subscription_id", sub.ID)
+	}
+	return q, inv, outSub, nil
+}
+
 func registerPortal(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "portal-login", Method: http.MethodPost, Path: "/api/portal/login",
@@ -4251,8 +4370,8 @@ func registerPortal(api huma.API, d *Deps) {
 		Body struct {
 			Phone      string `json:"phone"`
 			Password   string `json:"password"`
-			TenantID   xid.ID `json:"tenant_id, omitempty"`
-			TenantSlug string `json:"tenant_slug, omitempty"`
+			TenantID   xid.ID `json:"tenant_id,omitempty"`
+			TenantSlug string `json:"tenant_slug,omitempty"`
 		}
 	}) (*struct {
 		Body struct {
@@ -4312,7 +4431,28 @@ func registerPortal(api huma.API, d *Deps) {
 			for i := range plist {
 				plist[i].CustomerName = c.FullName
 				plist[i].CustomerCode = c.CustomerCode
+				plist[i].Method = payment.NormalizeMethod(plist[i].Method)
 				payments = append(payments, plist[i])
+			}
+			intents, _ := d.Store.ListCustomerOpenPaymentIntents(ctx, ten.ID, c.ID, 20)
+			for i := range intents {
+				pi := intents[i]
+				row := store.Payment{
+					ID:           pi.ID,
+					TenantID:     pi.TenantID,
+					CustomerID:   pi.CustomerID,
+					InvoiceID:    pi.InvoiceID,
+					Amount:       pi.Amount,
+					Method:       payment.MethodFromProvider(pi.Provider),
+					Status:       pi.Status,
+					CreatedAt:    pi.CreatedAt,
+					CustomerName: c.FullName,
+					CustomerCode: c.CustomerCode,
+				}
+				if pi.InvoiceID != nil {
+					row.InvoiceNumber = d.Store.InvoiceNumberByID(ctx, ten.ID, *pi.InvoiceID)
+				}
+				payments = append(payments, row)
 			}
 			if b, berr := d.Store.GetWallet(ctx, ten.ID, c.ID); berr == nil {
 				balance += b
@@ -4414,13 +4554,8 @@ func registerPortal(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID            xid.ID `path:"id"`
 		Authorization string `header:"Authorization"`
-		Body          struct {
-			TenantSlug string `json:"tenant_slug"`
-			Phone      string `json:"phone"`
-			Password   string `json:"password"`
-		}
 	}) (*struct{ Body store.PaymentIntent }, error) {
-		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, input.Body.TenantSlug, input.Body.Phone, input.Body.Password)
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
 		if err != nil {
 			return nil, err
 		}
@@ -4508,6 +4643,434 @@ func registerPortal(api huma.API, d *Deps) {
 		}
 		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-list-tickets", Method: http.MethodGet, Path: "/api/portal/tickets",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		Authorization string `header:"Authorization"`
+	}) (*struct {
+		Body struct {
+			Data []store.Ticket `json:"data"`
+		}
+	}, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]xid.ID, 0, len(custs))
+		for _, c := range custs {
+			ids = append(ids, c.ID)
+		}
+		list, err := d.Store.ListTicketsByCustomers(ctx, ten.ID, ids, 100)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.Ticket{}
+		}
+		return &struct {
+			Body struct {
+				Data []store.Ticket `json:"data"`
+			}
+		}{Body: struct {
+			Data []store.Ticket `json:"data"`
+		}{Data: list}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-create-ticket", Method: http.MethodPost, Path: "/api/portal/tickets",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		Authorization string `header:"Authorization"`
+		Body          struct {
+			CustomerID  *xid.ID `json:"customer_id,omitempty"`
+			Subject     string  `json:"subject"`
+			Description string  `json:"description"`
+			Category    string  `json:"category"`
+			Priority    string  `json:"priority"`
+		}
+	}) (*struct{ Body store.Ticket }, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		target := custs[0]
+		if input.Body.CustomerID != nil {
+			found := false
+			for _, c := range custs {
+				if c.ID == *input.Body.CustomerID {
+					target = c
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, httpx.BadRequest("akun tidak ditemukan")
+			}
+		} else if len(custs) > 1 {
+			return nil, httpx.BadRequest("pilih akun untuk keluhan ini")
+		}
+		subject := strings.TrimSpace(input.Body.Subject)
+		if subject == "" {
+			return nil, httpx.BadRequest("subjek wajib")
+		}
+		desc := strings.TrimSpace(input.Body.Description)
+		if desc == "" {
+			return nil, httpx.BadRequest("deskripsi wajib")
+		}
+		cat := strings.TrimSpace(strings.ToLower(input.Body.Category))
+		if cat == "" {
+			cat = "general"
+		}
+		pri := strings.TrimSpace(strings.ToLower(input.Body.Priority))
+		if pri == "" {
+			pri = "normal"
+		}
+		cid := target.ID
+		t := &store.Ticket{
+			TenantID: ten.ID, CustomerID: &cid, Subject: subject, Description: &desc,
+			Category: cat, Priority: pri, Status: "open",
+		}
+		if err := d.Store.CreateTicket(ctx, t); err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+		_, _ = d.Store.AddTicketMessage(ctx, ten.ID, t.ID, "customer", &cid, desc, nil)
+		full, _ := d.Store.GetTicket(ctx, ten.ID, t.ID)
+		who := strings.TrimSpace(target.FullName)
+		if who == "" {
+			who = target.CustomerCode
+		}
+		subj := t.Subject
+		if full != nil {
+			subj = full.Subject
+		}
+		_ = d.Notify.QueueTicketTelegram(ctx, ten.ID, &cid, subj,
+			"Dari portal pelanggan",
+			"Prioritas: "+t.Priority,
+			"Kategori: "+t.Category,
+			"Pelanggan: "+who,
+		)
+		if full != nil {
+			return &struct{ Body store.Ticket }{Body: *full}, nil
+		}
+		return &struct{ Body store.Ticket }{Body: *t}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-list-ticket-messages", Method: http.MethodGet, Path: "/api/portal/tickets/{id}/messages",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+	}) (*struct{ Body []store.TicketMessage }, error) {
+		ten, _, t, err := portalTicketForSession(ctx, d, input.Authorization, input.ID)
+		if err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListTicketMessages(ctx, ten.ID, t.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.TicketMessage{}
+		}
+		return &struct{ Body []store.TicketMessage }{Body: list}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-add-ticket-message", Method: http.MethodPost, Path: "/api/portal/tickets/{id}/messages",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+		Body          struct {
+			Message string `json:"message"`
+		}
+	}) (*struct{ Body store.TicketMessage }, error) {
+		ten, cust, t, err := portalTicketForSession(ctx, d, input.Authorization, input.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !store.TicketAllowsCustomerReply(t.Status) {
+			return nil, httpx.BadRequest("tiket ini sudah ditutup")
+		}
+		body := strings.TrimSpace(input.Body.Message)
+		if body == "" {
+			return nil, httpx.BadRequest("pesan wajib")
+		}
+		cid := cust.ID
+		m, err := d.Store.AddTicketMessage(ctx, ten.ID, t.ID, "customer", &cid, body, nil)
+		if err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+		who := strings.TrimSpace(cust.FullName)
+		if who == "" {
+			who = cust.CustomerCode
+		}
+		preview := body
+		if r := []rune(preview); len(r) > 200 {
+			preview = string(r[:200]) + "…"
+		}
+		_ = d.Notify.QueueTicketTelegram(ctx, ten.ID, &cid, t.Subject,
+			"Balasan pelanggan",
+			"Pelanggan: "+who,
+			preview,
+		)
+		return &struct{ Body store.TicketMessage }{Body: *m}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-list-subscriptions", Method: http.MethodGet, Path: "/api/portal/subscriptions",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		Authorization string `header:"Authorization"`
+	}) (*struct {
+		Body struct {
+			Data []store.Subscription `json:"data"`
+		}
+	}, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		var subs []store.Subscription
+		for _, c := range custs {
+			cid := c.ID
+			list, _, _ := d.Store.ListSubscriptions(ctx, ten.ID, "", &cid, 200, 0)
+			subs = append(subs, list...)
+		}
+		if subs == nil {
+			subs = []store.Subscription{}
+		}
+		return &struct {
+			Body struct {
+				Data []store.Subscription `json:"data"`
+			}
+		}{Body: struct {
+			Data []store.Subscription `json:"data"`
+		}{Data: subs}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-list-plans", Method: http.MethodGet, Path: "/api/portal/plans",
+		Tags:    []string{"Portal"},
+		Summary: "Catalog of portal-visible plans for the logged-in customer",
+	}, func(ctx context.Context, input *struct {
+		Authorization string `header:"Authorization"`
+	}) (*struct {
+		Body struct {
+			Data []store.PortalPlanOption `json:"data"`
+		}
+	}, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		seen := map[xid.ID]struct{}{}
+		var list []store.PortalPlanOption
+		for _, c := range custs {
+			opts, err := d.Store.ListPortalPlans(ctx, ten.ID, c.ClusterID, "", xid.Nil())
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			for _, p := range opts {
+				if _, ok := seen[p.ID]; ok {
+					continue
+				}
+				seen[p.ID] = struct{}{}
+				list = append(list, p)
+			}
+		}
+		if list == nil {
+			list = []store.PortalPlanOption{}
+		}
+		return &struct {
+			Body struct {
+				Data []store.PortalPlanOption `json:"data"`
+			}
+		}{Body: struct {
+			Data []store.PortalPlanOption `json:"data"`
+		}{Data: list}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-list-subscription-plans", Method: http.MethodGet, Path: "/api/portal/subscriptions/{id}/plans",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+	}) (*struct {
+		Body struct {
+			Data []store.PortalPlanOption `json:"data"`
+		}
+	}, error) {
+		ten, cust, sub, err := portalSubscriptionForSession(ctx, d, input.Authorization, input.ID)
+		if err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListPortalPlans(ctx, ten.ID, cust.ClusterID, sub.ServiceType, sub.PlanID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct {
+			Body struct {
+				Data []store.PortalPlanOption `json:"data"`
+			}
+		}{Body: struct {
+			Data []store.PortalPlanOption `json:"data"`
+		}{Data: list}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-preview-change-plan", Method: http.MethodPost, Path: "/api/portal/subscriptions/{id}/change-plan/preview",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+		Body          struct {
+			PlanID xid.ID `json:"plan_id"`
+		}
+	}) (*struct{ Body billing.PlanChangeQuote }, error) {
+		ten, cust, sub, err := portalSubscriptionForSession(ctx, d, input.Authorization, input.ID)
+		if err != nil {
+			return nil, err
+		}
+		if xid.IsNil(input.Body.PlanID) {
+			return nil, httpx.BadRequest("plan_id wajib")
+		}
+		if err := ensurePortalPlanChoice(ctx, d, ten.ID, cust, sub, input.Body.PlanID); err != nil {
+			return nil, err
+		}
+		q, _, _, _, err := d.Billing.QuotePlanChange(ctx, ten.ID, sub.ID, input.Body.PlanID, time.Now())
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, httpx.NotFound(err.Error())
+			}
+			return nil, httpx.BadRequest(err.Error())
+		}
+		return &struct{ Body billing.PlanChangeQuote }{Body: *q}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-change-plan", Method: http.MethodPost, Path: "/api/portal/subscriptions/{id}/change-plan",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+		Body          struct {
+			PlanID xid.ID `json:"plan_id"`
+		}
+	}) (*struct {
+		Body struct {
+			Quote   billing.PlanChangeQuote `json:"quote"`
+			Invoice *store.Invoice          `json:"invoice,omitempty"`
+			Status  string                  `json:"status"`
+		}
+	}, error) {
+		ten, cust, sub, err := portalSubscriptionForSession(ctx, d, input.Authorization, input.ID)
+		if err != nil {
+			return nil, err
+		}
+		if xid.IsNil(input.Body.PlanID) {
+			return nil, httpx.BadRequest("plan_id wajib")
+		}
+		if err := ensurePortalPlanChoice(ctx, d, ten.ID, cust, sub, input.Body.PlanID); err != nil {
+			return nil, err
+		}
+		q, inv, outSub, err := applyPlanChangeToRouter(ctx, d, ten.ID, sub, cust, input.Body.PlanID)
+		if err != nil {
+			return nil, err
+		}
+		who := strings.TrimSpace(cust.FullName)
+		if who == "" {
+			who = cust.CustomerCode
+		}
+		lines := []string{
+			"Dari portal pelanggan",
+			q.OldPlanName + " → " + q.NewPlanName,
+			"Arah: " + q.Direction,
+			"User: " + outSub.Username,
+		}
+		if q.Direction == "downgrade" {
+			lines = append(lines, "Sisa tagihan tidak di-refund")
+		}
+		if q.RequiresCharge {
+			lines = append(lines, fmt.Sprintf("Tagihan sekarang: %d", q.TotalAmount))
+		}
+		cluster, router, _ := d.Store.CustomerNetworkLabels(ctx, ten.ID, cust.ID)
+		lines = append(lines, notify.OpsNetworkLines(cluster, router)...)
+		if d.Notify != nil {
+			_ = d.Notify.QueueTenantTelegram(ctx, ten.ID, notify.OpsMsg("paket", who, lines...))
+		}
+		return &struct {
+			Body struct {
+				Quote   billing.PlanChangeQuote `json:"quote"`
+				Invoice *store.Invoice          `json:"invoice,omitempty"`
+				Status  string                  `json:"status"`
+			}
+		}{Body: struct {
+			Quote   billing.PlanChangeQuote `json:"quote"`
+			Invoice *store.Invoice          `json:"invoice,omitempty"`
+			Status  string                  `json:"status"`
+		}{Quote: *q, Invoice: inv, Status: outSub.Status}}, nil
+	})
+}
+
+func portalTicketForSession(ctx context.Context, d *Deps, authorization string, ticketID xid.ID) (*store.Tenant, *store.Customer, *store.Ticket, error) {
+	ten, custs, err := authenticatePortalRequest(ctx, d, authorization, "", "", "")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	t, err := d.Store.GetTicket(ctx, ten.ID, ticketID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, nil, httpx.NotFound("tiket tidak ditemukan")
+	}
+	if err != nil {
+		return nil, nil, nil, httpx.Internal(err)
+	}
+	if t.CustomerID == nil {
+		return nil, nil, nil, httpx.NotFound("tiket tidak ditemukan")
+	}
+	for _, c := range custs {
+		if c != nil && c.ID == *t.CustomerID {
+			return ten, c, t, nil
+		}
+	}
+	return nil, nil, nil, httpx.NotFound("tiket tidak ditemukan")
+}
+
+func portalSubscriptionForSession(ctx context.Context, d *Deps, authorization string, subscriptionID xid.ID) (*store.Tenant, *store.Customer, *store.Subscription, error) {
+	ten, custs, err := authenticatePortalRequest(ctx, d, authorization, "", "", "")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sub, err := d.Store.GetSubscription(ctx, ten.ID, subscriptionID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, nil, httpx.NotFound("langganan tidak ditemukan")
+	}
+	if err != nil {
+		return nil, nil, nil, httpx.Internal(err)
+	}
+	for _, c := range custs {
+		if c != nil && c.ID == sub.CustomerID {
+			return ten, c, sub, nil
+		}
+	}
+	return nil, nil, nil, httpx.NotFound("langganan tidak ditemukan")
+}
+
+func ensurePortalPlanChoice(ctx context.Context, d *Deps, tid xid.ID, cust *store.Customer, sub *store.Subscription, newPlanID xid.ID) error {
+	opts, err := d.Store.ListPortalPlans(ctx, tid, cust.ClusterID, sub.ServiceType, sub.PlanID)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	for _, o := range opts {
+		if o.ID == newPlanID {
+			return nil
+		}
+	}
+	return httpx.BadRequest("paket tidak tersedia di portal")
 }
 
 // authenticatePortalCustomers resolves tenant + ALL customers sharing the phone

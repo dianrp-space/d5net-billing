@@ -23,6 +23,10 @@ const MaxBytes = 15 << 20 // 15 MiB
 // MaxEdge is the longest side kept after resize (saves storage/bandwidth).
 const MaxEdge = 1600
 
+// MaxMapIconEdge is the longest side kept after resize for map icons.
+// Map pins render at ~32px, so a 128px edge keeps them crisp on retina while tiny on disk.
+const MaxMapIconEdge = 128
+
 var rasterExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".gif": true, ".ico": true,
 }
@@ -31,6 +35,16 @@ var rasterExts = map[string]bool{
 // Inputs are resized (max MaxEdge) and always re-encoded to WebP for smaller files.
 // SVG is kept as {kind}.svg (not rasterized). Older sibling files with other extensions are removed.
 func SaveImageAsWebP(dir, kind string, src io.Reader, filename string, declaredSize int64) (publicName string, err error) {
+	return saveImageAsWebPWithEdge(dir, kind, src, filename, declaredSize, MaxEdge)
+}
+
+// SaveMapIconAsWebP is like SaveImageAsWebP but resizes to MaxMapIconEdge so the
+// uploaded image is small enough to be used as a compact map pin icon.
+func SaveMapIconAsWebP(dir, kind string, src io.Reader, filename string, declaredSize int64) (publicName string, err error) {
+	return saveImageAsWebPWithEdge(dir, kind, src, filename, declaredSize, MaxMapIconEdge)
+}
+
+func saveImageAsWebPWithEdge(dir, kind string, src io.Reader, filename string, declaredSize int64, maxEdge int) (publicName string, err error) {
 	if declaredSize > MaxBytes {
 		return "", fmt.Errorf("file terlalu besar (max 15MB)")
 	}
@@ -71,7 +85,7 @@ func SaveImageAsWebP(dir, kind string, src io.Reader, filename string, declaredS
 	if err != nil {
 		return "", fmt.Errorf("gagal baca gambar: %w", err)
 	}
-	img = resizeMax(img, MaxEdge)
+	img = resizeMax(img, maxEdge)
 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("gagal buat folder upload")

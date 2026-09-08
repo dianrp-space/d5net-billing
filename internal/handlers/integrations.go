@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -23,31 +24,34 @@ const (
 )
 
 type paymentIntegrationStored struct {
-	APIKey        string `json:"api_key"`
-	WebhookSecret string `json:"webhook_secret"`
-	BaseURL       string `json:"base_url"`
-	Enabled       bool   `json:"enabled"`
+	APIKey           string `json:"api_key"`
+	WebhookSecret    string `json:"webhook_secret"`
+	BaseURL          string `json:"base_url"`
+	ExpiresInMinutes int    `json:"expires_in_minutes"`
+	Enabled          bool   `json:"enabled"`
 }
 
 type paymentIntegrationView struct {
-	Configured      bool   `json:"configured"`
-	Enabled         bool   `json:"enabled"`
-	BaseURL         string `json:"base_url"`
-	Method          string `json:"method"`
-	Provider        string `json:"provider"`
-	EnvFallback     bool   `json:"env_fallback"`
-	APIKey          string `json:"api_key,omitempty"`
-	WebhookSecret   string `json:"webhook_secret,omitempty"`
-	WebhookPath     string `json:"webhook_path"`
-	WebhookURL      string `json:"webhook_url"`
-	WebhookBaseHint string `json:"webhook_base_hint"`
+	Configured       bool   `json:"configured"`
+	Enabled          bool   `json:"enabled"`
+	BaseURL          string `json:"base_url"`
+	Method           string `json:"method"`
+	Provider         string `json:"provider"`
+	EnvFallback      bool   `json:"env_fallback"`
+	APIKey           string `json:"api_key"`
+	WebhookSecret    string `json:"webhook_secret"`
+	ExpiresInMinutes int    `json:"expires_in_minutes"`
+	WebhookPath      string `json:"webhook_path"`
+	WebhookURL       string `json:"webhook_url"`
+	WebhookBaseHint  string `json:"webhook_base_hint"`
 }
 
 type paymentIntegrationPut struct {
-	Enabled       bool   `json:"enabled"`
-	BaseURL       string `json:"base_url,omitempty"`
-	APIKey        string `json:"api_key,omitempty"`
-	WebhookSecret string `json:"webhook_secret,omitempty"`
+	Enabled          bool   `json:"enabled"`
+	BaseURL          string `json:"base_url,omitempty"`
+	APIKey           string `json:"api_key,omitempty"`
+	WebhookSecret    string `json:"webhook_secret,omitempty"`
+	ExpiresInMinutes int    `json:"expires_in_minutes,omitempty"`
 }
 
 type messagingIntegrationStored struct {
@@ -70,12 +74,20 @@ type messagingIntegrationView struct {
 	TelegramBotToken   string `json:"telegram_bot_token,omitempty"`
 }
 
+type telegramIntegrationPut struct {
+	TelegramEnabled  bool   `json:"telegram_enabled"`
+	TelegramChatID   string `json:"telegram_chat_id"`
+	TelegramBotToken string `json:"telegram_bot_token,omitempty"`
+}
+
 func registerIntegrations(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-payment-integration", Method: http.MethodGet, Path: "/api/integrations/payment",
 		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Host            string `header:"Host"`
+		Origin          string `header:"Origin"`
+		Referer         string `header:"Referer"`
 		XForwardedHost  string `header:"X-Forwarded-Host"`
 		XForwardedProto string `header:"X-Forwarded-Proto"`
 	}) (*struct{ Body paymentIntegrationView }, error) {
@@ -87,7 +99,7 @@ func registerIntegrations(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body paymentIntegrationView }{Body: paymentView(ctx, d, tid, stored, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
+		return &struct{ Body paymentIntegrationView }{Body: paymentView(ctx, d, tid, stored, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -95,6 +107,8 @@ func registerIntegrations(api huma.API, d *Deps) {
 		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Host            string `header:"Host"`
+		Origin          string `header:"Origin"`
+		Referer         string `header:"Referer"`
 		XForwardedHost  string `header:"X-Forwarded-Host"`
 		XForwardedProto string `header:"X-Forwarded-Proto"`
 		Body            paymentIntegrationPut
@@ -125,10 +139,13 @@ func registerIntegrations(api huma.API, d *Deps) {
 			}
 			cur.WebhookSecret = enc
 		}
+		if input.Body.ExpiresInMinutes > 0 {
+			cur.ExpiresInMinutes = payment.ClampQRISExpiresMinutes(input.Body.ExpiresInMinutes)
+		}
 		if err := d.Store.UpsertSettingJSON(ctx, tid, settingPayment, cur); err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body paymentIntegrationView }{Body: paymentView(ctx, d, tid, cur, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
+		return &struct{ Body paymentIntegrationView }{Body: paymentView(ctx, d, tid, cur, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -143,14 +160,14 @@ func registerIntegrations(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body messagingIntegrationView }{Body: messagingView(stored)}, nil
+		return &struct{ Body messagingIntegrationView }{Body: messagingView(d, stored)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
 		OperationID: "put-telegram-integration", Method: http.MethodPut, Path: "/api/integrations/telegram",
 		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		Body messagingIntegrationView
+		Body telegramIntegrationPut
 	}) (*struct{ Body messagingIntegrationView }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
@@ -172,7 +189,7 @@ func registerIntegrations(api huma.API, d *Deps) {
 		if err := d.Store.UpsertSettingJSON(ctx, tid, settingMessaging, cur); err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body messagingIntegrationView }{Body: messagingView(cur)}, nil
+		return &struct{ Body messagingIntegrationView }{Body: messagingView(d, cur)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -306,7 +323,25 @@ func paymentWebhookPath() string {
 	return "/api/webhooks/payment/" + payment.ProviderDRP
 }
 
-func publicOrigin(proto, forwardedHost, host string) string {
+func originFromReferer(referer string) string {
+	u, err := url.Parse(strings.TrimSpace(referer))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	return strings.TrimRight(u.Scheme+"://"+u.Host, "/")
+}
+
+func publicOrigin(origin, referer, proto, forwardedHost, host string) string {
+	o := strings.TrimSpace(origin)
+	if strings.HasPrefix(o, "http://") || strings.HasPrefix(o, "https://") {
+		return strings.TrimRight(o, "/")
+	}
+	if r := originFromReferer(referer); r != "" {
+		return r
+	}
 	h := strings.TrimSpace(forwardedHost)
 	if h == "" {
 		h = strings.TrimSpace(host)
@@ -331,25 +366,37 @@ func publicOrigin(proto, forwardedHost, host string) string {
 	return p + "://" + h
 }
 
-func paymentWebhookURL(ctx context.Context, d *Deps, tid xid.ID, proto, forwardedHost, host string) string {
+func paymentWebhookURL(ctx context.Context, d *Deps, tid xid.ID, origin, referer, proto, forwardedHost, host string) string {
 	path := paymentWebhookPath()
-	if net, err := d.Store.GetIsolirNetworkSettings(ctx, tid); err == nil {
-		if base := strings.TrimRight(strings.TrimSpace(net.PortalBaseURL), "/"); base != "" {
-			return base + path
-		}
+	if app := publicOrigin(origin, referer, proto, forwardedHost, host); app != "" {
+		return app + path
 	}
-	if origin := publicOrigin(proto, forwardedHost, host); origin != "" {
-		return origin + path
+	if d != nil && d.Store != nil {
+		if net, err := d.Store.GetIsolirNetworkSettings(ctx, tid); err == nil {
+			if base := strings.TrimRight(strings.TrimSpace(net.PortalBaseURL), "/"); base != "" {
+				return base + path
+			}
+		}
 	}
 	return path
 }
 
-func paymentView(ctx context.Context, d *Deps, tid xid.ID, s paymentIntegrationStored, proto, forwardedHost, host string) paymentIntegrationView {
+func paymentView(ctx context.Context, d *Deps, tid xid.ID, s paymentIntegrationStored, origin, referer, proto, forwardedHost, host string) paymentIntegrationView {
 	envKey := ""
+	envSecret := ""
 	if d != nil && d.Config != nil {
 		envKey = strings.TrimSpace(d.Config.DRPPaymentAPIKey)
+		envSecret = d.Config.DRPPaymentWebhookSecret
 	}
+	apiKey := decryptSecret(d, s.APIKey)
+	webhookSecret := decryptSecret(d, s.WebhookSecret)
 	envFallback := s.APIKey == "" && envKey != ""
+	if apiKey == "" {
+		apiKey = envKey
+	}
+	if webhookSecret == "" {
+		webhookSecret = envSecret
+	}
 	base := strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
 	if base == "" && d != nil && d.Config != nil {
 		base = strings.TrimRight(strings.TrimSpace(d.Config.DRPPaymentBaseURL), "/")
@@ -358,21 +405,24 @@ func paymentView(ctx context.Context, d *Deps, tid xid.ID, s paymentIntegrationS
 		base = payment.DefaultDRPBaseURL
 	}
 	hint := paymentWebhookPath()
-	webhookURL := paymentWebhookURL(ctx, d, tid, proto, forwardedHost, host)
+	webhookURL := paymentWebhookURL(ctx, d, tid, origin, referer, proto, forwardedHost, host)
 	return paymentIntegrationView{
-		Configured:      s.APIKey != "" || envKey != "",
-		Enabled:         s.Enabled,
-		BaseURL:         base,
-		Method:          "qris",
-		Provider:        payment.ProviderDRP,
-		EnvFallback:     envFallback,
-		WebhookPath:     hint,
-		WebhookURL:      webhookURL,
-		WebhookBaseHint: webhookURL,
+		Configured:       s.APIKey != "" || envKey != "",
+		Enabled:          s.Enabled,
+		BaseURL:          base,
+		Method:           "qris",
+		Provider:         payment.ProviderDRP,
+		EnvFallback:      envFallback,
+		APIKey:           apiKey,
+		WebhookSecret:    webhookSecret,
+		ExpiresInMinutes: qrisExpiresMinutes(s, d),
+		WebhookPath:      hint,
+		WebhookURL:       webhookURL,
+		WebhookBaseHint:  webhookURL,
 	}
 }
 
-func messagingView(s messagingIntegrationStored) messagingIntegrationView {
+func messagingView(d *Deps, s messagingIntegrationStored) messagingIntegrationView {
 	return messagingIntegrationView{
 		WhatsAppAPIURL:     s.WhatsAppAPIURL,
 		WhatsAppConfigured: s.WhatsAppAPIKey != "",
@@ -380,11 +430,22 @@ func messagingView(s messagingIntegrationStored) messagingIntegrationView {
 		TelegramChatID:     s.TelegramChatID,
 		WhatsAppEnabled:    s.WhatsAppEnabled,
 		TelegramEnabled:    s.TelegramEnabled,
+		TelegramBotToken:   decryptSecret(d, s.TelegramBotToken),
 	}
 }
 
+func qrisExpiresMinutes(s paymentIntegrationStored, d *Deps) int {
+	if s.ExpiresInMinutes > 0 {
+		return payment.ClampQRISExpiresMinutes(s.ExpiresInMinutes)
+	}
+	if d != nil && d.Config != nil && d.Config.DRPPaymentExpiresInMinutes > 0 {
+		return payment.ClampQRISExpiresMinutes(d.Config.DRPPaymentExpiresInMinutes)
+	}
+	return payment.DefaultQRISExpiresMinutes
+}
+
 func decryptSecret(d *Deps, enc string) string {
-	if enc == "" || d.Encryptor == nil {
+	if enc == "" || d == nil || d.Encryptor == nil {
 		return ""
 	}
 	plain, err := d.Encryptor.DecryptString(enc)
@@ -446,5 +507,7 @@ func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name 
 		}
 		return nil, httpx.BadRequest("DRP Payment belum dikonfigurasi")
 	}
-	return payment.NewDRPProvider(baseURL, apiKey, webhookSecret), nil
+	p := payment.NewDRPProvider(baseURL, apiKey, webhookSecret)
+	p.ExpiresInMinutes = qrisExpiresMinutes(cfg, d)
+	return p, nil
 }

@@ -44,12 +44,13 @@ func registerPublicTenant(api huma.API, d *Deps) {
 		Slug string `path:"slug"`
 	}) (*struct {
 		Body struct {
-			Slug       string  `json:"slug"`
-			Name       string  `json:"name"`
-			IsActive   bool    `json:"is_active"`
-			AppName    string  `json:"app_name"`
-			LogoURL    *string `json:"logo_url,omitempty"`
-			FaviconURL *string `json:"favicon_url,omitempty"`
+			Slug         string  `json:"slug"`
+			Name         string  `json:"name"`
+			IsActive     bool    `json:"is_active"`
+			AppName      string  `json:"app_name"`
+			LogoURL      *string `json:"logo_url,omitempty"`
+			FaviconURL   *string `json:"favicon_url,omitempty"`
+			PrimaryColor string  `json:"primary_color,omitempty"`
 		}
 	}, error) {
 		t, err := d.Store.GetTenantBySlug(ctx, strings.ToLower(strings.TrimSpace(input.Slug)))
@@ -66,14 +67,16 @@ func registerPublicTenant(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		gen, _ := d.Store.GetGeneralSettings(ctx, t.ID)
 		out := &struct {
 			Body struct {
-				Slug       string  `json:"slug"`
-				Name       string  `json:"name"`
-				IsActive   bool    `json:"is_active"`
-				AppName    string  `json:"app_name"`
-				LogoURL    *string `json:"logo_url,omitempty"`
-				FaviconURL *string `json:"favicon_url,omitempty"`
+				Slug         string  `json:"slug"`
+				Name         string  `json:"name"`
+				IsActive     bool    `json:"is_active"`
+				AppName      string  `json:"app_name"`
+				LogoURL      *string `json:"logo_url,omitempty"`
+				FaviconURL   *string `json:"favicon_url,omitempty"`
+				PrimaryColor string  `json:"primary_color,omitempty"`
 			}
 		}{}
 		out.Body.Slug = t.Slug
@@ -82,6 +85,7 @@ func registerPublicTenant(api huma.API, d *Deps) {
 		out.Body.AppName = view.Effective.AppName
 		out.Body.LogoURL = view.Effective.LogoURL
 		out.Body.FaviconURL = view.Effective.FaviconURL
+		out.Body.PrimaryColor = gen.PrimaryColor
 		return out, nil
 	})
 }
@@ -94,7 +98,7 @@ func registerPlatform(api huma.API, d *Deps) {
 		Body struct {
 			Email    string `json:"email"`
 			Password string `json:"password"`
-			TOTPCode string `json:"totp_code, omitempty"`
+			TOTPCode string `json:"totp_code,omitempty"`
 		}
 	}) (*LoginOutput, error) {
 		email := strings.TrimSpace(strings.ToLower(input.Body.Email))
@@ -252,8 +256,8 @@ func registerPlatform(api huma.API, d *Deps) {
 		ID   xid.ID `path:"id"`
 		Body struct {
 			Name     string  `json:"name" minLength:"2"`
-			Email    *string `json:"email, omitempty"`
-			Phone    *string `json:"phone, omitempty"`
+			Email    *string `json:"email,omitempty"`
+			Phone    *string `json:"phone,omitempty"`
 			IsActive bool    `json:"is_active"`
 		}
 	}) (*struct {
@@ -290,10 +294,10 @@ func registerPlatform(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			Name     *string `json:"name, omitempty"`
-			Email    *string `json:"email, omitempty"`
-			Phone    *string `json:"phone, omitempty"`
-			IsActive *bool   `json:"is_active, omitempty"`
+			Name     *string `json:"name,omitempty"`
+			Email    *string `json:"email,omitempty"`
+			Phone    *string `json:"phone,omitempty"`
+			IsActive *bool   `json:"is_active,omitempty"`
 		}
 	}) (*struct {
 		Body store.Tenant

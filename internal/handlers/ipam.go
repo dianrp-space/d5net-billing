@@ -38,6 +38,7 @@ func registerIPAM(api huma.API, d *Deps) {
 			Name       string   `json:"name"`
 			Network    string   `json:"network"`
 			Gateway    *string  `json:"gateway,omitempty"`
+			ClusterID  *xid.ID  `json:"cluster_id,omitempty"`
 			RouterID   *xid.ID  `json:"router_id,omitempty"`
 			DNSServers []string `json:"dns_servers,omitempty"`
 		}
@@ -51,11 +52,18 @@ func registerIPAM(api huma.API, d *Deps) {
 		if name == "" || network == "" {
 			return nil, httpx.BadRequest("name dan network wajib")
 		}
+		clusterID, routerID, err := bindIPPoolCluster(ctx, d, tid, input.Body.ClusterID, input.Body.RouterID)
+		if err != nil {
+			return nil, err
+		}
 		p := &store.IPPool{
 			TenantID: tid, Name: name, Network: network,
-			Gateway: emptyToNil(input.Body.Gateway), RouterID: input.Body.RouterID, DNSServers: cleanDNS(input.Body.DNSServers),
+			Gateway: emptyToNil(input.Body.Gateway), ClusterID: clusterID, RouterID: routerID, DNSServers: cleanDNS(input.Body.DNSServers),
 		}
 		if err := d.Store.CreateIPPool(ctx, p); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				return nil, httpx.BadRequest("nama pool sudah dipakai di cluster ini")
+			}
 			return nil, httpx.Internal(err)
 		}
 		out, err := d.Store.GetIPPool(ctx, tid, p.ID)
@@ -78,6 +86,7 @@ func registerIPAM(api huma.API, d *Deps) {
 			Name       string   `json:"name"`
 			Network    string   `json:"network"`
 			Gateway    *string  `json:"gateway,omitempty"`
+			ClusterID  *xid.ID  `json:"cluster_id,omitempty"`
 			RouterID   *xid.ID  `json:"router_id,omitempty"`
 			DNSServers []string `json:"dns_servers,omitempty"`
 		}
@@ -98,13 +107,20 @@ func registerIPAM(api huma.API, d *Deps) {
 		if name == "" || network == "" {
 			return nil, httpx.BadRequest("name dan network wajib")
 		}
+		clusterID, routerID, err := bindIPPoolCluster(ctx, d, tid, input.Body.ClusterID, input.Body.RouterID)
+		if err != nil {
+			return nil, err
+		}
 		p := &store.IPPool{
 			ID: input.ID, TenantID: tid, Name: name, Network: network,
-			Gateway: emptyToNil(input.Body.Gateway), RouterID: input.Body.RouterID, DNSServers: cleanDNS(input.Body.DNSServers),
+			Gateway: emptyToNil(input.Body.Gateway), ClusterID: clusterID, RouterID: routerID, DNSServers: cleanDNS(input.Body.DNSServers),
 		}
 		if err := d.Store.UpdateIPPool(ctx, p); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, httpx.NotFound("pool tidak ditemukan")
+			}
+			if errors.Is(err, store.ErrConflict) {
+				return nil, httpx.BadRequest("nama pool sudah dipakai di cluster ini")
 			}
 			return nil, httpx.Internal(err)
 		}
@@ -203,6 +219,9 @@ func registerIPAM(api huma.API, d *Deps) {
 			}
 			return nil, httpx.Internal(err)
 		}
+		if err := validateIPAssignmentCustomer(ctx, d, tid, pool, input.Body.CustomerID); err != nil {
+			return nil, err
+		}
 		status := input.Body.Status
 		if status == "" {
 			status = "assigned"
@@ -273,6 +292,50 @@ func emptyToNil(s *string) *string {
 		return nil
 	}
 	return &t
+}
+
+func bindIPPoolCluster(ctx context.Context, d *Deps, tid xid.ID, clusterID, routerID *xid.ID) (*xid.ID, *xid.ID, error) {
+	if routerID != nil {
+		r, err := d.Store.GetRouter(ctx, tid, *routerID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, nil, httpx.BadRequest("router tidak ditemukan")
+			}
+			return nil, nil, httpx.Internal(err)
+		}
+		if clusterID != nil && r.SiteID != nil && *clusterID != *r.SiteID {
+			return nil, nil, httpx.BadRequest("cluster pool harus sama dengan cluster router")
+		}
+		if clusterID == nil {
+			clusterID = r.SiteID
+		}
+	}
+	if clusterID != nil {
+		if _, err := d.Store.GetCluster(ctx, tid, *clusterID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, nil, httpx.BadRequest("cluster tidak ditemukan")
+			}
+			return nil, nil, httpx.Internal(err)
+		}
+	}
+	return clusterID, routerID, nil
+}
+
+func validateIPAssignmentCustomer(ctx context.Context, d *Deps, tid xid.ID, pool *store.IPPool, customerID *xid.ID) error {
+	if customerID == nil || pool == nil || pool.ClusterID == nil {
+		return nil
+	}
+	cust, err := d.Store.GetCustomer(ctx, tid, *customerID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return httpx.BadRequest("pelanggan tidak ditemukan")
+		}
+		return httpx.Internal(err)
+	}
+	if cust.ClusterID != nil && *cust.ClusterID != *pool.ClusterID {
+		return httpx.BadRequest("pelanggan bukan dari cluster pool ini")
+	}
+	return nil
 }
 
 func cleanDNS(in []string) []string {

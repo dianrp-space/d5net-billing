@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dianrp/drp-billing/internal/xid"
@@ -29,6 +30,7 @@ type Plan struct {
 	GraceDays     int     `json:"grace_days"`
 	TaxPercent    float64 `json:"tax_percent"`
 	IsActive      bool    `json:"is_active"`
+	PortalVisible bool    `json:"portal_visible"`
 }
 
 func (s *Store) ListPlans(ctx context.Context, tenantID xid.ID) ([]Plan, error) {
@@ -37,7 +39,7 @@ func (s *Store) ListPlans(ctx context.Context, tenantID xid.ID) ([]Plan, error) 
 	}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id, tenant_id, name, code, service_type, price, billing_cycle, download_mbps, upload_mbps,
-		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active
+		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active, portal_visible
 		FROM plans WHERE tenant_id = $1 ORDER BY name
 	`, tenantID)
 	if err != nil {
@@ -49,7 +51,7 @@ func (s *Store) ListPlans(ctx context.Context, tenantID xid.ID) ([]Plan, error) 
 		var p Plan
 		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.Code, &p.ServiceType, &p.Price, &p.BillingCycle,
 			&p.DownloadMbps, &p.UploadMbps, &p.QuotaGB, &p.LimitUptime, &p.SharedUsers,
-			&p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive); err != nil {
+			&p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive, &p.PortalVisible); err != nil {
 			return nil, err
 		}
 		list = append(list, p)
@@ -63,13 +65,13 @@ func (s *Store) GetPlan(ctx context.Context, tenantID xid.ID, id xid.ID) (*Plan,
 	}
 	row := s.Pool.QueryRow(ctx, `
 		SELECT id, tenant_id, name, code, service_type, price, billing_cycle, download_mbps, upload_mbps,
-		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active
+		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active, portal_visible
 		FROM plans WHERE tenant_id = $1 AND id = $2
 	`, tenantID, id)
 	var p Plan
 	err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Code, &p.ServiceType, &p.Price, &p.BillingCycle,
 		&p.DownloadMbps, &p.UploadMbps, &p.QuotaGB, &p.LimitUptime, &p.SharedUsers,
-		&p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive)
+		&p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive, &p.PortalVisible)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -82,10 +84,10 @@ func (s *Store) CreatePlan(ctx context.Context, p *Plan) error {
 	}
 	return s.Pool.QueryRow(ctx, `
 		INSERT INTO plans (tenant_id, name, code, service_type, price, billing_cycle, download_mbps, upload_mbps,
-		                   quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id
+		                   quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active, portal_visible)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id
 	`, p.TenantID, p.Name, p.Code, p.ServiceType, p.Price, p.BillingCycle, p.DownloadMbps, p.UploadMbps,
-		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive).Scan(&p.ID)
+		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive, p.PortalVisible).Scan(&p.ID)
 }
 
 func (s *Store) UpdatePlan(ctx context.Context, p *Plan) error {
@@ -95,10 +97,10 @@ func (s *Store) UpdatePlan(ctx context.Context, p *Plan) error {
 	tag, err := s.Pool.Exec(ctx, `
 		UPDATE plans SET name=$3, service_type=$4, price=$5, billing_cycle=$6, download_mbps=$7, upload_mbps=$8,
 		                 quota_gb=$9, limit_uptime=$10, shared_users=$11, profile_name=$12, isolir_profile=$13,
-		                 grace_days=$14, tax_percent=$15, is_active=$16, updated_at=NOW()
+		                 grace_days=$14, tax_percent=$15, is_active=$16, portal_visible=$17, updated_at=NOW()
 		WHERE tenant_id=$1 AND id=$2
 	`, p.TenantID, p.ID, p.Name, p.ServiceType, p.Price, p.BillingCycle, p.DownloadMbps, p.UploadMbps,
-		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive)
+		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive, p.PortalVisible)
 	if err != nil {
 		return err
 	}
@@ -120,6 +122,67 @@ func (s *Store) DeletePlan(ctx context.Context, tenantID xid.ID, id xid.ID) erro
 		return ErrNotFound
 	}
 	return nil
+}
+
+// PortalPlanOption is a customer-facing plan card (price already resolved for cluster).
+type PortalPlanOption struct {
+	ID           xid.ID `json:"id"`
+	Name         string `json:"name"`
+	Code         string `json:"code"`
+	Price        int64  `json:"price"`
+	DownloadMbps int    `json:"download_mbps"`
+	UploadMbps   int    `json:"upload_mbps"`
+	ServiceType  string `json:"service_type"`
+	BillingCycle string `json:"billing_cycle"`
+}
+
+// ListPortalPlans returns active, portal-visible plans the customer may pick.
+// With a cluster, only active cluster offers are listed (offer price).
+func (s *Store) ListPortalPlans(ctx context.Context, tenantID xid.ID, clusterID *xid.ID, serviceType string, excludePlanID xid.ID) ([]PortalPlanOption, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	svc := strings.TrimSpace(strings.ToLower(serviceType))
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if clusterID != nil && !xid.IsNil(*clusterID) {
+		rows, err = s.Pool.Query(ctx, `
+			SELECT p.id, p.name, p.code, o.price, p.download_mbps, p.upload_mbps, p.service_type, p.billing_cycle
+			FROM plans p
+			JOIN plan_cluster_offers o ON o.plan_id = p.id AND o.cluster_id = $2 AND o.tenant_id = p.tenant_id AND o.is_active
+			WHERE p.tenant_id = $1 AND p.is_active AND p.portal_visible
+			  AND ($3 = '' OR p.service_type = $3)
+			  AND p.id <> $4
+			ORDER BY o.price, p.name
+		`, tenantID, *clusterID, svc, excludePlanID)
+	} else {
+		rows, err = s.Pool.Query(ctx, `
+			SELECT p.id, p.name, p.code, p.price, p.download_mbps, p.upload_mbps, p.service_type, p.billing_cycle
+			FROM plans p
+			WHERE p.tenant_id = $1 AND p.is_active AND p.portal_visible
+			  AND ($2 = '' OR p.service_type = $2)
+			  AND p.id <> $3
+			ORDER BY p.price, p.name
+		`, tenantID, svc, excludePlanID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []PortalPlanOption
+	for rows.Next() {
+		var p PortalPlanOption
+		if err := rows.Scan(&p.ID, &p.Name, &p.Code, &p.Price, &p.DownloadMbps, &p.UploadMbps, &p.ServiceType, &p.BillingCycle); err != nil {
+			return nil, err
+		}
+		list = append(list, p)
+	}
+	if list == nil {
+		list = []PortalPlanOption{}
+	}
+	return list, rows.Err()
 }
 
 type Subscription struct {
@@ -328,9 +391,106 @@ func (s *Store) UpdateSubscriptionStatus(ctx context.Context, tenantID xid.ID, i
 	}
 	_, err := s.Pool.Exec(ctx, `
 		UPDATE subscriptions SET status=$3, updated_at=NOW(),
-			suspended_at = CASE WHEN $3 = 'suspended' THEN NOW() ELSE NULL END
+			suspended_at = CASE
+				WHEN $3 = 'suspended' THEN COALESCE(suspended_at, NOW())
+				WHEN $3 IN ('active', 'overdue') THEN suspended_at
+				ELSE NULL
+			END
 		WHERE tenant_id=$1 AND id=$2
 	`, tenantID, id, status)
+	return err
+}
+
+// ClearSubscriptionSuspendedAt marks router resume as done (billing already active).
+func (s *Store) ClearSubscriptionSuspendedAt(ctx context.Context, tenantID, id xid.ID) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE subscriptions SET suspended_at = NULL, updated_at = NOW()
+		WHERE tenant_id=$1 AND id=$2
+	`, tenantID, id)
+	return err
+}
+
+// ListSubscriptionsNeedingResume is paid (no past-due unpaid) but still flagged isolir
+// because Resume ke router belum sukses (router down, timeout, dll).
+func (s *Store) ListSubscriptionsNeedingResume(ctx context.Context, tenantID xid.ID) ([]xid.ID, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT s.id
+		FROM subscriptions s
+		JOIN plans p ON p.id = s.plan_id
+		WHERE s.tenant_id = $1
+		  AND s.router_id IS NOT NULL
+		  AND s.status IN ('active','overdue','suspended')
+		  AND s.suspended_at IS NOT NULL
+		  AND NOT EXISTS (
+		    SELECT 1 FROM invoices i
+		    WHERE i.tenant_id = s.tenant_id
+		      AND i.subscription_id = s.id
+		      AND i.status IN ('issued','partial','overdue')
+		      AND i.total_amount > i.paid_amount
+		      AND (i.due_date::timestamptz + (COALESCE(p.grace_days, 0) || ' days')::interval) < NOW()
+		  )
+	`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []xid.ID
+	for rows.Next() {
+		var id xid.ID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// ListProvisionableSubscriptionsByRouter lists live services on a router for profile sync.
+func (s *Store) ListProvisionableSubscriptionsByRouter(ctx context.Context, tenantID, routerID xid.ID) ([]Subscription, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT s.id, s.tenant_id, s.customer_id, s.plan_id, s.router_id, s.username, s.service_type, s.status,
+		       s.started_at, s.expires_at, s.next_bill_at, s.suspended_at, c.full_name, c.customer_code, p.name
+		FROM subscriptions s
+		JOIN customers c ON c.id = s.customer_id
+		JOIN plans p ON p.id = s.plan_id
+		WHERE s.tenant_id = $1 AND s.router_id = $2
+		  AND s.status IN ('active','suspended','overdue')
+	`, tenantID, routerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []Subscription
+	for rows.Next() {
+		var sub Subscription
+		if err := rows.Scan(&sub.ID, &sub.TenantID, &sub.CustomerID, &sub.PlanID, &sub.RouterID, &sub.Username,
+			&sub.ServiceType, &sub.Status, &sub.StartedAt, &sub.ExpiresAt, &sub.NextBillAt, &sub.SuspendedAt,
+			&sub.CustomerName, &sub.CustomerCode, &sub.PlanName); err != nil {
+			return nil, err
+		}
+		list = append(list, sub)
+	}
+	return list, rows.Err()
+}
+
+func (s *Store) CancelCustomerSubscriptions(ctx context.Context, tenantID, customerID xid.ID) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE subscriptions
+		SET status = 'cancelled', updated_at = NOW(), suspended_at = NULL
+		WHERE tenant_id = $1 AND customer_id = $2 AND status NOT IN ('cancelled', 'canceled')
+	`, tenantID, customerID)
 	return err
 }
 
@@ -374,7 +534,7 @@ func (s *Store) ListOverdueSubscriptions(ctx context.Context, tenantID xid.ID, g
 		FROM subscriptions s
 		JOIN plans p ON p.id = s.plan_id
 		WHERE s.tenant_id = $1
-		  AND s.status IN ('active','overdue')
+		  AND s.status IN ('active','overdue','suspended')
 		  AND EXISTS (
 		    SELECT 1 FROM invoices i
 		    WHERE i.tenant_id = s.tenant_id
