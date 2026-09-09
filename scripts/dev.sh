@@ -33,7 +33,7 @@ unset GOROOT
 export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.1}"
 export PATH="/usr/local/go/bin:${PATH}"
 
-API_ADDR="${HTTP_ADDR:-0.0.0.0:8080}"
+API_ADDR="${HTTP_ADDR:-0.0.0.0:8087}"
 API_PORT="${API_ADDR##*:}"
 # Health check must hit a reachable loopback even when API binds 0.0.0.0
 HEALTH_URL="http://127.0.0.1:${API_PORT}/api/health"

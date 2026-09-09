@@ -65,6 +65,40 @@ func TestPaymentViewReturnsDecryptedSecretsAndAppWebhookURL(t *testing.T) {
 	}
 }
 
+func TestSMTPViewReturnsDecryptedPasswordAndDefaultPort(t *testing.T) {
+	enc, err := auth.NewEncryptor("01234567890123456789012345678901")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass, err := enc.EncryptString("smtp-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := smtpView(&Deps{Encryptor: enc}, smtpIntegrationStored{
+		Host:     "smtp.tenant.id",
+		Username: "noreply",
+		Password: pass,
+		From:     "noreply@tenant.id",
+		FromName: "Tenant ISP",
+		Enabled:  true,
+	})
+	if view.Password != "smtp-secret" {
+		t.Fatalf("password = %q", view.Password)
+	}
+	if view.Port != 587 {
+		t.Fatalf("port default = %d", view.Port)
+	}
+	if !view.Configured || !view.Enabled {
+		t.Fatal("expected configured+enabled")
+	}
+	if view.EnvFallback {
+		t.Fatal("enabled tenant SMTP should not report env fallback")
+	}
+	if clampSMTPPort(0) != 587 || clampSMTPPort(65536) != 587 || clampSMTPPort(465) != 465 {
+		t.Fatalf("clampSMTPPort unexpected: 0=%d 65536=%d 465=%d", clampSMTPPort(0), clampSMTPPort(65536), clampSMTPPort(465))
+	}
+}
+
 func TestMessagingViewReturnsDecryptedTelegramToken(t *testing.T) {
 	enc, err := auth.NewEncryptor("01234567890123456789012345678901")
 	if err != nil {

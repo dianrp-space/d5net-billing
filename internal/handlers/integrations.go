@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -21,6 +22,7 @@ import (
 const (
 	settingPayment   = "integration.payment"
 	settingMessaging = "integration.messaging"
+	settingSMTP      = "integration.smtp"
 )
 
 type paymentIntegrationStored struct {
@@ -78,6 +80,38 @@ type telegramIntegrationPut struct {
 	TelegramEnabled  bool   `json:"telegram_enabled"`
 	TelegramChatID   string `json:"telegram_chat_id"`
 	TelegramBotToken string `json:"telegram_bot_token,omitempty"`
+}
+
+type smtpIntegrationStored struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	From     string `json:"from"`
+	FromName string `json:"from_name"`
+	Enabled  bool   `json:"enabled"`
+}
+
+type smtpIntegrationView struct {
+	Configured  bool   `json:"configured"`
+	Enabled     bool   `json:"enabled"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Username    string `json:"username"`
+	Password    string `json:"password,omitempty"`
+	From        string `json:"from"`
+	FromName    string `json:"from_name"`
+	EnvFallback bool   `json:"env_fallback"`
+}
+
+type smtpIntegrationPut struct {
+	Enabled  bool   `json:"enabled"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Password string `json:"password,omitempty"`
+	From     string `json:"from"`
+	FromName string `json:"from_name"`
 }
 
 func registerIntegrations(api huma.API, d *Deps) {
@@ -190,6 +224,64 @@ func registerIntegrations(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body messagingIntegrationView }{Body: messagingView(d, cur)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-smtp-integration", Method: http.MethodGet, Path: "/api/integrations/smtp",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body smtpIntegrationView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := loadSMTPIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body smtpIntegrationView }{Body: smtpView(d, stored)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "put-smtp-integration", Method: http.MethodPut, Path: "/api/integrations/smtp",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body smtpIntegrationPut
+	}) (*struct{ Body smtpIntegrationView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cur, err := loadSMTPIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		host := strings.TrimSpace(input.Body.Host)
+		from := strings.TrimSpace(input.Body.From)
+		if input.Body.Enabled {
+			if host == "" {
+				return nil, httpx.BadRequest("host SMTP wajib diisi")
+			}
+			if from == "" || !strings.Contains(from, "@") {
+				return nil, httpx.BadRequest("alamat From wajib diisi (contoh: noreply@domain.id)")
+			}
+		}
+		cur.Enabled = input.Body.Enabled
+		cur.Host = host
+		cur.From = from
+		cur.FromName = strings.TrimSpace(input.Body.FromName)
+		cur.Username = strings.TrimSpace(input.Body.Username)
+		cur.Port = clampSMTPPort(input.Body.Port)
+		if v := strings.TrimSpace(input.Body.Password); v != "" {
+			enc, err := d.Encryptor.EncryptString(v)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			cur.Password = enc
+		}
+		if err := d.Store.UpsertSettingJSON(ctx, tid, settingSMTP, cur); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body smtpIntegrationView }{Body: smtpView(d, cur)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -317,6 +409,42 @@ func loadMessagingIntegration(ctx context.Context, d *Deps, tid xid.ID) (messagi
 		return messagingIntegrationStored{}, nil
 	}
 	return s, err
+}
+
+func loadSMTPIntegration(ctx context.Context, d *Deps, tid xid.ID) (smtpIntegrationStored, error) {
+	var s smtpIntegrationStored
+	err := d.Store.GetSettingJSON(ctx, tid, settingSMTP, &s)
+	if errors.Is(err, store.ErrNotFound) {
+		return smtpIntegrationStored{}, nil
+	}
+	return s, err
+}
+
+func clampSMTPPort(port int) int {
+	if port < 1 || port > 65535 {
+		return 587
+	}
+	return port
+}
+
+func smtpView(d *Deps, s smtpIntegrationStored) smtpIntegrationView {
+	port := s.Port
+	if port < 1 || port > 65535 {
+		port = 587
+	}
+	host := strings.TrimSpace(s.Host)
+	from := strings.TrimSpace(s.From)
+	return smtpIntegrationView{
+		Configured:  host != "" && from != "",
+		Enabled:     s.Enabled,
+		Host:        host,
+		Port:        port,
+		Username:    strings.TrimSpace(s.Username),
+		Password:    decryptSecret(d, s.Password),
+		From:        from,
+		FromName:    strings.TrimSpace(s.FromName),
+		EnvFallback: !s.Enabled && strings.TrimSpace(os.Getenv("SMTP_HOST")) != "",
+	}
 }
 
 func paymentWebhookPath() string {

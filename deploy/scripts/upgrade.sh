@@ -13,7 +13,7 @@ MIGRATIONS_DIR="/opt/drp-billing/current/migrations" \
   DATABASE_URL="${DATABASE_URL}" \
   /opt/drp-billing/current/drp-api --version 2>/dev/null || true
 
-if ! curl -sf http://127.0.0.1:8080/api/health > /dev/null; then
+if ! curl -sf http://127.0.0.1:8087/api/health > /dev/null; then
   echo "!! Health check failed, rolling back"
   if [[ -n "${PREVIOUS}" ]]; then
     ln -sfn "${PREVIOUS}" /opt/drp-billing/current

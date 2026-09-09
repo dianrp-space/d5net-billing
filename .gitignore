@@ -9,6 +9,7 @@ dist/
 .vscode/
 coverage/
 data/uploads/
+data/exports/
 data/router-backups/
 data/whatsapp/
 data/db-backups/

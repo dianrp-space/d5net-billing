@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "./api";
 import { useAppDialog } from "./confirm";
-import { IconCopy, IconSend, IconTrash } from "./icons";
+import { IconCopy, IconMail, IconSend, IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { usePersistedTab } from "./navPersist";
 import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
@@ -405,13 +405,13 @@ function ProviderBlock({
 }
 
 export function MessagingGWPage() {
-  const [tab, setTab] = usePersistedTab("messaging-channel", "whatsapp", ["whatsapp", "telegram"]);
-  const current = tab === "telegram" ? "telegram" : "whatsapp";
+  const [tab, setTab] = usePersistedTab("messaging-channel", "whatsapp", ["whatsapp", "telegram", "email"]);
+  const current = tab === "telegram" || tab === "email" ? tab : "whatsapp";
   return (
     <Tabs
       value={current}
       onValueChange={(v) => {
-        if (v === "whatsapp" || v === "telegram") setTab(v);
+        if (v === "whatsapp" || v === "telegram" || v === "email") setTab(v);
       }}
       className="space-y-0"
     >
@@ -421,12 +421,19 @@ export function MessagingGWPage() {
           <IconSend />
           Telegram
         </TabsTrigger>
+        <TabsTrigger value="email">
+          <IconMail />
+          Email
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="whatsapp">
         <WhatsAppTab />
       </TabsContent>
       <TabsContent value="telegram">
         <TelegramTab />
+      </TabsContent>
+      <TabsContent value="email">
+        <SmtpTab />
       </TabsContent>
     </Tabs>
   );
@@ -621,6 +628,186 @@ function TelegramTab() {
                   placeholder="Chat ID (contoh: -100123… atau 123456789)"
                   value={form.telegram_chat_id}
                   onChange={(e) => setForm({ ...form, telegram_chat_id: e.target.value })}
+                />
+              </label>
+            </div>
+          </div>
+          <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? "Menyimpan..." : "Simpan"}
+          </button>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+type SmtpIntegration = {
+  configured: boolean;
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  from: string;
+  from_name: string;
+  env_fallback: boolean;
+};
+
+function SmtpTab() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["integration-smtp"],
+    queryFn: () => api<SmtpIntegration>("/api/integrations/smtp"),
+  });
+  const [form, setForm] = useState({
+    enabled: false,
+    host: "",
+    port: 587,
+    username: "",
+    password: "",
+    from: "",
+    from_name: "",
+  });
+
+  useEffect(() => {
+    if (!q.data) return;
+    setForm({
+      enabled: q.data.enabled,
+      host: q.data.host || "",
+      port: q.data.port || 587,
+      username: q.data.username || "",
+      password: q.data.password || "",
+      from: q.data.from || "",
+      from_name: q.data.from_name || "",
+    });
+  }, [q.data]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api<SmtpIntegration>("/api/integrations/smtp", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: form.enabled,
+          host: form.host.trim(),
+          port: Number(form.port) || 587,
+          username: form.username.trim(),
+          password: form.password.trim() || undefined,
+          from: form.from.trim(),
+          from_name: form.from_name.trim(),
+        }),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(["integration-smtp"], data);
+      setForm({
+        enabled: data.enabled,
+        host: data.host || "",
+        port: data.port || 587,
+        username: data.username || "",
+        password: data.password || form.password,
+        from: data.from || "",
+        from_name: data.from_name || "",
+      });
+      void qc.invalidateQueries({ queryKey: ["integration-smtp"] });
+      void toastSuccess("SMTP tenant disimpan");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  return (
+    <Section title="Email (SMTP tenant)">
+      <p className="mb-4 text-sm text-[var(--muted)]">
+        Server SMTP milik tenant untuk notifikasi email (laporan bulanan, broadcast, dunning). Port 587 memakai
+        STARTTLS; port 465 memakai TLS langsung. Password kosong saat simpan = tetap memakai yang tersimpan. Jika
+        nonaktif, sistem memakai SMTP platform (env) bila ada.
+      </p>
+      {q.isLoading ? (
+        <p className="text-[var(--muted)]">Memuat...</p>
+      ) : (
+        <div className="grid max-w-xl gap-4">
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Server SMTP</p>
+                <p className="text-[10px] text-[var(--muted)]">
+                  {q.data?.configured
+                    ? "host + From tersimpan"
+                    : q.data?.env_fallback
+                      ? "belum diisi · fallback SMTP platform"
+                      : "belum dikonfigurasi"}
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.enabled}
+                  onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+                />
+                Aktif
+              </label>
+            </div>
+            <div className="grid gap-2">
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Host</span>
+                <input
+                  className="input"
+                  placeholder="smtp.domain.id"
+                  value={form.host}
+                  onChange={(e) => setForm({ ...form, host: e.target.value })}
+                  autoComplete="off"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Port</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    placeholder="587"
+                    value={form.port}
+                    onChange={(e) => setForm({ ...form, port: Number(e.target.value) || 0 })}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Nama pengirim</span>
+                  <input
+                    className="input"
+                    placeholder="Nama ISP"
+                    value={form.from_name}
+                    onChange={(e) => setForm({ ...form, from_name: e.target.value })}
+                  />
+                </label>
+              </div>
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">From (email)</span>
+                <input
+                  className="input"
+                  type="email"
+                  placeholder="noreply@domain.id"
+                  value={form.from}
+                  onChange={(e) => setForm({ ...form, from: e.target.value })}
+                  autoComplete="off"
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Username</span>
+                <input
+                  className="input"
+                  placeholder="Biasanya sama dengan From"
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  autoComplete="off"
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Password</span>
+                <SecretInput
+                  name="smtp-password"
+                  placeholder="Password SMTP"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  autoComplete="new-password"
                 />
               </label>
             </div>

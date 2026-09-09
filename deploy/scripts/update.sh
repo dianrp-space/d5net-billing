@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Update produksi: git pull → build → migrate → restart systemd.
 #
-# Default path aaPanel:
-#   APP_DIR=/www/wwwroot/billing.dianrp.com   (repo git)
-#   WEB_ROOT=$APP_DIR/web/dist                (arahkan root situs aaPanel ke sini)
-#   binary Go  → /opt/drp-billing/current     (sesuai unit systemd)
-#   env        → /etc/drp-billing/drp-billing.env
+# Semua path di folder situs (user dianrp):
+#   APP_DIR=/www/wwwroot/billing.dianrp.com
+#   WEB_ROOT=$APP_DIR/web/dist
+#   binary    → $APP_DIR/bin
+#   env       → $APP_DIR/.env
+#   data      → $APP_DIR/data
 #
 # Jalankan sebagai root:
 #   sudo bash /www/wwwroot/billing.dianrp.com/deploy/scripts/update.sh
@@ -16,12 +17,13 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/www/wwwroot/billing.dianrp.com}"
 WEB_ROOT="${WEB_ROOT:-${APP_DIR}/web/dist}"
-BIN_DIR="${BIN_DIR:-/opt/drp-billing/current}"
-ENV_FILE="${ENV_FILE:-/etc/drp-billing/drp-billing.env}"
-APP_USER="${APP_USER:-drp}"
+BIN_DIR="${BIN_DIR:-${APP_DIR}/bin}"
+ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
+DATA_DIR="${DATA_DIR:-${APP_DIR}/data}"
+APP_USER="${APP_USER:-dianrp}"
 BRANCH="${BRANCH:-main}"
 REMOTE="${REMOTE:-origin}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/api/health}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8087/api/health}"
 SERVICES="${SERVICES:-drp-api drp-worker}"
 
 log() { printf '\n==> %s\n' "$*"; }
@@ -51,13 +53,13 @@ export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.1}"
 
 [[ "$(id -u)" -eq 0 ]] || die "jalankan sebagai root (sudo)"
 [[ -d "${APP_DIR}/.git" ]] || die "bukan git repo: ${APP_DIR}"
+id "${APP_USER}" &>/dev/null || die "user '${APP_USER}' tidak ada"
 need_cmd git
 need_cmd go
 need_cmd npm
 need_cmd rsync
 need_cmd systemctl
 need_cmd curl
-need_cmd install
 
 exec 9>"/tmp/drp-billing-update.lock"
 flock -n 9 || die "update lain sedang berjalan"
@@ -82,19 +84,13 @@ log "build frontend"
   npm run build
 )
 
-log "build Go (api, worker, migrate, drpctl)"
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/drp-api ./cmd/api
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/drp-worker ./cmd/worker
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/drp-migrate ./cmd/migrate
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/drpctl ./cmd/drpctl
-
-log "pasang binary ke ${BIN_DIR}"
-mkdir -p "${BIN_DIR}" /var/lib/drp-billing/{uploads,exports,router-backups} /var/log/drp-billing
-install -m 0755 bin/drp-api bin/drp-worker bin/drp-migrate bin/drpctl "${BIN_DIR}/"
-rsync -a --delete migrations/ "${BIN_DIR}/migrations/"
-if id "${APP_USER}" &>/dev/null; then
-  chown -R "${APP_USER}:${APP_USER}" "${BIN_DIR}" /var/lib/drp-billing /var/log/drp-billing
-fi
+log "build Go (api, worker, migrate, drpctl) → ${BIN_DIR}"
+mkdir -p "${BIN_DIR}" "${DATA_DIR}"/{uploads,exports,router-backups,whatsapp,db-backups}
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-api" ./cmd/api
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-worker" ./cmd/worker
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-migrate" ./cmd/migrate
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drpctl" ./cmd/drpctl
+chmod 0755 "${BIN_DIR}/drp-api" "${BIN_DIR}/drp-worker" "${BIN_DIR}/drp-migrate" "${BIN_DIR}/drpctl"
 
 log "publish frontend → ${WEB_ROOT}"
 mkdir -p "${WEB_ROOT}"
@@ -111,6 +107,12 @@ else
   rsync -a --delete "${APP_DIR}/web/dist/" "${WEB_ROOT}/"
 fi
 
+log "hak akses ${APP_USER}"
+chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
+if [[ -f "${ENV_FILE}" ]]; then
+  chmod 600 "${ENV_FILE}"
+fi
+
 log "migrate up"
 DATABASE_URL="$(database_url_from_env "${ENV_FILE}")"
 DATABASE_URL="${DATABASE_URL%\"}"
@@ -118,16 +120,10 @@ DATABASE_URL="${DATABASE_URL#\"}"
 DATABASE_URL="${DATABASE_URL%\'}"
 DATABASE_URL="${DATABASE_URL#\'}"
 [[ -n "${DATABASE_URL}" ]] || die "DATABASE_URL kosong di ${ENV_FILE}"
-MIGRATE_BIN="${BIN_DIR}/drp-migrate"
-MIG_DIR="${BIN_DIR}/migrations"
-if id "${APP_USER}" &>/dev/null; then
-  sudo -u "${APP_USER}" env \
-    DATABASE_URL="${DATABASE_URL}" \
-    MIGRATIONS_DIR="${MIG_DIR}" \
-    "${MIGRATE_BIN}" up
-else
-  DATABASE_URL="${DATABASE_URL}" MIGRATIONS_DIR="${MIG_DIR}" "${MIGRATE_BIN}" up
-fi
+sudo -u "${APP_USER}" env \
+  DATABASE_URL="${DATABASE_URL}" \
+  MIGRATIONS_DIR="${APP_DIR}/migrations" \
+  "${BIN_DIR}/drp-migrate" up
 
 log "restart systemd: ${SERVICES}"
 # shellcheck disable=SC2086
@@ -154,6 +150,8 @@ done
 log "selesai"
 printf '    situs  : %s\n' "${WEB_ROOT}"
 printf '    binary : %s\n' "${BIN_DIR}"
+printf '    env    : %s\n' "${ENV_FILE}"
+printf '    data   : %s\n' "${DATA_DIR}"
 printf '    unit   : %s\n' "${SERVICES}"
 printf '    commit : %s\n' "$(git log -1 --oneline)"
 printf '\nArahkan root situs aaPanel ke:\n  %s\n' "${WEB_ROOT}"

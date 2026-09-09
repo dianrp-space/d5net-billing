@@ -141,6 +141,11 @@ func (s *Service) ProcessPending(ctx context.Context, limit int) (int, error) {
 					sender = overlay
 				}
 			}
+			if channel == "email" {
+				if overlay := s.tenantEmailNotifier(ctx, tenantID); overlay != nil {
+					sender = overlay
+				}
+			}
 			if channel == "telegram" {
 				if chatID := s.tenantTelegramChatID(ctx, tenantID); chatID != "" {
 					msg.Recipient = chatID
@@ -208,6 +213,53 @@ func (s *Service) tenantMessagingNotifier(ctx context.Context, tenantID xid.ID, 
 		return &TelegramNotifier{BotToken: token}
 	default:
 		return nil
+	}
+}
+
+type tenantSMTPCfg struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	From     string `json:"from"`
+	FromName string `json:"from_name"`
+	Enabled  bool   `json:"enabled"`
+}
+
+func (s *Service) tenantEmailNotifier(ctx context.Context, tenantID xid.ID) Notifier {
+	var cfg tenantSMTPCfg
+	if err := s.store.GetSettingJSON(ctx, tenantID, "integration.smtp", &cfg); err != nil {
+		return nil
+	}
+	if !cfg.Enabled {
+		return nil
+	}
+	host := strings.TrimSpace(cfg.Host)
+	from := strings.TrimSpace(cfg.From)
+	if host == "" || from == "" {
+		return nil
+	}
+	port := cfg.Port
+	if port < 1 || port > 65535 {
+		port = 587
+	}
+	pass := cfg.Password
+	if pass != "" && s.decrypt != nil {
+		plain, err := s.decrypt(pass)
+		if err != nil {
+			slog.Warn("tenant smtp password decrypt failed", "tenant_id", tenantID)
+			pass = ""
+		} else {
+			pass = plain
+		}
+	}
+	return &EmailNotifier{
+		Host:     host,
+		Port:     fmt.Sprintf("%d", port),
+		User:     strings.TrimSpace(cfg.Username),
+		Pass:     pass,
+		From:     from,
+		FromName: strings.TrimSpace(cfg.FromName),
 	}
 }
 

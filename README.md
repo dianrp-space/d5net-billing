@@ -18,13 +18,13 @@ make run-api
 cd web && npm install && npm run dev
 ```
 
-Vite listen di `0.0.0.0:5173`. PC lain di Wi‑Fi `192.168.100.0/24` bisa buka `http://<IP-laptop>:5173` (contoh `http://192.168.100.67:5173`). API default `0.0.0.0:8080`; frontend mem-proxy `/api`, `/uploads`, `/events`.
+Vite listen di `0.0.0.0:5173`. PC lain di Wi‑Fi `192.168.100.0/24` bisa buka `http://<IP-laptop>:5173` (contoh `http://192.168.100.67:5173`). API default `0.0.0.0:8087`; frontend mem-proxy `/api`, `/uploads`, `/events`.
 
-Pastikan firewall mengizinkan port **5173** (dan **8080** jika API dipanggil langsung):
+Pastikan firewall mengizinkan port **5173** (dan **8087** jika API dipanggil langsung):
 
 ```bash
 sudo ufw allow from 192.168.100.0/24 to any port 5173 proto tcp
-sudo ufw allow from 192.168.100.0/24 to any port 8080 proto tcp
+sudo ufw allow from 192.168.100.0/24 to any port 8087 proto tcp
 ```
 
 Buat superadmin platform + tenant pertama:
@@ -47,87 +47,79 @@ Go **tidak hot-reload**. Setelah ubah kode backend, restart proses API/worker (d
 
 ## Produksi (aaPanel + systemd)
 
-Alur yang dipakai repo ini: **clone git di wwwroot**, frontend di `web/dist`, binary Go di `/opt/drp-billing/current`, dijalankan **systemd** (`drp-api` + `drp-worker`). Nginx hanya static + reverse proxy.
+Semua file aplikasi ada di **satu folder situs**, dijalankan user **`dianrp`** (bukan user sistem `drp` baru). Nginx root hanya `web/dist`, jadi `.env`, `data/`, `bin/`, dan `.git` tidak ikut ter-serve.
 
-`deploy/scripts/install.sh` adalah sisa alur tarball (`make release`) dengan path web lama (`/www/wwwroot/drp-billing/web`) dan migrate yang tidak lengkap. **Jangan dipakai** untuk server ini. Pakai langkah di bawah + [`deploy/scripts/update.sh`](deploy/scripts/update.sh).
+Yang tetap di luar webroot hanya unit systemd (`/etc/systemd/system/`) — systemd memang wajib baca unit dari situ — dan PostgreSQL/Nginx milik aaPanel.
+
+`deploy/scripts/install.sh` adalah sisa alur tarball lama. **Jangan dipakai.** Pakai langkah di bawah + [`deploy/scripts/update.sh`](deploy/scripts/update.sh).
 
 ### Layout
 
 | Path | Isi |
 |------|-----|
-| `/www/wwwroot/billing.dianrp.com` | Clone git |
-| `/www/wwwroot/billing.dianrp.com/web/dist` | Root situs aaPanel / Nginx (`index.html`) |
-| `/opt/drp-billing/current` | `drp-api`, `drp-worker`, `drp-migrate`, `drpctl`, `migrations/` |
-| `/etc/drp-billing/drp-billing.env` | Secret produksi (chmod 600) |
-| `/var/lib/drp-billing/` | Upload, backup router, sesi WhatsApp, backup DB |
+| `/www/wwwroot/billing.dianrp.com` | Clone git (working dir proses) |
+| `web/dist/` | Root situs aaPanel / Nginx (`index.html`) |
+| `bin/` | `drp-api`, `drp-worker`, `drp-migrate`, `drpctl` |
+| `.env` | Secret produksi (chmod 600, gitignored) |
+| `data/` | Upload, backup router, sesi WhatsApp, backup DB |
 | `/etc/systemd/system/drp-api.service` | Unit API — [`deploy/systemd/drp-api.service`](deploy/systemd/drp-api.service) |
 | `/etc/systemd/system/drp-worker.service` | Unit worker — [`deploy/systemd/drp-worker.service`](deploy/systemd/drp-worker.service) |
 
-Unit systemd memakai `ProtectSystem=strict` dan hanya boleh tulis ke `/var/lib/drp-billing` serta `/var/log/drp-billing`. Jangan taruh sesi WhatsApp atau backup di `./data/...` relatif ke binary.
+Unit systemd memakai `ProtectSystem=strict` dan hanya boleh tulis ke `data/`. Log proses lewat `journalctl` (bukan `/var/log/drp-billing`).
 
 ### Prasyarat
 
 - aaPanel: Nginx, PostgreSQL 16+ (atau 14+), SSL Let's Encrypt
 - Di server: `git`, **Go 1.26+** (toolchain `go1.27.1`), **Node.js 20+** + `npm`, `rsync`, `curl`
-- User sistem `drp` (dibuat di langkah 2)
+- User **`dianrp`** (sudah ada; proses API/worker jalan sebagai user ini)
 
 ### 1. Database
 
-Di aaPanel → PostgreSQL, buat database + user (contoh `drp_billing` / `drp`). Catat DSN:
+Di aaPanel → PostgreSQL, buat database + user. Catat DSN:
 
 ```
 postgres://USER:PASSWORD@127.0.0.1:5432/drp_billing?sslmode=disable
 ```
 
-### 2. User dan direktori
-
-```bash
-sudo useradd --system --home /opt/drp-billing --shell /usr/sbin/nologin drp || true
-sudo mkdir -p /opt/drp-billing/current /etc/drp-billing \
-  /var/lib/drp-billing/{uploads,exports,router-backups,whatsapp,db-backups} \
-  /var/log/drp-billing
-sudo chown -R drp:drp /opt/drp-billing /var/lib/drp-billing /var/log/drp-billing
-```
-
-### 3. Clone repo
+### 2. Clone repo
 
 ```bash
 sudo mkdir -p /www/wwwroot
 sudo git clone git@github.com:dianrp-space/drp-billing.git /www/wwwroot/billing.dianrp.com
 # atau HTTPS:
 # sudo git clone https://github.com/dianrp-space/drp-billing.git /www/wwwroot/billing.dianrp.com
+sudo chown -R dianrp:dianrp /www/wwwroot/billing.dianrp.com
 ```
 
-User yang menjalankan `update.sh` (root) harus bisa `git pull` (deploy key / credential).
+User root yang menjalankan `update.sh` harus bisa `git pull` (deploy key / credential).
 
-### 4. File env
+### 3. File env
 
 ```bash
-sudo cp /www/wwwroot/billing.dianrp.com/.env.example /etc/drp-billing/drp-billing.env
-sudo chmod 640 /etc/drp-billing/drp-billing.env
-sudo chown root:drp /etc/drp-billing/drp-billing.env
-sudo nano /etc/drp-billing/drp-billing.env
+sudo -u dianrp cp /www/wwwroot/billing.dianrp.com/.env.example /www/wwwroot/billing.dianrp.com/.env
+sudo chmod 600 /www/wwwroot/billing.dianrp.com/.env
+sudo nano /www/wwwroot/billing.dianrp.com/.env
 ```
 
-Isi minimal (sesuaikan):
+Isi minimal (sesuaikan). Path data relatif ke folder repo:
 
 ```bash
 APP_ENV=production
-HTTP_ADDR=127.0.0.1:8080
+HTTP_ADDR=127.0.0.1:8087
 DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/drp_billing?sslmode=disable
 JWT_SECRET='<acak panjang, openssl rand -hex 32>'
 ENCRYPTION_KEY='<tepat 32 karakter, openssl rand -base64 24 | cut -c1-32>'
 CORS_ORIGINS=https://billing.dianrp.com
-UPLOAD_DIR=/var/lib/drp-billing/uploads
-ROUTER_BACKUP_DIR=/var/lib/drp-billing/router-backups
-WHATSAPP_SESSION_DIR=/var/lib/drp-billing/whatsapp
-DB_BACKUP_DIR=/var/lib/drp-billing/db-backups
+UPLOAD_DIR=./data/uploads
+ROUTER_BACKUP_DIR=./data/router-backups
+WHATSAPP_SESSION_DIR=./data/whatsapp
+DB_BACKUP_DIR=./data/db-backups
 WORKER_ENABLED=true
 ```
 
 `ENCRYPTION_KEY` wajib **32 byte** (32 karakter). Ganti `JWT_SECRET` dari contoh. Setelah ubah env: `sudo systemctl restart drp-api drp-worker`.
 
-### 5. systemd
+### 4. systemd
 
 ```bash
 sudo cp /www/wwwroot/billing.dianrp.com/deploy/systemd/drp-api.service /etc/systemd/system/
@@ -136,50 +128,51 @@ sudo systemctl daemon-reload
 sudo systemctl enable drp-api drp-worker
 ```
 
-Jangan `start` dulu sebelum binary ada (langkah 6).
+Jangan `start` dulu sebelum binary ada (langkah 5). Kalau unit lama masih memakai `/opt` + `/etc/drp-billing`, timpa dengan file di atas lalu `daemon-reload`.
 
-### 6. Build, migrate, start
+### 5. Build, migrate, start
 
 ```bash
 sudo bash /www/wwwroot/billing.dianrp.com/deploy/scripts/update.sh
 ```
 
-Skrip ini: `git pull` → `npm ci` + Vite build → compile Go → pasang binary ke `/opt/drp-billing/current` → `migrate up` → restart service → `GET /api/health`.
+Skrip ini: `git pull` → `npm ci` + Vite build → compile Go ke `bin/` → `migrate up` → restart service → `GET /api/health`.
 
 Cek:
 
 ```bash
-curl -sf http://127.0.0.1:8080/api/health
+curl -sf http://127.0.0.1:8087/api/health
 sudo systemctl status drp-api drp-worker --no-pager
 ```
 
-### 7. Situs Nginx (aaPanel)
+### 6. Situs Nginx (aaPanel)
 
 1. Buat website `billing.dianrp.com`, aktifkan SSL Let's Encrypt.
 2. Set **website root** ke `/www/wwwroot/billing.dianrp.com/web/dist` (bukan folder git).
-3. Gabungkan reverse proxy dari template [`deploy/nginx/drp-billing.conf`](deploy/nginx/drp-billing.conf) (lokasi `/api/`, `/uploads/`, `/events/`, `try_files` SPA). Reload Nginx.
+3. Gabungkan reverse proxy dari template [`deploy/nginx/drp-billing.conf`](deploy/nginx/drp-billing.conf) (lokasi `/api/`, `/uploads/`, `/events/`, `try_files` SPA, proxy ke **8087**). Reload Nginx.
 
 | Lokasi | Peran |
 |--------|--------|
 | `/` | Static SPA; fallback `index.html` untuk `/<slug>/...` |
-| `/api/` | Proxy ke `127.0.0.1:8080` |
+| `/api/` | Proxy ke `127.0.0.1:8087` |
 | `/uploads/` | Proxy file branding |
 | `/events/` | SSE (buffering off) |
 
 Jangan expose `.git`. Template sudah `deny` path itu.
 
-### 8. Akun pertama
+### 7. Akun pertama
 
-`drpctl` ikut dipasang oleh `update.sh`. Load env lalu buat platform admin + tenant:
+`drpctl` ada di `bin/` setelah `update.sh`. Load env lalu buat platform admin + tenant:
 
 ```bash
-sudo -u drp bash -c '
+sudo -u dianrp bash -c '
   set -a
-  source /etc/drp-billing/drp-billing.env
+  source /www/wwwroot/billing.dianrp.com/.env
   set +a
-  /opt/drp-billing/current/drpctl create-platform-admin \
+  cd /www/wwwroot/billing.dianrp.com
+  ./bin/drpctl create-platform-admin \
     --email super@dianrp.com --password "GANTI" --full-name "Platform Admin"
-  /opt/drp-billing/current/drpctl create-tenant \
+  ./bin/drpctl create-tenant \
     --slug demo --name "ISP Demo" --email admin@demo.local --password "GANTI" --full-name Admin
 '
 ```
@@ -190,17 +183,17 @@ sudo -u drp bash -c '
 | `https://billing.dianrp.com/<slug>/login` | Admin tenant |
 | `https://billing.dianrp.com/<slug>/client/login` | Portal pelanggan |
 
-### 9. Update berikutnya
+### 8. Update berikutnya
 
 ```bash
 sudo bash /www/wwwroot/billing.dianrp.com/deploy/scripts/update.sh
 ```
 
-Override path jika perlu: `APP_DIR=... WEB_ROOT=... BRANCH=main sudo -E bash .../update.sh`.
+Override jika perlu: `APP_DIR=... WEB_ROOT=... BRANCH=main sudo -E bash .../update.sh`.
 
-Rollback tarball lama: [`deploy/scripts/rollback.sh`](deploy/scripts/rollback.sh) (symlink `/opt/drp-billing/current`). Untuk git, `git checkout` commit sebelumnya lalu jalankan `update.sh` lagi.
+Rollback: `git checkout` commit sebelumnya lalu jalankan `update.sh` lagi.
 
-### 10. Log
+### 9. Log
 
 ```bash
 sudo journalctl -u drp-api -u drp-worker -f
@@ -226,7 +219,7 @@ location / {
 }
 
 location /api/ {
-    proxy_pass http://127.0.0.1:8080;
+    proxy_pass http://127.0.0.1:8087;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -236,7 +229,7 @@ location /api/ {
 }
 
 location /uploads/ {
-    proxy_pass http://127.0.0.1:8080;
+    proxy_pass http://127.0.0.1:8087;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -245,7 +238,7 @@ location /uploads/ {
 }
 
 location /events/ {
-    proxy_pass http://127.0.0.1:8080;
+    proxy_pass http://127.0.0.1:8087;
     proxy_http_version 1.1;
     proxy_set_header Connection '';
     proxy_buffering off;
@@ -262,7 +255,7 @@ Di menu **Integrasi**:
 - **Messaging Gateway** — tab **WhatsApp** (pairing QR via [whatsmeow](https://github.com/tulir/whatsmeow), ke pelanggan) dan tab **Telegram** (bot token + chat ID **ops tenant** saja)
 - **Backup / Restore** — tenant: export/import JSON data tenant; platform/owner: `pg_dump` / `psql` penuh (dir `DB_BACKUP_DIR`)
 
-Sesi WhatsApp produksi: `WHATSAPP_SESSION_DIR=/var/lib/drp-billing/whatsapp`. Setelah Connect + scan QR, notifikasi invoice/pembayaran memakai sesi tersebut.
+Sesi WhatsApp produksi: `WHATSAPP_SESSION_DIR=./data/whatsapp` (folder `data/` di repo). Setelah Connect + scan QR, notifikasi invoice/pembayaran memakai sesi tersebut.
 
 ## Fitur
 

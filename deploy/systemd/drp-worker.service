@@ -5,11 +5,10 @@ Wants=postgresql.service
 
 [Service]
 Type=simple
-User=drp
-Group=drp
-WorkingDirectory=/opt/drp-billing/current
-EnvironmentFile=/etc/drp-billing/drp-billing.env
-ExecStart=/opt/drp-billing/current/drp-worker
+User=dianrp
+WorkingDirectory=/www/wwwroot/billing.dianrp.com
+EnvironmentFile=/www/wwwroot/billing.dianrp.com/.env
+ExecStart=/www/wwwroot/billing.dianrp.com/bin/drp-worker
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
@@ -17,7 +16,7 @@ LimitNOFILE=65535
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/drp-billing /var/log/drp-billing
+ReadWritePaths=/www/wwwroot/billing.dianrp.com/data
 PrivateTmp=true
 
 [Install]

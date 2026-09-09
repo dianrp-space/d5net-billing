@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Skrip tarball lama (/opt, /etc/drp-billing, user drp).
+# Untuk billing.dianrp.com pakai: deploy/scripts/update.sh
 set -euo pipefail
 
 VERSION="${1:?Usage: install.sh <version>}"
