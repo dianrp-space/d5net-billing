@@ -21,6 +21,7 @@ import (
 
 const (
 	settingPayment   = "integration.payment"
+	settingDuitku    = "integration.duitku"
 	settingMessaging = "integration.messaging"
 	settingSMTP      = "integration.smtp"
 )
@@ -54,6 +55,41 @@ type paymentIntegrationPut struct {
 	APIKey           string `json:"api_key,omitempty"`
 	WebhookSecret    string `json:"webhook_secret,omitempty"`
 	ExpiresInMinutes int    `json:"expires_in_minutes,omitempty"`
+}
+
+type duitkuIntegrationStored struct {
+	MerchantCode     string `json:"merchant_code"`
+	APIKey           string `json:"api_key"`
+	Sandbox          bool   `json:"sandbox"`
+	Enabled          bool   `json:"enabled"`
+	ExpiresInMinutes int    `json:"expires_in_minutes"`
+}
+
+type duitkuIntegrationView struct {
+	Configured       bool   `json:"configured"`
+	Enabled          bool   `json:"enabled"`
+	Sandbox          bool   `json:"sandbox"`
+	MerchantCode     string `json:"merchant_code"`
+	APIKey           string `json:"api_key,omitempty"`
+	ExpiresInMinutes int    `json:"expires_in_minutes"`
+	WebhookPath      string `json:"webhook_path"`
+	WebhookURL       string `json:"webhook_url"`
+	WebhookBaseHint  string `json:"webhook_base_hint"`
+}
+
+type duitkuIntegrationPut struct {
+	Enabled          bool   `json:"enabled"`
+	Sandbox          bool   `json:"sandbox"`
+	MerchantCode     string `json:"merchant_code"`
+	APIKey           string `json:"api_key,omitempty"`
+	ExpiresInMinutes int    `json:"expires_in_minutes,omitempty"`
+}
+
+type payOptionView struct {
+	Provider    string `json:"provider"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
 }
 
 type messagingIntegrationStored struct {
@@ -180,6 +216,86 @@ func registerIntegrations(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body paymentIntegrationView }{Body: paymentView(ctx, d, tid, cur, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-duitku-integration", Method: http.MethodGet, Path: "/api/integrations/duitku",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Host            string `header:"Host"`
+		Origin          string `header:"Origin"`
+		Referer         string `header:"Referer"`
+		XForwardedHost  string `header:"X-Forwarded-Host"`
+		XForwardedProto string `header:"X-Forwarded-Proto"`
+	}) (*struct{ Body duitkuIntegrationView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := loadDuitkuIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body duitkuIntegrationView }{Body: duitkuView(ctx, d, tid, stored, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "put-duitku-integration", Method: http.MethodPut, Path: "/api/integrations/duitku",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Host            string `header:"Host"`
+		Origin          string `header:"Origin"`
+		Referer         string `header:"Referer"`
+		XForwardedHost  string `header:"X-Forwarded-Host"`
+		XForwardedProto string `header:"X-Forwarded-Proto"`
+		Body            duitkuIntegrationPut
+	}) (*struct{ Body duitkuIntegrationView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cur, err := loadDuitkuIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		merchant := strings.TrimSpace(input.Body.MerchantCode)
+		if merchant == "" {
+			merchant = strings.TrimSpace(cur.MerchantCode)
+		}
+		if input.Body.Enabled && merchant == "" {
+			return nil, httpx.BadRequest("merchant code Duitku wajib diisi")
+		}
+		if input.Body.Enabled && strings.TrimSpace(input.Body.APIKey) == "" && cur.APIKey == "" {
+			return nil, httpx.BadRequest("API key Duitku wajib diisi")
+		}
+		cur.Enabled = input.Body.Enabled
+		cur.Sandbox = input.Body.Sandbox
+		cur.MerchantCode = merchant
+		if v := strings.TrimSpace(input.Body.APIKey); v != "" {
+			enc, err := d.Encryptor.EncryptString(v)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			cur.APIKey = enc
+		}
+		if input.Body.ExpiresInMinutes > 0 {
+			cur.ExpiresInMinutes = payment.ClampDuitkuExpiryMinutes(input.Body.ExpiresInMinutes)
+		}
+		if err := d.Store.UpsertSettingJSON(ctx, tid, settingDuitku, cur); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body duitkuIntegrationView }{Body: duitkuView(ctx, d, tid, cur, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-pay-options", Method: http.MethodGet, Path: "/api/integrations/pay-options",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body []payOptionView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body []payOptionView }{Body: listEnabledPayOptions(ctx, d, tid)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -402,6 +518,15 @@ func loadPaymentIntegration(ctx context.Context, d *Deps, tid xid.ID) (paymentIn
 	return s, err
 }
 
+func loadDuitkuIntegration(ctx context.Context, d *Deps, tid xid.ID) (duitkuIntegrationStored, error) {
+	var s duitkuIntegrationStored
+	err := d.Store.GetSettingJSON(ctx, tid, settingDuitku, &s)
+	if errors.Is(err, store.ErrNotFound) {
+		return duitkuIntegrationStored{}, nil
+	}
+	return s, err
+}
+
 func loadMessagingIntegration(ctx context.Context, d *Deps, tid xid.ID) (messagingIntegrationStored, error) {
 	var s messagingIntegrationStored
 	err := d.Store.GetSettingJSON(ctx, tid, settingMessaging, &s)
@@ -448,7 +573,11 @@ func smtpView(d *Deps, s smtpIntegrationStored) smtpIntegrationView {
 }
 
 func paymentWebhookPath() string {
-	return "/api/webhooks/payment/" + payment.ProviderDRP
+	return paymentWebhookPathFor(payment.ProviderDRP)
+}
+
+func paymentWebhookPathFor(provider string) string {
+	return "/api/webhooks/payment/" + normalizePaymentProviderName(provider)
 }
 
 func originFromReferer(referer string) string {
@@ -494,17 +623,28 @@ func publicOrigin(origin, referer, proto, forwardedHost, host string) string {
 	return p + "://" + h
 }
 
-func paymentWebhookURL(ctx context.Context, d *Deps, tid xid.ID, origin, referer, proto, forwardedHost, host string) string {
-	path := paymentWebhookPath()
+func appPublicOrigin(ctx context.Context, d *Deps, tid xid.ID, origin, referer, proto, forwardedHost, host string) string {
 	if app := publicOrigin(origin, referer, proto, forwardedHost, host); app != "" {
-		return app + path
+		return app
 	}
 	if d != nil && d.Store != nil {
 		if net, err := d.Store.GetIsolirNetworkSettings(ctx, tid); err == nil {
 			if base := strings.TrimRight(strings.TrimSpace(net.PortalBaseURL), "/"); base != "" {
-				return base + path
+				return base
 			}
 		}
+	}
+	return ""
+}
+
+func paymentWebhookURL(ctx context.Context, d *Deps, tid xid.ID, origin, referer, proto, forwardedHost, host string) string {
+	return paymentWebhookURLFor(ctx, d, tid, origin, referer, proto, forwardedHost, host, payment.ProviderDRP)
+}
+
+func paymentWebhookURLFor(ctx context.Context, d *Deps, tid xid.ID, origin, referer, proto, forwardedHost, host, provider string) string {
+	path := paymentWebhookPathFor(provider)
+	if app := appPublicOrigin(ctx, d, tid, origin, referer, proto, forwardedHost, host); app != "" {
+		return app + path
 	}
 	return path
 }
@@ -550,6 +690,23 @@ func paymentView(ctx context.Context, d *Deps, tid xid.ID, s paymentIntegrationS
 	}
 }
 
+func duitkuView(ctx context.Context, d *Deps, tid xid.ID, s duitkuIntegrationStored, origin, referer, proto, forwardedHost, host string) duitkuIntegrationView {
+	apiKey := decryptSecret(d, s.APIKey)
+	merchant := strings.TrimSpace(s.MerchantCode)
+	webhookURL := paymentWebhookURLFor(ctx, d, tid, origin, referer, proto, forwardedHost, host, payment.ProviderDuitku)
+	return duitkuIntegrationView{
+		Configured:       merchant != "" && s.APIKey != "",
+		Enabled:          s.Enabled,
+		Sandbox:          s.Sandbox,
+		MerchantCode:     merchant,
+		APIKey:           apiKey,
+		ExpiresInMinutes: payment.ClampDuitkuExpiryMinutes(s.ExpiresInMinutes),
+		WebhookPath:      paymentWebhookPathFor(payment.ProviderDuitku),
+		WebhookURL:       webhookURL,
+		WebhookBaseHint:  webhookURL,
+	}
+}
+
 func messagingView(d *Deps, s messagingIntegrationStored) messagingIntegrationView {
 	return messagingIntegrationView{
 		WhatsAppAPIURL:     s.WhatsAppAPIURL,
@@ -588,6 +745,8 @@ func normalizePaymentProviderName(name string) string {
 	switch name {
 	case "", "qris", "drp_payment", "drp-payment", "drppayment":
 		return payment.ProviderDRP
+	case "duitku", "duitku_pop", "duitkupop", "pop":
+		return payment.ProviderDuitku
 	default:
 		return name
 	}
@@ -614,14 +773,64 @@ func drpCredentials(d *Deps, cfg paymentIntegrationStored) (baseURL, apiKey, web
 	return baseURL, apiKey, webhookSecret
 }
 
-// resolvePaymentProvider prefers tenant integration keys, then falls back to env.
+func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payOptionView {
+	out := make([]payOptionView, 0, 2)
+	if drpPaymentReady(ctx, d, tenantID) {
+		out = append(out, payOptionView{
+			Provider:    payment.ProviderDRP,
+			Label:       "QRIS",
+			Description: "Scan QR dengan e-wallet atau m-banking",
+			Kind:        "qris",
+		})
+	}
+	if duitkuPaymentReady(ctx, d, tenantID) {
+		out = append(out, payOptionView{
+			Provider:    payment.ProviderDuitku,
+			Label:       "Duitku Payment Gateway",
+			Description: "Popup pembayaran Duitku (VA, e-wallet, retail, QRIS)",
+			Kind:        "popup",
+		})
+	}
+	return out
+}
+
+func drpPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
+	cfg, _ := loadPaymentIntegration(ctx, d, tenantID)
+	hasTenantCfg := cfg.APIKey != "" || cfg.WebhookSecret != "" || cfg.BaseURL != "" || cfg.Enabled
+	if hasTenantCfg && !cfg.Enabled {
+		return false
+	}
+	_, apiKey, _ := drpCredentials(d, cfg)
+	return apiKey != ""
+}
+
+func duitkuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
+	cfg, _ := loadDuitkuIntegration(ctx, d, tenantID)
+	if !cfg.Enabled {
+		return false
+	}
+	return strings.TrimSpace(cfg.MerchantCode) != "" && decryptSecret(d, cfg.APIKey) != ""
+}
+
+// resolvePaymentProvider prefers tenant integration keys, then falls back to env (DRP only).
 func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name string) (payment.Provider, error) {
 	name = normalizePaymentProviderName(name)
 	if name == payment.ProviderManual {
 		return d.Payments.Get(payment.ProviderManual)
 	}
+	if name == payment.ProviderDuitku {
+		cfg, _ := loadDuitkuIntegration(ctx, d, tenantID)
+		if !cfg.Enabled {
+			return nil, httpx.BadRequest("Duitku POP belum diaktifkan di Integrasi")
+		}
+		apiKey := decryptSecret(d, cfg.APIKey)
+		if strings.TrimSpace(cfg.MerchantCode) == "" || apiKey == "" {
+			return nil, httpx.BadRequest("Duitku POP belum dikonfigurasi")
+		}
+		return payment.NewDuitkuProvider(cfg.MerchantCode, apiKey, cfg.Sandbox, cfg.ExpiresInMinutes), nil
+	}
 	if name != payment.ProviderDRP {
-		return nil, fmt.Errorf("unknown payment provider: %s", name)
+		return nil, httpx.BadRequest("payment gateway tidak dikenali")
 	}
 	cfg, _ := loadPaymentIntegration(ctx, d, tenantID)
 	hasTenantCfg := cfg.APIKey != "" || cfg.WebhookSecret != "" || cfg.BaseURL != "" || cfg.Enabled

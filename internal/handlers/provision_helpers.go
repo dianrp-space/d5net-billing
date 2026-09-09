@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/dianrp/drp-billing/internal/httpx"
 	"github.com/dianrp/drp-billing/internal/payment"
 	"github.com/dianrp/drp-billing/internal/provision"
 	"github.com/dianrp/drp-billing/internal/provision/routeros"
@@ -454,6 +455,69 @@ func resumeSubscription(ctx context.Context, d *Deps, tenantID xid.ID, subID xid
 	if err := d.Store.ClearSubscriptionSuspendedAt(ctx, tenantID, subID); err != nil {
 		slog.Warn("clear suspended_at after resume", "sub_id", subID, "err", err)
 	}
+}
+
+// isolirSubscription forces a subscription into isolir (suspend) immediately:
+// it marks the billing status suspended and swaps the RouterOS secret to the
+// isolir profile. Used by the manual admin "suspend" action so operators do not
+// have to wait for the billing worker / grace period.
+func isolirSubscription(ctx context.Context, d *Deps, tenantID xid.ID, subID xid.ID) error {
+	sub, err := d.Store.GetSubscription(ctx, tenantID, subID)
+	if err != nil {
+		return httpx.NotFound("subscription not found")
+	}
+	if err := d.Store.UpdateSubscriptionStatus(ctx, tenantID, subID, "suspended"); err != nil {
+		return httpx.Internal(err)
+	}
+	if sub.RouterID == nil {
+		return nil
+	}
+	plan, err := d.Store.GetPlan(ctx, tenantID, sub.PlanID)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	r, err := d.Store.GetRouter(ctx, tenantID, *sub.RouterID)
+	if err != nil {
+		return nil
+	}
+	prov, err := d.Provisioner.Get(r.Provisioner)
+	if err != nil {
+		return nil
+	}
+	isolirCfg, _ := d.Store.GetIsolirNetworkSettings(ctx, tenantID)
+	_ = d.Store.ResolveIsolirPool(ctx, tenantID, &isolirCfg)
+	isolir := store.IsolirProfileName(isolirCfg, plan)
+	isolirCfg.ProfileName = isolir
+	if ensurer, ok := prov.(provision.IsolirEnsurer); ok && isolirCfg.PoolRanges != "" && isolirCfg.PortalBaseURL != "" {
+		ten, _ := d.Store.GetTenant(ctx, tenantID)
+		slug := ""
+		if ten != nil {
+			slug = ten.Slug
+		}
+		if err := ensurer.EnsureIsolirInfra(ctx, tenantID, *sub.RouterID, isolirCfg, slug); err != nil {
+			slog.Warn("ensure isolir infra (manual suspend)", "sub_id", subID, "err", err)
+		}
+	}
+	local := strings.TrimSpace(isolirCfg.PoolGateway)
+	if local == "" && isolirCfg.PoolRanges != "" {
+		local = routeros.CIDRLocalAddress(isolirCfg.PoolRanges, nil)
+	}
+	spec := &provision.ServiceSpec{
+		TenantID:       tenantID,
+		SubscriptionID: sub.ID,
+		RouterID:       *sub.RouterID,
+		Username:       sub.Username,
+		ServiceType:    sub.ServiceType,
+		ProfileName:    planProfileName(plan),
+		IsolirProfile:  isolir,
+		LocalAddress:   local,
+		Comment:        ownershipComment(ctx, d, tenantID, sub.CustomerCode, sub.CustomerName),
+	}
+	if err := prov.Suspend(ctx, spec); err != nil {
+		slog.Error("manual suspend subscription", "sub_id", subID, "err", err)
+		return httpx.BadRequest("gagal isolir di router: " + err.Error())
+	}
+	return nil
 }
 
 // applyStaticIPAMToSpec pins a static assignment on resume. Dynamic users leave

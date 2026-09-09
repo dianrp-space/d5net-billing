@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "./api";
 import { useAppDialog } from "./confirm";
@@ -31,6 +32,18 @@ type PaymentIntegration = {
   webhook_base_hint: string;
 };
 
+type DuitkuIntegration = {
+  configured: boolean;
+  enabled: boolean;
+  sandbox: boolean;
+  merchant_code: string;
+  api_key?: string;
+  expires_in_minutes: number;
+  webhook_path: string;
+  webhook_url: string;
+  webhook_base_hint: string;
+};
+
 function ttlHint(minutes: number) {
   const n = Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
   if (n >= 1440) return "24 jam";
@@ -50,12 +63,10 @@ const TTL_PRESETS = [
   { minutes: 1440, label: "24 jam" },
 ];
 
-function paymentWebhookDisplayURL(data?: PaymentIntegration | null) {
-  const path = data?.webhook_path || "/api/webhooks/payment/drp";
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  if (typeof window === "undefined") {
-    return data?.webhook_url || normalized;
-  }
+function paymentWebhookDisplayURL(path?: string, fallback = "/api/webhooks/payment/drp") {
+  const raw = path || fallback;
+  const normalized = raw.startsWith("/") ? raw : `/${raw}`;
+  if (typeof window === "undefined") return normalized;
   return `${window.location.origin}${normalized}`;
 }
 
@@ -209,12 +220,23 @@ export function PaymentGWPage() {
     queryKey: ["integration-payment"],
     queryFn: () => api<PaymentIntegration>("/api/integrations/payment"),
   });
+  const duitkuQ = useQuery({
+    queryKey: ["integration-duitku"],
+    queryFn: () => api<DuitkuIntegration>("/api/integrations/duitku"),
+  });
   const [form, setForm] = useState({
     enabled: false,
     base_url: "",
     api_key: "",
     webhook_secret: "",
     expires_in_minutes: 15,
+  });
+  const [duitkuForm, setDuitkuForm] = useState({
+    enabled: false,
+    sandbox: true,
+    merchant_code: "",
+    api_key: "",
+    expires_in_minutes: 60,
   });
 
   useEffect(() => {
@@ -227,6 +249,17 @@ export function PaymentGWPage() {
       expires_in_minutes: q.data.expires_in_minutes || 15,
     });
   }, [q.data]);
+
+  useEffect(() => {
+    if (!duitkuQ.data) return;
+    setDuitkuForm({
+      enabled: duitkuQ.data.enabled,
+      sandbox: duitkuQ.data.configured ? duitkuQ.data.sandbox : true,
+      merchant_code: duitkuQ.data.merchant_code || "",
+      api_key: duitkuQ.data.api_key || "",
+      expires_in_minutes: duitkuQ.data.expires_in_minutes || 60,
+    });
+  }, [duitkuQ.data]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -250,33 +283,64 @@ export function PaymentGWPage() {
         expires_in_minutes: data.expires_in_minutes || form.expires_in_minutes,
       });
       void qc.invalidateQueries({ queryKey: ["integration-payment"] });
-      void toastSuccess("Payment gateway disimpan");
+      void toastSuccess("DRP Payment disimpan");
     },
     onError: (e: Error) => void toastError(e.message),
   });
 
-  const webhookURL = paymentWebhookDisplayURL(q.data);
+  const saveDuitku = useMutation({
+    mutationFn: () =>
+      api<DuitkuIntegration>("/api/integrations/duitku", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: duitkuForm.enabled,
+          sandbox: duitkuForm.sandbox,
+          merchant_code: duitkuForm.merchant_code.trim(),
+          api_key: duitkuForm.api_key.trim() || undefined,
+          expires_in_minutes: Math.min(1440, Math.max(1, duitkuForm.expires_in_minutes || 60)),
+        }),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(["integration-duitku"], data);
+      setDuitkuForm({
+        enabled: data.enabled,
+        sandbox: data.sandbox,
+        merchant_code: data.merchant_code || "",
+        api_key: data.api_key || duitkuForm.api_key,
+        expires_in_minutes: data.expires_in_minutes || duitkuForm.expires_in_minutes,
+      });
+      void qc.invalidateQueries({ queryKey: ["integration-duitku"] });
+      void toastSuccess("Duitku POP disimpan");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
 
-  async function copyWebhook() {
+  const webhookURL = paymentWebhookDisplayURL(q.data?.webhook_path);
+  const duitkuWebhookURL = paymentWebhookDisplayURL(duitkuQ.data?.webhook_path, "/api/webhooks/payment/duitku");
+
+  async function copyWebhook(url: string) {
     try {
-      await navigator.clipboard.writeText(webhookURL);
-      void toastSuccess("Webhook URL disalin");
+      await navigator.clipboard.writeText(url);
+      void toastSuccess("Callback URL disalin");
     } catch {
-      void toastError("Gagal menyalin. Salin manual dari kolom Webhook URL.");
+      void toastError("Gagal menyalin. Salin manual dari kolom URL.");
     }
   }
+
+  const loading = q.isLoading || duitkuQ.isLoading;
 
   return (
     <Section title="Payment Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Integrasi <strong>DRP Payment</strong> (QRIS saja). Kredensial per tenant disimpan terenkripsi. Gunakan tombol
-        mata untuk menampilkan API key dan webhook secret.
+        Aktifkan gateway per tenant. <strong>DRP Payment</strong> untuk QRIS di aplikasi,{" "}
+        <strong>Duitku POP</strong> untuk redirect ke halaman bayar Duitku. Kredensial disimpan terenkripsi.
       </p>
-      {q.isLoading ? (
+      {loading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
       ) : (
-        <div className="grid max-w-xl gap-4">
-          <ProviderBlock
+        <Accordion type="multiple" className="grid max-w-xl gap-3">
+          <ProviderAccordionItem
+            value="drp"
             title="DRP Payment · QRIS"
             enabled={form.enabled}
             configured={Boolean(q.data?.configured)}
@@ -352,35 +416,124 @@ export function PaymentGWPage() {
               </span>
             </label>
             <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Webhook URL (isi di dashboard DRP Payment)</span>
+              <span className="text-[var(--muted)]">Webhook URL DRP · /api/webhooks/payment/drp</span>
               <div className="flex gap-2">
                 <input className="input min-w-0 flex-1 font-mono text-xs" readOnly value={webhookURL} />
-                <IconButton label="Salin webhook URL" onClick={() => void copyWebhook()}>
+                <IconButton label="Salin webhook URL" onClick={() => void copyWebhook(webhookURL)}>
                   <IconCopy />
                 </IconButton>
               </div>
               <span className="text-[11px] text-[var(--muted)]">
-                Tempel URL ini ke field webhook merchant di provider. Pastikan domain publik (bukan localhost) agar callback
-                sampai.
+                Khusus DRP Payment / QRIS, terpisah dari Duitku. Tempel di dashboard merchant. Domain harus publik.
               </span>
             </label>
-          </ProviderBlock>
-          <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Menyimpan..." : "Simpan"}
-          </button>
-        </div>
+            <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Menyimpan..." : "Simpan"}
+            </button>
+          </ProviderAccordionItem>
+
+          <ProviderAccordionItem
+            value="duitku"
+            title="Duitku POP"
+            enabled={duitkuForm.enabled}
+            configured={Boolean(duitkuQ.data?.configured)}
+            onToggle={(v) => setDuitkuForm({ ...duitkuForm, enabled: v })}
+          >
+            <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+              Pelanggan diarahkan ke <strong>halaman bayar Duitku</strong> (bukan API v2 / MD5). Callback memakai HMAC-SHA256.
+              Isi callback URL di bawah ke dashboard Duitku.
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={duitkuForm.sandbox}
+                onChange={(e) => setDuitkuForm({ ...duitkuForm, sandbox: e.target.checked })}
+              />
+              Sandbox (api-sandbox.duitku.com)
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Merchant code</span>
+              <input
+                className="input"
+                placeholder="Dxxxxx"
+                value={duitkuForm.merchant_code}
+                onChange={(e) => setDuitkuForm({ ...duitkuForm, merchant_code: e.target.value })}
+                autoComplete="off"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">API key</span>
+              <SecretInput
+                name="duitku-api-key"
+                placeholder="API key Duitku POP"
+                value={duitkuForm.api_key}
+                onChange={(e) => setDuitkuForm({ ...duitkuForm, api_key: e.target.value })}
+                autoComplete="new-password"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={1440}
+                step={1}
+                value={duitkuForm.expires_in_minutes}
+                onChange={(e) =>
+                  setDuitkuForm({
+                    ...duitkuForm,
+                    expires_in_minutes: Number(e.target.value) || 60,
+                  })
+                }
+              />
+              <div className="flex flex-wrap gap-1">
+                {TTL_PRESETS.map((p) => (
+                  <button
+                    key={`duitku-${p.minutes}`}
+                    type="button"
+                    className="btn-ghost px-2 py-1 text-[11px]"
+                    onClick={() => setDuitkuForm({ ...duitkuForm, expires_in_minutes: p.minutes })}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-[var(--muted)]">
+                Invoice Duitku berlaku {ttlHint(duitkuForm.expires_in_minutes)}.
+              </span>
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Callback URL Duitku · /api/webhooks/payment/duitku</span>
+              <div className="flex gap-2">
+                <input className="input min-w-0 flex-1 font-mono text-xs" readOnly value={duitkuWebhookURL} />
+                <IconButton label="Salin callback URL" onClick={() => void copyWebhook(duitkuWebhookURL)}>
+                  <IconCopy />
+                </IconButton>
+              </div>
+              <span className="text-[11px] text-[var(--muted)]">
+                Khusus Duitku, terpisah dari QRIS. Tempel di dashboard Duitku POP. Domain harus publik; callback berupa form POST.
+              </span>
+            </label>
+            <button type="button" className="btn w-fit" disabled={saveDuitku.isPending} onClick={() => saveDuitku.mutate()}>
+              {saveDuitku.isPending ? "Menyimpan..." : "Simpan"}
+            </button>
+          </ProviderAccordionItem>
+        </Accordion>
       )}
     </Section>
   );
 }
 
-function ProviderBlock({
+function ProviderAccordionItem({
+  value,
   title,
   enabled,
   configured,
   onToggle,
   children,
 }: {
+  value: string;
   title: string;
   enabled: boolean;
   configured: boolean;
@@ -388,19 +541,30 @@ function ProviderBlock({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--border)] p-3">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium">{title}</p>
-          <p className="text-[10px] text-[var(--muted)]">{configured ? "kunci tersimpan" : "belum dikonfigurasi"}</p>
-        </div>
-        <label className="flex items-center gap-2 text-sm">
+    <AccordionItem value={value} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3">
+      <div className="flex items-center gap-2">
+        <AccordionTrigger className="min-w-0 flex-1 py-3 hover:no-underline">
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium">{title}</span>
+            <span className="mt-0.5 block text-[10px] text-[var(--muted)]">
+              {configured ? "kunci tersimpan" : "belum dikonfigurasi"}
+              {enabled ? " · aktif" : " · nonaktif"}
+            </span>
+          </span>
+        </AccordionTrigger>
+        <label
+          className="flex shrink-0 items-center gap-2 py-3 text-sm"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <input type="checkbox" checked={enabled} onChange={(e) => onToggle(e.target.checked)} />
           Aktif
         </label>
       </div>
-      <div className="grid gap-2">{children}</div>
-    </div>
+      <AccordionContent>
+        <div className="grid gap-2">{children}</div>
+      </AccordionContent>
+    </AccordionItem>
   );
 }
 

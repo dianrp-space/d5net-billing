@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { IconBox, IconPencil, IconPlug, IconTrash } from "../icons";
+import { IconBan, IconBox, IconPencil, IconPlug, IconRefresh, IconTrash } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
 import {
@@ -566,6 +566,26 @@ export function SubscriptionsPage({
     onError: (e: Error) => void toastError(e.message),
   });
 
+  const suspend = useMutation({
+    mutationFn: (id: string) =>
+      api<{ status: string }>(`/api/subscriptions/${id}/suspend`, { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["subs"] });
+      void toastSuccess("Langganan diisolir");
+    },
+    onError: (e: Error) => void toastError(e.message || "Gagal isolir"),
+  });
+
+  const resume = useMutation({
+    mutationFn: (id: string) =>
+      api<{ status: string }>(`/api/subscriptions/${id}/resume`, { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["subs"] });
+      void toastSuccess("Isolir dibuka, layanan aktif kembali");
+    },
+    onError: (e: Error) => void toastError(e.message || "Gagal buka isolir"),
+  });
+
   const changePlanCustomer = customers.find((c) => c.id === changePlanTarget?.customer_id);
   const changePlanClusterId = changePlanCustomer?.cluster_id || "";
   const changePlanOffersQ = useQuery({
@@ -795,6 +815,39 @@ export function SubscriptionsPage({
             {(s.status === "active" || s.status === "suspended" || s.status === "overdue") && !customerCabut ? (
               <IconButton label="Ganti paket" onClick={() => openChangePlan(s)}>
                 <IconBox />
+              </IconButton>
+            ) : null}
+            {(s.status === "active" || s.status === "overdue") && !customerCabut ? (
+              <IconButton
+                label="Isolir langganan"
+                danger
+                disabled={suspend.isPending}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: "Isolir langganan",
+                    description: `Isolir ${s.username} sekarang? Secret di router akan dipindah ke profil isolir.`,
+                    confirmLabel: "Isolir",
+                  });
+                  if (ok) suspend.mutate(s.id);
+                }}
+              >
+                <IconBan />
+              </IconButton>
+            ) : null}
+            {s.status === "suspended" && !customerCabut ? (
+              <IconButton
+                label="Buka isolir (aktifkan)"
+                disabled={resume.isPending}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: "Buka isolir",
+                    description: `Aktifkan kembali ${s.username}? Layanan akan menyala tanpa menunggu pembayaran.`,
+                    confirmLabel: "Aktifkan",
+                  });
+                  if (ok) resume.mutate(s.id);
+                }}
+              >
+                <IconRefresh />
               </IconButton>
             ) : null}
             <IconButton label="Edit langganan" onClick={() => startEdit(s)}>

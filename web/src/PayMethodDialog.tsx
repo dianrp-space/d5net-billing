@@ -1,14 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
-import { IconQrCode } from "./icons";
+import { openDuitkuPopup } from "./duitkuPop";
+import { IconExternalLink, IconQrCode } from "./icons";
 import {
   getSavedPayMethod,
+  hasSavedPayMethod,
   invoiceRemaining,
+  PAY_METHOD_DUITKU,
   PAY_METHOD_QRIS,
-  PORTAL_PAY_METHODS,
+  payMethodToProvider,
+  payOptionsToMethods,
   setSavedPayMethod,
   type PayableInvoice,
+  type PayMethodDef,
   type PayMethodId,
+  type PayOption,
 } from "./payMethod";
 import { QrisPayDialog, type QrisIntent } from "./QrisPayDialog";
 import { toastError } from "./swal";
@@ -16,8 +23,9 @@ import { formatRp, FormDialog } from "./ui";
 
 function methodIcon(id: PayMethodId) {
   switch (id) {
+    case PAY_METHOD_DUITKU:
+      return <IconExternalLink />;
     case PAY_METHOD_QRIS:
-      return <IconQrCode />;
     default:
       return <IconQrCode />;
   }
@@ -28,6 +36,8 @@ export function PayMethodDialog({
   invoiceNumber,
   amount,
   tenantSlug,
+  methods,
+  loading,
   busy,
   error,
   onClose,
@@ -37,6 +47,8 @@ export function PayMethodDialog({
   invoiceNumber: string;
   amount: number;
   tenantSlug?: string;
+  methods: PayMethodDef[];
+  loading?: boolean;
   busy?: boolean;
   error?: string;
   onClose: () => void;
@@ -45,8 +57,14 @@ export function PayMethodDialog({
   const [method, setMethod] = useState<PayMethodId>(() => getSavedPayMethod(tenantSlug));
 
   useEffect(() => {
-    if (open) setMethod(getSavedPayMethod(tenantSlug));
-  }, [open, tenantSlug]);
+    if (!open) return;
+    const saved = getSavedPayMethod(tenantSlug);
+    if (methods.some((m) => m.id === saved)) {
+      setMethod(saved);
+      return;
+    }
+    if (methods[0]) setMethod(methods[0].id);
+  }, [open, tenantSlug, methods]);
 
   return (
     <FormDialog open={open} title="Pilih metode pembayaran" onClose={onClose}>
@@ -55,37 +73,43 @@ export function PayMethodDialog({
           <p className="text-xs text-[var(--muted)]">{invoiceNumber || "Tagihan"}</p>
           <p className="text-lg font-bold">{formatRp(amount)}</p>
         </div>
-        <div className="grid gap-2" role="radiogroup" aria-label="Metode pembayaran">
-          {PORTAL_PAY_METHODS.map((m) => {
-            const selected = method === m.id;
-            return (
-              <button
-                key={m.id}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                disabled={busy}
-                onClick={() => setMethod(m.id)}
-                className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
-                  selected
-                    ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]"
-                    : "border-[var(--border)] bg-[var(--panel)] hover:border-[var(--border-strong)]"
-                }`}
-              >
-                <span className="mt-0.5 text-[var(--accent)]">{methodIcon(m.id)}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold">{m.label}</span>
-                  <span className="mt-0.5 block text-xs text-[var(--muted)]">{m.description}</span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        {loading ? (
+          <p className="text-sm text-[var(--muted)]">Memuat metode pembayaran…</p>
+        ) : methods.length === 0 ? (
+          <p className="text-sm text-[var(--danger)]">Belum ada payment gateway yang aktif. Hubungi admin.</p>
+        ) : (
+          <div className="grid gap-2" role="radiogroup" aria-label="Metode pembayaran">
+            {methods.map((m) => {
+              const selected = method === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={busy}
+                  onClick={() => setMethod(m.id)}
+                  className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
+                    selected
+                      ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]"
+                      : "border-[var(--border)] bg-[var(--panel)] hover:border-[var(--border-strong)]"
+                  }`}
+                >
+                  <span className="mt-0.5 text-[var(--accent)]">{methodIcon(m.id)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold">{m.label}</span>
+                    <span className="mt-0.5 block text-xs text-[var(--muted)]">{m.description}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
         <button
           type="button"
           className="btn w-fit"
-          disabled={busy}
+          disabled={busy || loading || methods.length === 0}
           onClick={() => onConfirm(method)}
         >
           {busy ? "Menyiapkan…" : "Lanjut bayar"}
@@ -108,34 +132,61 @@ export function PortalPayHost({
   onClose: () => void;
   onPaid?: () => void;
 }) {
-  const [step, setStep] = useState<"method" | "qris">("method");
+  const [step, setStep] = useState<"method" | "qris" | "duitku">("method");
   const [intent, setIntent] = useState<QrisIntent | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Skip the picker straight to checkout when a preferred method exists.
+  const autoTriedFor = useRef<string | null>(null);
+  const options = useQuery({
+    queryKey: ["portal-pay-options", tenantSlug],
+    queryFn: () => api<PayOption[]>("/api/portal/pay-options", { headers }),
+    enabled: Boolean(invoice?.id),
+  });
+  const methods = payOptionsToMethods(options.data);
 
   useEffect(() => {
     setStep("method");
     setIntent(null);
     setError("");
     setBusy(false);
+    autoTriedFor.current = null;
   }, [invoice?.id]);
+
+  // Auto-advance to the previously chosen method (once per invoice) unless the
+  // customer cleared it via the "batalkan / ganti metode" action.
+  useEffect(() => {
+    if (!invoice?.id || step !== "method" || busy) return;
+    if (autoTriedFor.current === invoice.id) return;
+    if (options.isLoading || !methods.length) return;
+    if (!hasSavedPayMethod(tenantSlug)) return;
+    const saved = getSavedPayMethod(tenantSlug);
+    if (!methods.some((m) => m.id === saved)) return;
+    autoTriedFor.current = invoice.id;
+    void confirmMethod(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoice?.id, step, busy, options.isLoading, methods.length, tenantSlug]);
 
   if (!invoice?.id) return null;
 
   async function confirmMethod(method: PayMethodId) {
     if (!invoice?.id) return;
     setSavedPayMethod(method, tenantSlug);
-    if (method !== PAY_METHOD_QRIS) {
-      setError("Metode ini belum tersedia.");
-      return;
-    }
     setBusy(true);
     setError("");
     try {
       const next = await api<QrisIntent>(`/api/portal/invoices/${invoice.id}/checkout`, {
         method: "POST",
         headers,
+        body: JSON.stringify({
+          provider: payMethodToProvider(method),
+          return_url: typeof window !== "undefined" ? window.location.href : "",
+        }),
       });
+      if (method === PAY_METHOD_DUITKU) {
+        await launchDuitku(next);
+        return;
+      }
       setIntent(next);
       setStep("qris");
     } catch (err: unknown) {
@@ -144,6 +195,32 @@ export function PortalPayHost({
       void toastError(msg);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Duitku POP renders its own overlay popup. Our Radix dialogs are modal and
+  // block outside pointer events, so we close them first and hand control to the
+  // Duitku SDK (checkout.process). Falls back to the hosted paymentUrl.
+  async function launchDuitku(next: QrisIntent) {
+    const meta = (next.metadata ?? {}) as Record<string, unknown>;
+    const reference = String(meta.reference || meta.transaction_id || "").trim();
+    const sandbox = meta.duitku_sandbox === true;
+    const url = String(next.checkout_url || "").trim();
+    setStep("duitku"); // hide our modals so the Duitku popup is clickable
+    if (!reference) {
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+      onClose();
+      return;
+    }
+    try {
+      await openDuitkuPopup(reference, sandbox, {
+        onSuccess: () => onPaid?.(),
+        onError: () => void toastError("Pembayaran Duitku gagal atau dibatalkan."),
+        onClose: () => onClose(),
+      });
+    } catch {
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+      onClose();
     }
   }
 
@@ -156,8 +233,10 @@ export function PortalPayHost({
         invoiceNumber={invoice.invoice_number}
         amount={amount}
         tenantSlug={tenantSlug}
+        methods={methods}
+        loading={options.isLoading}
         busy={busy}
-        error={error}
+        error={error || (options.isError ? "Gagal memuat metode pembayaran" : "")}
         onClose={onClose}
         onConfirm={(m) => void confirmMethod(m)}
       />

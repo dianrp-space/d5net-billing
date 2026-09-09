@@ -687,6 +687,20 @@ func (s *Store) GetLatestPaymentIntentForInvoice(ctx context.Context, tenantID, 
 	return pi, err
 }
 
+func (s *Store) GetLatestPaymentIntentForInvoiceAny(ctx context.Context, tenantID, invoiceID xid.ID) (*PaymentIntent, error) {
+	row := s.Pool.QueryRow(ctx, `
+		SELECT `+paymentIntentSelectCols()+`
+		FROM payment_intents
+		WHERE tenant_id=$1 AND invoice_id=$2
+		ORDER BY created_at DESC LIMIT 1
+	`, tenantID, invoiceID)
+	pi, err := scanPaymentIntent(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return pi, err
+}
+
 func (s *Store) GetLatestPendingPaymentIntent(ctx context.Context, tenantID, invoiceID xid.ID, provider string) (*PaymentIntent, error) {
 	row := s.Pool.QueryRow(ctx, `
 		SELECT `+paymentIntentSelectCols()+`

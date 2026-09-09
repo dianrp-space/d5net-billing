@@ -95,6 +95,9 @@ const ResellersPage = lazy(() =>
 const GeneralSettingsPage = lazy(() =>
   import("./SettingsPages").then((m) => ({ default: m.GeneralSettingsPage })),
 );
+const InvoiceSettingsPage = lazy(() =>
+  import("./SettingsPages").then((m) => ({ default: m.InvoiceSettingsPage })),
+);
 const IsolirTemplatePage = lazy(() =>
   import("./IsolirTemplatePage").then((m) => ({ default: m.IsolirTemplatePage })),
 );
@@ -178,6 +181,7 @@ const navGroups: NavGroup[] = [
     label: "Settings",
     items: [
       { id: "general", label: "Umum", icon: <IconSettings /> },
+      { id: "invoice-format", label: "Format Invoice", icon: <IconReceipt /> },
       { id: "isolir-template", label: "Template Isolir", icon: <IconShield /> },
       { id: "jobs", label: "Cronjob", icon: <IconClock /> },
       { id: "roles", label: "Roles", icon: <IconShieldCheck /> },
@@ -492,6 +496,7 @@ export function AdminApp({
               {page === "accounting" && <AccountingPage />}
               {page === "resellers" && <ResellersPage />}
               {page === "general" && <GeneralSettingsPage />}
+              {page === "invoice-format" && <InvoiceSettingsPage />}
               {page === "isolir-template" && <IsolirTemplatePage tenantSlug={tenantSlug} />}
               {page === "jobs" && <JobsSettingsPage />}
               {page === "notifications" && <NotificationsPage />}

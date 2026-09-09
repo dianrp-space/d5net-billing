@@ -32,12 +32,15 @@ async function downloadBlob(blob: Blob, filename: string) {
 export type QrisIntent = {
   id: string;
   status: string;
+  provider?: string;
   qr_string?: string;
   qr_image_base64?: string;
+  checkout_url?: string;
   payable_amount?: number;
   unique_digit?: number;
   amount?: number;
   expires_at?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 function statusOf(status?: string) {
@@ -88,7 +91,10 @@ export function QrisPayDialog({
   const paid = isPaid(current?.status);
   const cancelled = isCancelled(current?.status);
   const expired = isExpired(current?.status);
-  const live = Boolean(current?.qr_image_base64) && !paid && !cancelled && !expired;
+  const img = current?.qr_image_base64 || "";
+  const checkoutURL = String(current?.checkout_url || "").trim();
+  const isRedirect = Boolean(checkoutURL) && !img;
+  const live = Boolean(img || checkoutURL) && !paid && !cancelled && !expired;
 
   useEffect(() => {
     setCurrent(intent);
@@ -140,8 +146,10 @@ export function QrisPayDialog({
   async function onCancel() {
     if (!cancelPath) return;
     const ok = await confirm({
-      title: "Batalkan QRIS?",
-      description: "Kode QR ini tidak bisa dipakai lagi setelah dibatalkan.",
+      title: isRedirect ? "Batalkan pembayaran?" : "Batalkan QRIS?",
+      description: isRedirect
+        ? "Link pembayaran ini tidak dipakai lagi di aplikasi. Selesaikan di Duitku jika sudah dibuka."
+        : "Kode QR ini tidak bisa dipakai lagi setelah dibatalkan.",
       confirmLabel: "Batalkan",
       danger: true,
     });
@@ -155,18 +163,22 @@ export function QrisPayDialog({
         void toastSuccess("Pembayaran QRIS diterima");
         return;
       }
-      void toastSuccess("QRIS dibatalkan");
+      void toastSuccess(isRedirect ? "Pembayaran dibatalkan" : "QRIS dibatalkan");
       onCancelled?.();
     } catch (e: unknown) {
-      void toastError(e instanceof Error ? e.message : "Gagal membatalkan QRIS");
+      void toastError(e instanceof Error ? e.message : "Gagal membatalkan pembayaran");
     } finally {
       setCancelling(false);
     }
   }
 
-  const img = current?.qr_image_base64 || "";
   const payAmount = current?.payable_amount || current?.amount || 0;
   const expires = current?.expires_at ? new Date(current.expires_at) : null;
+
+  function openCheckout() {
+    if (!checkoutURL) return;
+    window.open(checkoutURL, "_blank", "noopener,noreferrer");
+  }
 
   async function onDownloadQris() {
     if (!img) return;
@@ -194,13 +206,43 @@ export function QrisPayDialog({
   }
 
   return (
-    <FormDialog open={open} title={title || `Bayar QRIS · ${invoiceNumber}`} onClose={onClose}>
+    <FormDialog open={open} title={title || (isRedirect ? `Bayar · ${invoiceNumber}` : `Bayar QRIS · ${invoiceNumber}`)} onClose={onClose}>
       {paid ? (
         <p className="text-sm font-medium text-[var(--ok)]">Pembayaran diterima. Tagihan akan ditandai lunas.</p>
       ) : cancelled ? (
-        <p className="text-sm font-medium text-[var(--muted)]">QRIS dibatalkan. Buat ulang jika ingin membayar.</p>
+        <p className="text-sm font-medium text-[var(--muted)]">
+          {isRedirect ? "Pembayaran dibatalkan. Buat ulang jika ingin membayar." : "QRIS dibatalkan. Buat ulang jika ingin membayar."}
+        </p>
       ) : expired ? (
-        <p className="text-sm font-medium text-[var(--warn)]">QRIS kedaluwarsa. Buat ulang dari tombol Bayar QRIS.</p>
+        <p className="text-sm font-medium text-[var(--warn)]">
+          {isRedirect ? "Link pembayaran kedaluwarsa. Buat ulang dari tombol bayar." : "QRIS kedaluwarsa. Buat ulang dari tombol Bayar QRIS."}
+        </p>
+      ) : isRedirect ? (
+        <div className="grid justify-items-center gap-3 text-center">
+          <div>
+            <p className="text-xs text-[var(--muted)]">Total pembayaran</p>
+            <p className="text-lg font-bold">{formatRp(payAmount)}</p>
+          </div>
+          {expires ? (
+            <p className="text-[11px] text-[var(--muted)]">
+              Berlaku sampai {expires.toLocaleString("id-ID")}
+            </p>
+          ) : null}
+          <p className="max-w-xs text-[11px] leading-relaxed text-[var(--muted)]">
+            Selesaikan di halaman pembayaran (VA, e-wallet, retail, atau QRIS). Setelah bayar, status tagihan
+            terbarui otomatis.
+          </p>
+          <div className="mt-1 flex w-full flex-wrap justify-center gap-2">
+            <button type="button" className="btn" disabled={checking} onClick={openCheckout}>
+              Buka halaman pembayaran
+            </button>
+            {pollPath ? (
+              <button type="button" className="btn-ghost" disabled={checking} onClick={() => void onCheckPaid()}>
+                {checking ? "Mengecek…" : "Aku sudah bayar"}
+              </button>
+            ) : null}
+          </div>
+        </div>
       ) : (
         <div className="grid justify-items-center gap-3 text-center">
           {img ? (

@@ -1,7 +1,9 @@
 package payment
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -13,7 +15,7 @@ func ParseWebhookEvent(provider string, body map[string]any) (*WebhookEvent, err
 	}
 
 	ev.ExternalID = firstString(body,
-		"referenceId", "reference_id", "external_id", "order_id", "merchant_ref", "reference", "id",
+		"merchantOrderId", "merchant_order_id", "referenceId", "reference_id", "external_id", "order_id", "merchant_ref", "reference", "id",
 	)
 	ev.Reference = firstString(body, "transactionId", "transaction_id", "reference", "payment_id", "merchant_ref")
 
@@ -31,6 +33,16 @@ func ParseWebhookEvent(provider string, body map[string]any) (*WebhookEvent, err
 			ev.Status = "paid"
 		default:
 			ev.Status = v
+		}
+	}
+	if rc := firstString(body, "resultCode", "result_code", "statusCode", "status_code"); rc != "" {
+		switch rc {
+		case "00":
+			ev.Status = "paid"
+		case "01":
+			ev.Status = "pending"
+		case "02":
+			ev.Status = "failed"
 		}
 	}
 
@@ -59,6 +71,41 @@ func ParseWebhookEvent(provider string, body map[string]any) (*WebhookEvent, err
 
 	_ = provider
 	return ev, nil
+}
+
+func ParseWebhookBodyBytes(contentType string, raw []byte) map[string]any {
+	out := map[string]any{}
+	if len(raw) == 0 {
+		return out
+	}
+	ct := strings.ToLower(contentType)
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	if ct == "application/x-www-form-urlencoded" || (!strings.Contains(ct, "json") && bytesLookLikeForm(raw)) {
+		vals, err := url.ParseQuery(string(raw))
+		if err == nil && len(vals) > 0 {
+			for k, vs := range vals {
+				if len(vs) > 0 {
+					out[k] = vs[0]
+				}
+			}
+			return out
+		}
+	}
+	_ = json.Unmarshal(raw, &out)
+	if out == nil {
+		out = map[string]any{}
+	}
+	return out
+}
+
+func bytesLookLikeForm(raw []byte) bool {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[") {
+		return false
+	}
+	return strings.Contains(s, "=")
 }
 
 func WebhookIsPaid(status string) bool {

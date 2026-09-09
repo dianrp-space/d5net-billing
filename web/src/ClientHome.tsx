@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Home, PanelLeft, PanelLeftClose } from "lucide-react";
-import { api, clearClientSession } from "./api";
+import { api, apiDownload, clearClientSession } from "./api";
 import { applyBrandingMeta } from "./branding";
 import type { ClientPortalData } from "./TenantLogin";
 import { toastError, toastSuccess } from "./swal";
@@ -13,17 +13,17 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { Card, formatRp, IconButton, invoiceStatusLabel, paymentStatusLabel, Section, SecretInput, subscriptionStatusLabel, Table, ticketStatusHint, ticketStatusLabel, ticketStatusTone } from "./ui";
-import { IconBanknote, IconBox, IconChart, IconGauge, IconLock, IconLogout, IconShield, IconTicket } from "./icons";
+import { formatRp, IconButton, invoiceStatusLabel, paymentStatusLabel, Section, SecretInput, subscriptionStatusLabel, Table, ticketStatusHint, ticketStatusLabel, ticketStatusTone } from "./ui";
+import { IconBan, IconBanknote, IconChart, IconDownload, IconGauge, IconLock, IconLogout, IconShield, IconTicket } from "./icons";
 import { PortalPayHost } from "./PayMethodDialog";
-import { invoiceRemaining, isInvoiceUnpaid, isIsolirStatus, paymentMethodLabel, type PayableInvoice } from "./payMethod";
+import { clearSavedPayMethod, hasSavedPayMethod, invoiceRemaining, isInvoiceUnpaid, isIsolirStatus, paymentMethodLabel, type PayableInvoice } from "./payMethod";
 import { canChangePortalPlan, PortalChangePlanDialog, PortalPlanCatalog, type PortalPlan, type PortalSub } from "./PortalChangePlan";
 import { getSidebarOpen, setSidebarOpen, usePersistedTab } from "./navPersist";
 
 type ClientPage = "home" | "plans" | "invoices" | "payments" | "tickets" | "account";
 
 const CLIENT_PAGES: { id: ClientPage; label: string; icon: ReactNode }[] = [
-  { id: "home", label: "Beranda", icon: <IconBox /> },
+  { id: "home", label: "Beranda", icon: <Home size={18} /> },
   { id: "plans", label: "Paket", icon: <IconGauge /> },
   { id: "invoices", label: "Tagihan", icon: <IconChart /> },
   { id: "payments", label: "Pembayaran", icon: <IconBanknote /> },
@@ -384,6 +384,30 @@ export function ClientHome({
     setPayInv(inv);
   }
 
+  // Cancel any pending checkout and forget the saved method so the picker shows
+  // again next time. Ignores "no pending payment" responses.
+  async function resetPayMethod(inv: PayableInvoice) {
+    clearSavedPayMethod(data.tenant_slug);
+    if (inv.id && data.portal_token) {
+      try {
+        await api(`/api/portal/invoices/${inv.id}/payment-intent/cancel`, {
+          method: "POST",
+          headers: portalHeaders,
+        });
+      } catch {
+        /* no pending payment — fine */
+      }
+    }
+    void toastSuccess("Metode pembayaran direset. Silakan pilih ulang saat bayar.");
+  }
+
+  function downloadInvoice(inv: PayableInvoice) {
+    if (!inv.id) return;
+    void apiDownload(`/api/portal/invoices/${inv.id}/pdf`, `${inv.invoice_number || inv.id}.pdf`, {
+      token: data.portal_token,
+    }).catch((e: Error) => void toastError(e.message || "Gagal unduh invoice"));
+  }
+
   async function onChangePassword(e: React.FormEvent) {
     e.preventDefault();
     setFormErr("");
@@ -438,12 +462,28 @@ export function ClientHome({
 
   const invoiceRows = (data.invoices ?? []).map((i) => {
     const unpaid = isInvoiceUnpaid(i);
-    const action = unpaid ? (
-      <button type="button" className="btn whitespace-nowrap" onClick={() => startPay(i)}>
-        Bayar sekarang
-      </button>
-    ) : (
-      "—"
+    const paidSomething = i.status === "paid" || (i.paid_amount ?? 0) > 0;
+    const action = (
+      <span className="flex flex-wrap items-center justify-end gap-1.5">
+        {unpaid ? (
+          <>
+            <button type="button" className="btn whitespace-nowrap" onClick={() => startPay(i)}>
+              Bayar sekarang
+            </button>
+            {hasSavedPayMethod(data.tenant_slug) ? (
+              <IconButton label="Batalkan / ganti metode" onClick={() => void resetPayMethod(i)}>
+                <IconBan />
+              </IconButton>
+            ) : null}
+          </>
+        ) : null}
+        {paidSomething ? (
+          <IconButton label="Unduh invoice" onClick={() => downloadInvoice(i)}>
+            <IconDownload />
+          </IconButton>
+        ) : null}
+        {!unpaid && !paidSomething ? <span className="text-[var(--muted)]">—</span> : null}
+      </span>
     );
     return multi
       ? [
@@ -590,43 +630,57 @@ export function ClientHome({
                   </div>
                 ) : null}
               </div>
-              {isolirSubs.length > 0 ? (
+              {isolirSubs.length > 0 || unpaidInvoices.length > 0 ? (
                 <div
                   className="panel-card p-4"
                   style={{
-                    borderColor: "color-mix(in srgb, var(--danger) 35%, var(--border))",
-                    background: "color-mix(in srgb, var(--danger) 7%, var(--panel))",
+                    borderColor: isolirSubs.length > 0
+                      ? "color-mix(in srgb, var(--danger) 35%, var(--border))"
+                      : "color-mix(in srgb, var(--warn, #b7791f) 40%, var(--border))",
+                    background: isolirSubs.length > 0
+                      ? "color-mix(in srgb, var(--danger) 7%, var(--panel))"
+                      : "color-mix(in srgb, var(--warn, #b7791f) 8%, var(--panel))",
                   }}
                 >
                   <div className="flex items-start gap-3">
-                    <span className="mt-0.5 text-[var(--danger)]" aria-hidden>
+                    <span
+                      className="mt-0.5"
+                      style={{ color: isolirSubs.length > 0 ? "var(--danger)" : "var(--warn, #b7791f)" }}
+                      aria-hidden
+                    >
                       <IconShield />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold">Layanan diisolir</p>
-                      <p className="mt-1 text-sm text-[var(--muted)]">
-                        {isolirSubs.length === 1
-                          ? "Akun berikut sedang diisolir. Bayar tagihan agar koneksi dipulihkan."
-                          : `${isolirSubs.length} akun sedang diisolir. Bayar tagihan agar koneksi dipulihkan.`}
+                      <p className="text-sm font-semibold">
+                        {isolirSubs.length > 0 ? "Layanan diisolir" : "Tagihan belum dibayar"}
                       </p>
-                      <ul className="mt-2 grid gap-1 text-sm">
-                        {isolirSubs.map((s) => (
-                          <li key={`${s.customer_code || ""}-${s.username}`}>
-                            <span className="font-medium">{s.username}</span>
-                            {s.plan_name ? <span className="text-[var(--muted)]"> · {s.plan_name}</span> : null}
-                            {multi && (s.customer_code || s.customer_name) ? (
-                              <span className="text-[var(--muted)]"> · {accountLabel(s.customer_code, s.customer_name)}</span>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
+                      <p className="mt-1 text-sm text-[var(--muted)]">
+                        {isolirSubs.length > 0
+                          ? isolirSubs.length === 1
+                            ? "Akun berikut sedang diisolir. Bayar tagihan agar koneksi dipulihkan."
+                            : `${isolirSubs.length} akun sedang diisolir. Bayar tagihan agar koneksi dipulihkan.`
+                          : "Ada tagihan yang belum dibayar. Segera lakukan pembayaran agar layanan tidak diisolir."}
+                      </p>
+                      {isolirSubs.length > 0 ? (
+                        <ul className="mt-2 grid gap-1 text-sm">
+                          {isolirSubs.map((s) => (
+                            <li key={`${s.customer_code || ""}-${s.username}`}>
+                              <span className="font-medium">{s.username}</span>
+                              {s.plan_name ? <span className="text-[var(--muted)]"> · {s.plan_name}</span> : null}
+                              {multi && (s.customer_code || s.customer_name) ? (
+                                <span className="text-[var(--muted)]"> · {accountLabel(s.customer_code, s.customer_name)}</span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                       {unpaidTotal > 0 ? (
                         <p className="mt-2 text-sm font-semibold">Tagihan terbuka {formatRp(unpaidTotal)}</p>
-                      ) : (
+                      ) : isolirSubs.length > 0 ? (
                         <p className="mt-2 text-sm text-[var(--muted)]">
                           Tidak ada tagihan terbuka. Hubungi admin jika internet masih terisolir.
                         </p>
-                      )}
+                      ) : null}
                       <div className="mt-3 flex flex-wrap gap-2">
                         {firstUnpaid ? (
                           <button type="button" className="btn" onClick={() => startPay(firstUnpaid)}>
@@ -641,7 +695,6 @@ export function ClientHome({
                   </div>
                 </div>
               ) : null}
-              <Card title={multi ? `Saldo gabungan (${accounts.length} akun)` : "Saldo"} value={formatRp(data.wallet_balance ?? 0)} />
               <Section title="Paket / Langganan">
                 <div className="portal-table-desktop">
                   <Table

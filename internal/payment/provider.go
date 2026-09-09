@@ -17,11 +17,17 @@ const ProviderDRP = "drp"
 const ProviderManual = "manual"
 
 type IntentRequest struct {
-	TenantID   xid.ID
-	CustomerID xid.ID
-	InvoiceID  xid.ID
-	Amount     int64
-	ReturnURL  string
+	TenantID        xid.ID
+	CustomerID      xid.ID
+	InvoiceID       xid.ID
+	Amount          int64
+	ReturnURL       string
+	CallbackURL     string
+	MerchantOrderID string
+	Email           string
+	Phone           string
+	CustomerName    string
+	ProductDetails  string
 }
 
 type IntentResult struct {
@@ -36,6 +42,9 @@ type IntentResult struct {
 	PayableAmount int64
 	UniqueDigit   int64
 	Fee           int64
+	// Metadata carries provider-specific extras persisted on the intent and
+	// surfaced to the client (e.g. Duitku popup environment).
+	Metadata map[string]any
 }
 
 type WebhookEvent struct {

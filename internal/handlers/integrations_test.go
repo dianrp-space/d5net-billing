@@ -65,6 +65,45 @@ func TestPaymentViewReturnsDecryptedSecretsAndAppWebhookURL(t *testing.T) {
 	}
 }
 
+func TestDuitkuViewReturnsDecryptedKeyAndCallbackURL(t *testing.T) {
+	enc, err := auth.NewEncryptor("01234567890123456789012345678901")
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiKey, err := enc.EncryptString("duitku-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := duitkuView(context.Background(), &Deps{Encryptor: enc}, xid.Nil(), duitkuIntegrationStored{
+		MerchantCode: "D1234",
+		APIKey:       apiKey,
+		Sandbox:      true,
+		Enabled:      true,
+	}, "http://localhost:5173", "", "", "", "127.0.0.1:8080")
+	if view.APIKey != "duitku-secret" {
+		t.Fatalf("api_key = %q", view.APIKey)
+	}
+	if !view.Configured || !view.Enabled || !view.Sandbox {
+		t.Fatal("expected configured+enabled+sandbox")
+	}
+	wantURL := "http://localhost:5173/api/webhooks/payment/duitku"
+	if view.WebhookURL != wantURL {
+		t.Fatalf("webhook_url = %q, want %q", view.WebhookURL, wantURL)
+	}
+	if view.MerchantCode != "D1234" {
+		t.Fatalf("merchant = %q", view.MerchantCode)
+	}
+	if normalizePaymentProviderName("pop") != "duitku" || normalizePaymentProviderName("qris") != "drp" {
+		t.Fatal("normalize aliases")
+	}
+	if paymentWebhookPathFor("duitku") != "/api/webhooks/payment/duitku" {
+		t.Fatalf("duitku path = %q", paymentWebhookPathFor("duitku"))
+	}
+	if paymentWebhookPathFor("drp") != "/api/webhooks/payment/drp" {
+		t.Fatalf("drp path = %q", paymentWebhookPathFor("drp"))
+	}
+}
+
 func TestSMTPViewReturnsDecryptedPasswordAndDefaultPort(t *testing.T) {
 	enc, err := auth.NewEncryptor("01234567890123456789012345678901")
 	if err != nil {

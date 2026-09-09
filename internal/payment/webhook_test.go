@@ -47,6 +47,29 @@ func TestParseDRPWebhookEvent(t *testing.T) {
 	}
 }
 
+func TestParseWebhookBodyBytesForm(t *testing.T) {
+	raw := []byte("merchantCode=D123&amount=15000&merchantOrderId=inv-1&signature=abc&resultCode=00")
+	got := ParseWebhookBodyBytes("application/x-www-form-urlencoded", raw)
+	if got["merchantOrderId"] != "inv-1" || got["amount"] != "15000" || got["resultCode"] != "00" {
+		t.Fatalf("%+v", got)
+	}
+	ev, err := ParseWebhookEvent("duitku", got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.ExternalID != "inv-1" || ev.Amount != 15000 || !WebhookIsPaid(ev.Status) {
+		t.Fatalf("%+v", ev)
+	}
+}
+
+func TestParseWebhookBodyBytesJSON(t *testing.T) {
+	raw := []byte(`{"referenceId":"drp-1","status":"PAID","amount":1000}`)
+	got := ParseWebhookBodyBytes("application/json", raw)
+	if got["referenceId"] != "drp-1" {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestHMAC256HexLength(t *testing.T) {
 	got := hmacSHA256("secret", []byte("body"))
 	if len(got) != 64 {

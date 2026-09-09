@@ -47,7 +47,7 @@ const menuHits: { page: AdminPage; title: string; keywords: string }[] = [
   { page: "roles", title: "Roles", keywords: "roles rbac permission settings" },
   { page: "users", title: "Users", keywords: "users staf portal pelanggan settings" },
   { page: "webhooks", title: "Webhook", keywords: "webhook outbound integrasi n8n" },
-  { page: "payment-gw", title: "Payment Gateway", keywords: "payment gateway drp qris integrasi" },
+  { page: "payment-gw", title: "Payment Gateway", keywords: "payment gateway drp qris duitku pop integrasi" },
   { page: "messaging-gw", title: "Messaging Gateway", keywords: "whatsapp telegram email smtp notifikasi messaging whatsmeow integrasi" },
   { page: "backup", title: "Backup / Restore", keywords: "backup restore database pg_dump export import settings" },
 ];

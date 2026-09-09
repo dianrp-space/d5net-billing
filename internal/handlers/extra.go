@@ -15,7 +15,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/dianrp/drp-billing/internal/httpx"
-	"github.com/dianrp/drp-billing/internal/invoice"
 	"github.com/dianrp/drp-billing/internal/notify"
 	"github.com/dianrp/drp-billing/internal/provision"
 	"github.com/dianrp/drp-billing/internal/store"
@@ -260,7 +259,7 @@ func registerAdvanced(api huma.API, d *Deps) {
 		}{
 			ContentType:        "application/pdf",
 			ContentDisposition: fmt.Sprintf(`attachment; filename="%s.pdf"`, inv.InvoiceNumber),
-			Body:               invoice.RenderPDF(inv, items),
+			Body:               renderInvoicePDF(ctx, d, tid, inv, items),
 		}, nil
 	})
 
@@ -1394,8 +1393,13 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		OperationID: "invoice-checkout", Method: http.MethodPost, Path: "/api/invoices/{id}/checkout",
 		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		ID   xid.ID `path:"id"`
-		Body struct {
+		ID              xid.ID `path:"id"`
+		Host            string `header:"Host"`
+		Origin          string `header:"Origin"`
+		Referer         string `header:"Referer"`
+		XForwardedHost  string `header:"X-Forwarded-Host"`
+		XForwardedProto string `header:"X-Forwarded-Proto"`
+		Body            struct {
 			Provider  string `json:"provider"`
 			ReturnURL string `json:"return_url"`
 		}
@@ -1408,7 +1412,12 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.NotFound("invoice not found")
 		}
-		pi, err := checkoutInvoice(ctx, d, tid, inv, input.Body.Provider, input.Body.ReturnURL)
+		origin := appPublicOrigin(ctx, d, tid, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)
+		returnURL := strings.TrimSpace(input.Body.ReturnURL)
+		if returnURL == "" {
+			returnURL = origin
+		}
+		pi, err := checkoutInvoice(ctx, d, tid, inv, input.Body.Provider, returnURL, origin)
 		if err != nil {
 			return nil, err
 		}

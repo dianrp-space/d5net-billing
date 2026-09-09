@@ -34,6 +34,17 @@ func (s *Store) UpdatePaymentIntentStatus(ctx context.Context, externalID, statu
 	return err
 }
 
+// CancelPendingPaymentIntentsExcept cancels all pending intents for an invoice
+// except the one with keepExternalID. Used when the customer switches payment
+// gateway so only a single active checkout exists per invoice.
+func (s *Store) CancelPendingPaymentIntentsExcept(ctx context.Context, tenantID, invoiceID xid.ID, keepExternalID string) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE payment_intents SET status='cancelled', updated_at=NOW()
+		WHERE tenant_id=$1 AND invoice_id=$2 AND status='pending' AND external_id <> $3
+	`, tenantID, invoiceID, keepExternalID)
+	return err
+}
+
 // DispatchOutboundEvent queues deliveries for active webhooks subscribed to event.
 func (s *Store) DispatchOutboundEvent(ctx context.Context, tenantID xid.ID, event string, payload map[string]any) error {
 	hooks, err := s.ListOutboundWebhooks(ctx, tenantID)

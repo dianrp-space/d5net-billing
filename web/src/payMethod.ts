@@ -1,10 +1,15 @@
 /** Portal payment methods. Add new PG entries here; the picker stays the first step. */
 
 export const PAY_METHOD_QRIS = "qris" as const;
+export const PAY_METHOD_DUITKU = "duitku" as const;
 export const PAY_METHOD_TUNAI = "tunai" as const;
 export const PAY_METHOD_TRANSFER = "transfer" as const;
 
-export type PayMethodId = typeof PAY_METHOD_QRIS | typeof PAY_METHOD_TUNAI | typeof PAY_METHOD_TRANSFER;
+export type PayMethodId =
+  | typeof PAY_METHOD_QRIS
+  | typeof PAY_METHOD_DUITKU
+  | typeof PAY_METHOD_TUNAI
+  | typeof PAY_METHOD_TRANSFER;
 
 export type PayMethodDef = {
   id: PayMethodId;
@@ -18,7 +23,19 @@ export const PORTAL_PAY_METHODS: PayMethodDef[] = [
     label: "QRIS",
     description: "Scan QR dengan e-wallet atau m-banking",
   },
+  {
+    id: PAY_METHOD_DUITKU,
+    label: "Duitku Payment Gateway",
+    description: "Popup pembayaran Duitku (VA, e-wallet, retail, QRIS)",
+  },
 ];
+
+export type PayOption = {
+  provider: string;
+  label: string;
+  description: string;
+  kind: string;
+};
 
 export type PayableInvoice = {
   id?: string;
@@ -37,6 +54,35 @@ export function isPayMethodId(value: string | null | undefined): value is PayMet
   return PORTAL_PAY_METHODS.some((m) => m.id === value);
 }
 
+export function providerToPayMethod(provider?: string | null): PayMethodId | null {
+  const key = String(provider || "").trim().toLowerCase();
+  if (!key) return null;
+  if (key === "drp" || key === "qris" || key === "qr") return PAY_METHOD_QRIS;
+  if (key === "duitku" || key === "duitku_pop" || key === "pop") return PAY_METHOD_DUITKU;
+  if (isPayMethodId(key)) return key;
+  return null;
+}
+
+export function payMethodToProvider(method: PayMethodId): string {
+  if (method === PAY_METHOD_QRIS) return "drp";
+  return method;
+}
+
+export function payOptionsToMethods(options: PayOption[] | null | undefined): PayMethodDef[] {
+  if (!options?.length) return [];
+  const out: PayMethodDef[] = [];
+  for (const opt of options) {
+    const id = providerToPayMethod(opt.provider);
+    if (!id) continue;
+    out.push({
+      id,
+      label: opt.label || paymentMethodLabel(id),
+      description: opt.description || "",
+    });
+  }
+  return out;
+}
+
 /** Label for a stored method/provider id. Unknown values are shown as-is (never forced to "manual"). */
 export function paymentMethodLabel(method?: string | null) {
   const key = String(method || "").trim().toLowerCase();
@@ -44,6 +90,7 @@ export function paymentMethodLabel(method?: string | null) {
   const fromCatalog = PORTAL_PAY_METHODS.find((m) => m.id === key);
   if (fromCatalog) return fromCatalog.label;
   if (key === "drp" || key === "qr") return "QRIS";
+  if (key === "duitku_pop" || key === "duitkupop" || key === "pop") return "Duitku Payment Gateway";
   if (key === PAY_METHOD_TUNAI || key === "cash" || key === "kasir" || key === "manual") return "Tunai";
   if (key === PAY_METHOD_TRANSFER || key === "bank" || key === "va") return "Transfer";
   return String(method).trim();
@@ -64,6 +111,24 @@ export function setSavedPayMethod(id: PayMethodId, slug?: string) {
     localStorage.setItem(storageKey(slug), id);
   } catch {
     /* ignore quota */
+  }
+}
+
+/** True when the customer has explicitly saved a method before (not the default). */
+export function hasSavedPayMethod(slug?: string): boolean {
+  try {
+    return isPayMethodId(localStorage.getItem(storageKey(slug)));
+  } catch {
+    return false;
+  }
+}
+
+/** Forget the saved method so the picker is shown again on the next payment. */
+export function clearSavedPayMethod(slug?: string) {
+  try {
+    localStorage.removeItem(storageKey(slug));
+  } catch {
+    /* ignore */
   }
 }
 

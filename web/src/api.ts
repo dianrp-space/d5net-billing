@@ -208,15 +208,38 @@ export async function apiUpload<T>(
 export async function apiDownload(
   path: string,
   filename: string,
-  opts?: { platform?: boolean },
+  opts?: { platform?: boolean; token?: string },
 ): Promise<void> {
   const platform = Boolean(opts?.platform);
+  // When an explicit token is provided (e.g. portal session) use it directly and
+  // skip admin/platform refresh logic.
+  const explicitToken = opts?.token?.trim();
   const doFetch = async () => {
     const headers = new Headers();
-    const token = platform ? getPlatformToken() : getToken();
+    const token = explicitToken || (platform ? getPlatformToken() : getToken());
     if (token) headers.set("Authorization", `Bearer ${token}`);
     return fetch(path, { headers, credentials: "include" });
   };
+  if (explicitToken) {
+    const res = await doFetch();
+    if (!res.ok) {
+      const text = await res.text();
+      try {
+        const j = JSON.parse(text) as { error?: string; detail?: string };
+        throw new Error(j.error || j.detail || text || res.statusText);
+      } catch (e) {
+        if (e instanceof SyntaxError) throw new Error(text || res.statusText);
+        throw e;
+      }
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    return;
+  }
   let res = await doFetch();
   if (res.status === 401 && shouldAttemptRefresh(path, false)) {
     const refreshed = await refreshAccessToken(platform);

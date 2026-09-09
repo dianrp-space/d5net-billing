@@ -17,6 +17,7 @@ export type AdminPage =
   | "resellers"
   | "tech"
   | "general"
+  | "invoice-format"
   | "isolir-template"
   | "jobs"
   | "notifications"
@@ -46,6 +47,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   "resellers",
   "tech",
   "general",
+  "invoice-format",
   "isolir-template",
   "jobs",
   "notifications",
@@ -86,6 +88,7 @@ export const pageTitles: Record<AdminPage, string> = {
   resellers: "Reseller & Komisi",
   tech: "Tiket",
   general: "Umum",
+  "invoice-format": "Format Invoice",
   "isolir-template": "Template Isolir",
   jobs: "Cronjob",
   notifications: "Notifikasi",

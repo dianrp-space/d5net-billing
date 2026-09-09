@@ -6,7 +6,7 @@ import { IconPencil, IconTrash, IconUpload } from "./icons";
 import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
+import { formatRp, FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
 import { EXAMPLE_ICONS, exampleIconDataUrl, exampleIconFile, type ExampleIcon } from "./exampleIcons";
 import { DEFAULT_PRIMARY, parseHexColor, setTenantPrimaryColor } from "./theme";
 import { cn } from "./lib/utils";
@@ -160,6 +160,7 @@ export function GeneralSettingsPage() {
       const parsed = parseHexColor(primaryColor);
       setTenantPrimaryColor(parsed && parsed !== DEFAULT_PRIMARY ? parsed : null);
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
+      void qc.invalidateQueries({ queryKey: ["settings-invoice"] });
       void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
       void qc.invalidateQueries({ queryKey: ["jobs-settings"] });
       void toastSuccess("Pengaturan umum disimpan");
@@ -179,6 +180,7 @@ export function GeneralSettingsPage() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
+      void qc.invalidateQueries({ queryKey: ["settings-invoice"] });
       void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
       void toastSuccess("Mengikuti branding owner");
     },
@@ -190,6 +192,7 @@ export function GeneralSettingsPage() {
     try {
       await apiUpload<{ url: string }>(`/api/settings/branding/${kind}`, file);
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
+      void qc.invalidateQueries({ queryKey: ["settings-invoice"] });
       void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
       void toastSuccess(
         kind === "logo" ? "Logo diunggah" : kind === "favicon" ? "Favicon diunggah" : "Icon peta diunggah",
@@ -396,6 +399,326 @@ export function GeneralSettingsPage() {
         </div>
       )}
     </Section>
+  );
+}
+
+type InvoiceSettingsData = {
+  company_name: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  tax_id: string;
+  payment_instructions: string;
+  footer_note: string;
+};
+
+const EMPTY_INVOICE_SETTINGS: InvoiceSettingsData = {
+  company_name: "",
+  address: "",
+  phone: "",
+  email: "",
+  website: "",
+  tax_id: "",
+  payment_instructions: "",
+  footer_note: "",
+};
+
+export function InvoiceSettingsPage() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["settings-invoice"],
+    queryFn: () =>
+      api<{ settings: InvoiceSettingsData; default_company: string; logo_url?: string | null }>(
+        "/api/settings/invoice",
+      ),
+  });
+  const [form, setForm] = useState<InvoiceSettingsData>(EMPTY_INVOICE_SETTINGS);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!q.data) return;
+    setForm({ ...EMPTY_INVOICE_SETTINGS, ...q.data.settings });
+  }, [q.data]);
+
+  const set = (k: keyof InvoiceSettingsData) => (e: { target: { value: string } }) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const save = useMutation({
+    mutationFn: () =>
+      api("/api/settings/invoice", { method: "PUT", body: JSON.stringify(form) }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["settings-invoice"] });
+      void toastSuccess("Format invoice disimpan");
+      setErr("");
+    },
+    onError: (e: Error) => {
+      setErr(e.message);
+      void toastError(e.message);
+    },
+  });
+
+  const defaultCompany = q.data?.default_company || "";
+  const logoUrl = q.data?.logo_url || "";
+
+  return (
+    <Section title="Format Invoice">
+      {q.isLoading ? (
+        <p className="text-[var(--muted)]">Memuat...</p>
+      ) : (
+        <div className="grid gap-6">
+          <p className="text-sm text-[var(--muted)]">
+            Data ini tampil di dokumen invoice PDF (header perusahaan, cara pembayaran, dan catatan kaki). Bisa
+            diunduh admin dari menu Tagihan maupun pelanggan dari portal.
+          </p>
+
+          <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
+          <div className="panel-card grid gap-4 p-4 sm:grid-cols-2">
+            <label className="grid gap-1 text-sm sm:col-span-2">
+              <span className="font-medium">Nama perusahaan</span>
+              <input
+                className="input"
+                value={form.company_name}
+                onChange={set("company_name")}
+                placeholder={defaultCompany || "Nama ISP / perusahaan"}
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Kosongkan untuk memakai nama tenant{defaultCompany ? ` (${defaultCompany})` : ""}. Logo
+                memakai unggahan di Pengaturan → Umum.
+              </span>
+            </label>
+
+            <label className="grid gap-1 text-sm sm:col-span-2">
+              <span className="font-medium">Alamat</span>
+              <textarea
+                className="input min-h-[70px]"
+                value={form.address}
+                onChange={set("address")}
+                placeholder="Alamat kantor (boleh beberapa baris)"
+              />
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Telepon</span>
+              <input className="input" value={form.phone} onChange={set("phone")} placeholder="0812xxxx" />
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Email</span>
+              <input className="input" value={form.email} onChange={set("email")} placeholder="billing@isp.id" />
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Website</span>
+              <input className="input" value={form.website} onChange={set("website")} placeholder="www.isp.id" />
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">NPWP / Tax ID</span>
+              <input className="input" value={form.tax_id} onChange={set("tax_id")} placeholder="00.000.000.0-000.000" />
+            </label>
+
+            <label className="grid gap-1 text-sm sm:col-span-2">
+              <span className="font-medium">Cara pembayaran</span>
+              <textarea
+                className="input min-h-[80px]"
+                value={form.payment_instructions}
+                onChange={set("payment_instructions")}
+                placeholder={"Transfer ke:\nBCA 1234567890 a.n. PT ISP\nQRIS / VA lewat portal"}
+              />
+              <span className="text-xs text-[var(--muted)]">Instruksi transfer / rekening. Tampil di bagian bawah invoice.</span>
+            </label>
+
+            <label className="grid gap-1 text-sm sm:col-span-2">
+              <span className="font-medium">Catatan kaki</span>
+              <textarea
+                className="input min-h-[60px]"
+                value={form.footer_note}
+                onChange={set("footer_note")}
+                placeholder="Terima kasih telah berlangganan. Tagihan ini sah tanpa tanda tangan."
+              />
+            </label>
+
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+              <button type="button" className="btn" disabled={save.isPending} onClick={() => save.mutate()}>
+                {save.isPending ? "Menyimpan..." : "Simpan"}
+              </button>
+              {err ? <p className="text-sm text-[var(--danger)]">{err}</p> : null}
+            </div>
+          </div>
+
+          <div className="grid gap-2 xl:sticky xl:top-4">
+            <p className="text-sm font-medium">Pratinjau invoice</p>
+            <InvoiceFormPreview form={form} defaultCompany={defaultCompany} logoUrl={logoUrl} />
+            <p className="text-xs text-[var(--muted)]">
+              Contoh dengan data dummy. Watermark LUNAS hanya muncul otomatis pada invoice yang sudah dibayar.
+            </p>
+          </div>
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+const PREVIEW_ITEMS = [
+  { desc: "Paket Internet 30 Mbps — Sep 2026", qty: 1, price: 150000, amount: 150000 },
+  { desc: "Biaya instalasi (sekali)", qty: 1, price: 50000, amount: 50000 },
+];
+const PREVIEW_SUBTOTAL = 200000;
+const PREVIEW_TAX = 22000;
+const PREVIEW_TOTAL = 222000;
+
+function previewLines(value: string): string[] {
+  return String(value || "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function InvoiceFormPreview({
+  form,
+  defaultCompany,
+  logoUrl,
+}: {
+  form: InvoiceSettingsData;
+  defaultCompany: string;
+  logoUrl?: string;
+}) {
+  const [paidPreview, setPaidPreview] = useState(false);
+  const company = form.company_name.trim() || defaultCompany || "Nama Perusahaan";
+  const addressLines = previewLines(form.address);
+  const contact = [form.phone.trim() && `Telp: ${form.phone.trim()}`, form.email.trim()].filter(Boolean);
+  const payLines = previewLines(form.payment_instructions);
+  const footLines = previewLines(form.footer_note);
+
+  return (
+    <div className="grid gap-2">
+      <label className="flex w-fit items-center gap-2 text-xs text-[var(--muted)]">
+        <input
+          type="checkbox"
+          checked={paidPreview}
+          onChange={(e) => setPaidPreview(e.target.checked)}
+        />
+        Pratinjau status lunas (watermark)
+      </label>
+    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-white text-[13px] leading-relaxed text-slate-800 shadow-sm">
+      <div className="relative mx-auto max-w-[560px] p-6">
+        {paidPreview ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden" aria-hidden>
+            <span
+              className="select-none text-[72px] font-bold tracking-[0.28em] text-red-800/15"
+              style={{ transform: "rotate(-35deg)" }}
+            >
+              LUNAS
+            </span>
+          </div>
+        ) : null}
+        {/* Header */}
+        <div className="relative flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            {logoUrl ? (
+              <img
+                src={logoUrl}
+                alt=""
+                className="h-12 w-12 shrink-0 rounded-md object-contain"
+              />
+            ) : null}
+            <div className="min-w-0">
+              <p className="text-lg font-bold text-slate-900">{company}</p>
+              {addressLines.map((l, i) => (
+                <p key={`addr-${i}`} className="text-[11px] text-slate-500">
+                  {l}
+                </p>
+              ))}
+              {contact.length ? <p className="text-[11px] text-slate-500">{contact.join("  ·  ")}</p> : null}
+              {form.website.trim() ? <p className="text-[11px] text-slate-500">{form.website.trim()}</p> : null}
+              {form.tax_id.trim() ? <p className="text-[11px] text-slate-500">NPWP: {form.tax_id.trim()}</p> : null}
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-xl font-bold tracking-wide text-slate-900">INVOICE</p>
+            <p className="text-[11px] text-slate-500">No: INV-2026-0001</p>
+            <p className="text-[11px] text-slate-500">Terbit: 01 Sep 2026</p>
+            <p className="text-[11px] text-slate-500">Jatuh tempo: 08 Sep 2026</p>
+            <p className="text-[11px] font-semibold text-slate-700">
+              Status: {paidPreview ? "LUNAS" : "BELUM DIBAYAR"}
+            </p>
+          </div>
+        </div>
+
+        <div className="my-4 border-t border-slate-200" />
+
+        {/* Bill to */}
+        <p className="text-[10px] font-semibold tracking-wide text-slate-500">DITAGIHKAN KEPADA</p>
+        <p className="mt-1 font-semibold text-slate-900">Budi Santoso</p>
+        <p className="text-[11px] text-slate-500">Kode: CUST-001</p>
+        <p className="text-[11px] text-slate-500">Jl. Kenanga No. 5</p>
+        <p className="text-[11px] text-slate-500">Telp: 0812-3456-7890</p>
+
+        {/* Items */}
+        <table className="mt-4 w-full border-collapse text-[12px]" style={{ border: "1px solid #5180b8" }}>
+          <thead>
+            <tr className="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
+              <th className="border border-[#5180b8] px-2 py-1.5 text-left font-semibold">Deskripsi</th>
+              <th className="w-12 border border-[#5180b8] px-2 py-1.5 text-right font-semibold">Qty</th>
+              <th className="w-24 border border-[#5180b8] px-2 py-1.5 text-right font-semibold">Harga</th>
+              <th className="w-28 border border-[#5180b8] px-2 py-1.5 text-right font-semibold">Jumlah</th>
+            </tr>
+          </thead>
+          <tbody>
+            {PREVIEW_ITEMS.map((it, i) => (
+              <tr key={i}>
+                <td className="border border-[#5180b8] px-2 py-1.5">{it.desc}</td>
+                <td className="border border-[#5180b8] px-2 py-1.5 text-right">{it.qty}</td>
+                <td className="border border-[#5180b8] px-2 py-1.5 text-right">{formatRp(it.price)}</td>
+                <td className="border border-[#5180b8] px-2 py-1.5 text-right">{formatRp(it.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* Totals */}
+        <div className="mt-3 ml-auto w-full max-w-[240px] text-[12px]">
+          <div className="flex justify-between py-0.5 text-slate-600">
+            <span>Subtotal</span>
+            <span>{formatRp(PREVIEW_SUBTOTAL)}</span>
+          </div>
+          <div className="flex justify-between py-0.5 text-slate-600">
+            <span>Pajak</span>
+            <span>{formatRp(PREVIEW_TAX)}</span>
+          </div>
+          <div className="mt-1 flex justify-between border-t border-slate-300 py-1 font-bold text-slate-900">
+            <span>TOTAL</span>
+            <span>{formatRp(PREVIEW_TOTAL)}</span>
+          </div>
+        </div>
+
+        {/* Payment instructions */}
+        {payLines.length ? (
+          <div className="mt-5">
+            <p className="text-[10px] font-semibold tracking-wide text-slate-500">CARA PEMBAYARAN</p>
+            {payLines.map((l, i) => (
+              <p key={`pay-${i}`} className="text-[11px] text-slate-600">
+                {l}
+              </p>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Footer */}
+        {footLines.length ? (
+          <div className="mt-4 border-t border-slate-200 pt-2">
+            {footLines.map((l, i) => (
+              <p key={`foot-${i}`} className="text-[10px] text-slate-500">
+                {l}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+    </div>
   );
 }
 

@@ -62,6 +62,7 @@ func RegisterAll(api huma.API, d *Deps) {
 	registerSettings(api, d)
 	registerIsolirSettings(api, d)
 	registerJobsSettings(api, d)
+	registerInvoiceSettings(api, d)
 	registerPublicIsolir(api, d)
 	registerNotifications(api, d)
 	registerIntegrations(api, d)
@@ -2663,6 +2664,65 @@ func registerSubscriptions(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "suspend-subscription", Method: http.MethodPost, Path: "/api/subscriptions/{id}/suspend",
+		Tags: []string{"Subscriptions"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct {
+		Body struct {
+			Status string `json:"status"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := d.Store.GetSubscription(ctx, tid, input.ID); err != nil {
+			return nil, httpx.NotFound("subscription not found")
+		}
+		if err := isolirSubscription(ctx, d, tid, input.ID); err != nil {
+			return nil, err
+		}
+		out := &struct {
+			Body struct {
+				Status string `json:"status"`
+			}
+		}{}
+		out.Body.Status = "suspended"
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "resume-subscription", Method: http.MethodPost, Path: "/api/subscriptions/{id}/resume",
+		Tags: []string{"Subscriptions"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct {
+		Body struct {
+			Status string `json:"status"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := d.Store.GetSubscription(ctx, tid, input.ID); err != nil {
+			return nil, httpx.NotFound("subscription not found")
+		}
+		if err := d.Store.UpdateSubscriptionStatus(ctx, tid, input.ID, "active"); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		resumeSubscription(ctx, d, tid, input.ID)
+		out := &struct {
+			Body struct {
+				Status string `json:"status"`
+			}
+		}{}
+		out.Body.Status = "active"
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "preview-change-plan", Method: http.MethodPost, Path: "/api/subscriptions/{id}/change-plan/preview",
 		Tags: []string{"Subscriptions"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
@@ -4607,11 +4667,33 @@ func registerPortal(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "portal-pay-options", Method: http.MethodGet, Path: "/api/portal/pay-options",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		Authorization string `header:"Authorization"`
+	}) (*struct{ Body []payOptionView }, error) {
+		ten, _, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body []payOptionView }{Body: listEnabledPayOptions(ctx, d, ten.ID)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "portal-invoice-checkout", Method: http.MethodPost, Path: "/api/portal/invoices/{id}/checkout",
 		Tags: []string{"Portal"},
 	}, func(ctx context.Context, input *struct {
-		ID            xid.ID `path:"id"`
-		Authorization string `header:"Authorization"`
+		ID              xid.ID `path:"id"`
+		Authorization   string `header:"Authorization"`
+		Host            string `header:"Host"`
+		Origin          string `header:"Origin"`
+		Referer         string `header:"Referer"`
+		XForwardedHost  string `header:"X-Forwarded-Host"`
+		XForwardedProto string `header:"X-Forwarded-Proto"`
+		Body            *struct {
+			Provider  string `json:"provider"`
+			ReturnURL string `json:"return_url"`
+		}
 	}) (*struct{ Body store.PaymentIntent }, error) {
 		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
 		if err != nil {
@@ -4631,7 +4713,25 @@ func registerPortal(api huma.API, d *Deps) {
 		if !allowed {
 			return nil, httpx.NotFound("invoice not found")
 		}
-		pi, err := checkoutInvoice(ctx, d, ten.ID, inv, payment.ProviderDRP, "")
+		providerName := ""
+		returnURL := ""
+		if input.Body != nil {
+			providerName = strings.TrimSpace(input.Body.Provider)
+			returnURL = strings.TrimSpace(input.Body.ReturnURL)
+		}
+		if providerName == "" {
+			opts := listEnabledPayOptions(ctx, d, ten.ID)
+			if len(opts) == 1 {
+				providerName = opts[0].Provider
+			} else {
+				providerName = payment.ProviderDRP
+			}
+		}
+		origin := appPublicOrigin(ctx, d, ten.ID, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)
+		if returnURL == "" {
+			returnURL = origin
+		}
+		pi, err := checkoutInvoice(ctx, d, ten.ID, inv, providerName, returnURL, origin)
 		if err != nil {
 			return nil, err
 		}
@@ -4700,6 +4800,46 @@ func registerPortal(api huma.API, d *Deps) {
 			return nil, err
 		}
 		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-invoice-pdf", Method: http.MethodGet, Path: "/api/portal/invoices/{id}/pdf",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+	}) (*struct {
+		ContentType        string `header:"Content-Type"`
+		ContentDisposition string `header:"Content-Disposition"`
+		Body               []byte
+	}, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		inv, items, err := d.Store.GetInvoice(ctx, ten.ID, input.ID)
+		if err != nil {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		allowed := false
+		for _, c := range custs {
+			if c.ID == inv.CustomerID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		return &struct {
+			ContentType        string `header:"Content-Type"`
+			ContentDisposition string `header:"Content-Disposition"`
+			Body               []byte
+		}{
+			ContentType:        "application/pdf",
+			ContentDisposition: fmt.Sprintf(`attachment; filename="%s.pdf"`, inv.InvoiceNumber),
+			Body:               renderInvoicePDF(ctx, d, ten.ID, inv, items),
+		}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -5237,98 +5377,117 @@ func authenticatePortalRequest(ctx context.Context, d *Deps, authorization, tena
 	return authenticatePortalCustomers(ctx, d, tenantSlug, xid.Nil(), phone, password)
 }
 
-func registerWebhooks(api huma.API, d *Deps) {
+type paymentWebhookInput struct {
+	RawBody            []byte
+	ContentType        string `header:"Content-Type"`
+	XSignature         string `header:"X-Signature"`
+	XCallbackToken     string `header:"X-CALLBACK-TOKEN"`
+	XCallbackSignature string `header:"X-Callback-Signature"`
+	XDRPToken          string `header:"X-DRP-Token"`
+	XEventType         string `header:"X-Event-Type"`
+	Authorization      string `header:"Authorization"`
+}
+
+func registerPaymentWebhookRoute(api huma.API, d *Deps, provider string) {
+	provider = normalizePaymentProviderName(provider)
+	path := paymentWebhookPathFor(provider)
 	huma.Register(api, huma.Operation{
-		OperationID: "payment-webhook", Method: http.MethodPost, Path: "/api/webhooks/payment/{provider}",
-		Tags: []string{"Webhooks"},
-	}, func(ctx context.Context, input *struct {
-		Provider           string `path:"provider"`
-		RawBody            []byte
-		Body               map[string]any
-		XSignature         string `header:"X-Signature"`
-		XCallbackToken     string `header:"X-CALLBACK-TOKEN"`
-		XCallbackSignature string `header:"X-Callback-Signature"`
-		XDRPToken          string `header:"X-DRP-Token"`
-		XEventType         string `header:"X-Event-Type"`
-		Authorization      string `header:"Authorization"`
-	}) (*struct{ Body map[string]string }, error) {
-		providerName := normalizePaymentProviderName(input.Provider)
-		if providerName == payment.ProviderManual {
-			return nil, httpx.BadRequest("manual provider has no webhook")
-		}
+		OperationID:      "payment-webhook-" + provider,
+		Method:           http.MethodPost,
+		Path:             path,
+		Tags:             []string{"Webhooks"},
+		SkipValidateBody: true,
+	}, func(ctx context.Context, input *paymentWebhookInput) (*struct{ Body map[string]string }, error) {
+		return processPaymentWebhook(ctx, d, provider, input)
+	})
+}
 
-		bodyMap := input.Body
-		raw := input.RawBody
-		if len(raw) == 0 && bodyMap != nil {
-			raw, _ = json.Marshal(bodyMap)
-		}
-		if bodyMap == nil && len(raw) > 0 {
-			_ = json.Unmarshal(raw, &bodyMap)
-		}
+func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, input *paymentWebhookInput) (*struct{ Body map[string]string }, error) {
+	providerName = normalizePaymentProviderName(providerName)
+	if providerName == payment.ProviderManual {
+		return nil, httpx.BadRequest("manual provider has no webhook")
+	}
+	if providerName != payment.ProviderDRP && providerName != payment.ProviderDuitku {
+		return nil, httpx.NotFound("provider not found")
+	}
 
-		headers := map[string]string{
-			"X-Signature":          input.XSignature,
-			"X-CALLBACK-TOKEN":     input.XCallbackToken,
-			"X-Callback-Signature": input.XCallbackSignature,
-			"X-DRP-Token":          input.XDRPToken,
-			"X-Event-Type":         input.XEventType,
-			"Authorization":        input.Authorization,
-		}
+	raw := input.RawBody
+	bodyMap := payment.ParseWebhookBodyBytes(input.ContentType, raw)
+	parsed, _ := payment.ParseWebhookEvent(providerName, bodyMap)
+	if parsed == nil {
+		parsed = &payment.WebhookEvent{Raw: bodyMap, Status: "pending"}
+	}
 
-		parsed, err := payment.ParseWebhookEvent(providerName, bodyMap)
-		if err != nil {
-			return nil, httpx.BadRequest(err.Error())
-		}
+	headers := map[string]string{
+		"Content-Type":         input.ContentType,
+		"X-Signature":          input.XSignature,
+		"X-CALLBACK-TOKEN":     input.XCallbackToken,
+		"X-Callback-Signature": input.XCallbackSignature,
+		"X-DRP-Token":          input.XDRPToken,
+		"X-Event-Type":         input.XEventType,
+		"Authorization":        input.Authorization,
+	}
 
-		var prov payment.Provider
-		var perr error
-		if parsed.ExternalID != "" {
-			if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, parsed.ExternalID); ierr == nil && pi != nil {
-				prov, perr = resolvePaymentProvider(ctx, d, pi.TenantID, providerName)
+	var prov payment.Provider
+	var perr error
+	if parsed.ExternalID != "" {
+		if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, parsed.ExternalID); ierr == nil && pi != nil {
+			if normalizePaymentProviderName(pi.Provider) != providerName {
+				return nil, httpx.NotFound("payment intent not found")
 			}
+			prov, perr = resolvePaymentProvider(ctx, d, pi.TenantID, providerName)
 		}
-		if prov == nil && d.Payments != nil && d.Payments.Has(providerName) {
-			prov, perr = d.Payments.Get(providerName)
-		}
-		if prov == nil {
-			if perr != nil {
-				return nil, httpx.NotFound("provider not found")
-			}
+	}
+	if prov == nil && d.Payments != nil && d.Payments.Has(providerName) {
+		prov, perr = d.Payments.Get(providerName)
+	}
+	if prov == nil {
+		if perr != nil {
 			return nil, httpx.NotFound("provider not found")
 		}
+		return nil, httpx.NotFound("provider not found")
+	}
 
-		var event *payment.WebhookEvent
-		verified, verr := prov.VerifyWebhook(ctx, headers, raw)
-		if verr != nil {
-			softFail := d.Config != nil && d.Config.AppEnv == "development"
-			if softFail {
-				slog.Warn("webhook signature soft-fail in development", "provider", providerName, "err", verr)
-			} else {
-				return nil, httpx.Unauthorized("invalid webhook signature")
-			}
+	var event *payment.WebhookEvent
+	verified, verr := prov.VerifyWebhook(ctx, headers, raw)
+	if verr != nil {
+		softFail := d.Config != nil && d.Config.AppEnv == "development"
+		if softFail {
+			slog.Warn("webhook signature soft-fail in development", "provider", providerName, "err", verr)
 		} else {
-			event = verified
+			return nil, httpx.Unauthorized("invalid webhook signature")
 		}
-		if event == nil {
-			event = parsed
-		}
+	} else {
+		event = verified
+	}
+	if event == nil {
+		event = parsed
+	}
 
-		if event.ExternalID != "" {
-			if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, event.ExternalID); ierr == nil && pi != nil {
-				event.ExternalID = pi.ExternalID
+	if event.ExternalID != "" {
+		if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, event.ExternalID); ierr == nil && pi != nil {
+			if normalizePaymentProviderName(pi.Provider) != providerName {
+				return nil, httpx.NotFound("payment intent not found")
 			}
-			_ = d.Store.UpdatePaymentIntentStatus(ctx, event.ExternalID, event.Status)
+			event.ExternalID = pi.ExternalID
 		}
+		_ = d.Store.UpdatePaymentIntentStatus(ctx, event.ExternalID, event.Status)
+	}
 
-		if payment.WebhookIsPaid(event.Status) && event.ExternalID != "" {
-			if err := completePaidWebhook(ctx, d, providerName, event); err != nil {
-				slog.Error("complete paid webhook", "external_id", event.ExternalID, "err", err)
-				return nil, httpx.Internal(err)
-			}
+	if payment.WebhookIsPaid(event.Status) && event.ExternalID != "" {
+		if err := completePaidWebhook(ctx, d, providerName, event); err != nil {
+			slog.Error("complete paid webhook", "external_id", event.ExternalID, "err", err)
+			return nil, httpx.Internal(err)
 		}
+	}
 
-		return &struct{ Body map[string]string }{Body: map[string]string{"status": "ok"}}, nil
-	})
+	return &struct{ Body map[string]string }{Body: map[string]string{"status": "ok"}}, nil
+}
+
+func registerWebhooks(api huma.API, d *Deps) {
+	for _, name := range []string{payment.ProviderDRP, payment.ProviderDuitku} {
+		registerPaymentWebhookRoute(api, d, name)
+	}
 
 	huma.Register(api, huma.Operation{
 		OperationID: "whatsapp-webhook", Method: http.MethodPost, Path: "/api/webhooks/whatsapp",
