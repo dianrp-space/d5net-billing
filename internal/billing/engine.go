@@ -164,6 +164,27 @@ func (e *Engine) NextBillDate(from time.Time, cycle string) time.Time {
 	}
 }
 
+// NextCycleAnchor is the next occurrence of calendar day (1–28) after from.
+// Activating on that day itself returns the same day next month.
+func NextCycleAnchor(from time.Time, day int) time.Time {
+	if day < 1 {
+		day = 1
+	}
+	if day > 28 {
+		day = 28
+	}
+	loc := from.Location()
+	if loc == nil {
+		loc = time.Local
+	}
+	from = time.Date(from.Year(), from.Month(), from.Day(), 12, 0, 0, 0, loc)
+	candidate := time.Date(from.Year(), from.Month(), day, 12, 0, 0, 0, loc)
+	if candidate.After(from) {
+		return candidate
+	}
+	return time.Date(from.Year(), from.Month()+1, day, 12, 0, 0, 0, loc)
+}
+
 func (e *Engine) ProcessDueBilling(ctx context.Context, tenantID xid.ID) (int, error) {
 	subs, err := e.store.ListDueSubscriptions(ctx, tenantID)
 	if err != nil {

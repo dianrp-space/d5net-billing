@@ -18,13 +18,18 @@ type GeneralSettings struct {
 	Timezone          string  `json:"timezone"`
 	DefaultTaxPercent float64 `json:"default_tax_percent"`
 	PrimaryColor      string  `json:"primary_color,omitempty"`
+	// IsolirGraceDays is days after invoice due_date before auto-isolir (tenant-wide).
+	IsolirGraceDays int `json:"isolir_grace_days"`
+	// BillingCycleStartDay is the calendar day (1–28) prorata activations lock to.
+	BillingCycleStartDay int `json:"billing_cycle_start_day"`
 }
 
 func DefaultGeneralSettings() GeneralSettings {
 	return GeneralSettings{
-		Timezone:          "Asia/Jakarta",
-		DefaultTaxPercent: 0,
-		PrimaryColor:      "",
+		Timezone:             "Asia/Jakarta",
+		DefaultTaxPercent:    0,
+		PrimaryColor:         "",
+		BillingCycleStartDay: 1,
 	}
 }
 
@@ -59,6 +64,18 @@ func NormalizeGeneralSettings(g GeneralSettings) GeneralSettings {
 		g.DefaultTaxPercent = 100
 	}
 	g.PrimaryColor = NormalizeHexColor(g.PrimaryColor)
+	if g.IsolirGraceDays < 0 {
+		g.IsolirGraceDays = 0
+	}
+	if g.IsolirGraceDays > 30 {
+		g.IsolirGraceDays = 30
+	}
+	if g.BillingCycleStartDay < 1 {
+		g.BillingCycleStartDay = def.BillingCycleStartDay
+	}
+	if g.BillingCycleStartDay > 28 {
+		g.BillingCycleStartDay = 28
+	}
 	return g
 }
 
@@ -103,4 +120,22 @@ func (s *Store) EffectiveTaxPercent(ctx context.Context, tenantID xid.ID) (float
 		return 0, err
 	}
 	return g.DefaultTaxPercent, nil
+}
+
+// IsolirGraceDays is how many days after invoice due_date auto-isolir waits.
+func (s *Store) IsolirGraceDays(ctx context.Context, tenantID xid.ID) int {
+	g, err := s.GetGeneralSettings(ctx, tenantID)
+	if err != nil {
+		return 0
+	}
+	return g.IsolirGraceDays
+}
+
+// BillingCycleStartDay is the tenant calendar day prorata next_bill_at snaps to.
+func (s *Store) BillingCycleStartDay(ctx context.Context, tenantID xid.ID) int {
+	g, err := s.GetGeneralSettings(ctx, tenantID)
+	if err != nil {
+		return 1
+	}
+	return g.BillingCycleStartDay
 }

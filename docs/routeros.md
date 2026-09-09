@@ -32,7 +32,7 @@ HTML fallback: `GET /api/public/tenants/{slug}/isolir`
 
 ### Alur
 
-1. Tagihan unpaid lewat `due_date + grace_days` → subscription `suspended`.
+1. Tagihan unpaid lewat `due_date + isolir_grace_days` (Pengaturan → Umum / Cronjob; default 0 = pada jatuh tempo) → subscription `suspended`.
 2. PPP/hotspot secret dipindah ke **profil isolir** (enabled), comment diawali `ISOLIR `.
 3. Session di-disconnect → user reconnect mendapat IP dari **pool isolir**.
 4. HTTP dari pool isolir masuk **Web Proxy** → redirect ke URL isolir di atas

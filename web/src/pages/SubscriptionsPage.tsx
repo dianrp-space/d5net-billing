@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { IconBox, IconPencil, IconPlug, IconTrash } from "../icons";
@@ -23,6 +23,19 @@ import {
 } from "../ui";
 import { Checkbox } from "@/components/ui/checkbox";
 
+function clampCycleStartDay(n: number | undefined) {
+  const v = Math.floor(Number(n) || 1);
+  if (!Number.isFinite(v) || v < 1) return 1;
+  return Math.min(28, v);
+}
+
+function nextCycleAnchor(start: Date, day: number) {
+  const d = clampCycleStartDay(day);
+  const thisMonth = new Date(start.getFullYear(), start.getMonth(), d, 12, 0, 0, 0);
+  if (thisMonth.getTime() > start.getTime()) return thisMonth;
+  return new Date(start.getFullYear(), start.getMonth() + 1, d, 12, 0, 0, 0);
+}
+
 export function SubscriptionsPage({
   customerId,
   createMode = false,
@@ -38,6 +51,7 @@ export function SubscriptionsPage({
 }) {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
+  const cycleStartDayRef = useRef(1);
   type SubRow = {
     id: string;
     customer_id: string;
@@ -95,7 +109,7 @@ export function SubscriptionsPage({
   const emptyBillForm = () => {
     const start = new Date();
     start.setHours(12, 0, 0, 0);
-    const next = defaultNextBill(start, "monthly", true);
+    const next = nextCycleAnchor(start, cycleStartDayRef.current);
     return {
       activate_now: true,
       started_at: toDateInput(start),
@@ -179,9 +193,7 @@ export function SubscriptionsPage({
   }
   function defaultNextBill(start: Date, cycle: string, prorate: boolean) {
     if (!prorate) return addBillingCycle(start, cycle);
-    const firstNext = new Date(start.getFullYear(), start.getMonth() + 1, 1, 12, 0, 0, 0);
-    if (firstNext > start) return firstNext;
-    return addBillingCycle(start, cycle);
+    return nextCycleAnchor(start, cycleStartDayRef.current);
   }
   function isoToDateInput(iso?: string | null) {
     if (!iso) return "";
@@ -314,9 +326,24 @@ export function SubscriptionsPage({
   });
   const generalQ = useQuery({
     queryKey: ["settings-branding"],
-    queryFn: () => api<{ default_tax_percent?: number }>("/api/settings/branding"),
-    enabled: dialogOpen || Boolean(activateTarget),
+    queryFn: () =>
+      api<{ default_tax_percent?: number; billing_cycle_start_day?: number }>("/api/settings/branding"),
   });
+  const cycleStartDay = clampCycleStartDay(generalQ.data?.billing_cycle_start_day);
+  cycleStartDayRef.current = cycleStartDay;
+  useEffect(() => {
+    if (!generalQ.isSuccess) return;
+    if (editId) return;
+    if (activateTarget?.next_bill_at) return;
+    setBillForm((f) => {
+      if (!f.prorate) return f;
+      const start = parseDateInput(f.started_at);
+      if (!start) return f;
+      const next = toDateInput(nextCycleAnchor(start, cycleStartDay));
+      if (f.next_bill_at === next) return f;
+      return { ...f, next_bill_at: next };
+    });
+  }, [cycleStartDay, generalQ.isSuccess, activateTarget, editId]);
   const billPlanId = activateTarget?.plan_id || form.plan_id;
   const activateCustomer = customers.find(
     (c) => c.id === (activateTarget?.customer_id || form.customer_id),
@@ -1009,7 +1036,7 @@ export function SubscriptionsPage({
                         onChange={(e) => setBillForm({ ...billForm, next_bill_at: e.target.value })}
                       />
                       <span className="text-xs text-[var(--muted)]">
-                        Default: tanggal 1 bulan berikutnya.
+                        Default: tanggal {cycleStartDay} (Pengaturan → Umum). Bisa diubah manual.
                       </span>
                     </label>
                   ) : (
@@ -1158,8 +1185,8 @@ export function SubscriptionsPage({
                 onChange={(e) => setBillForm({ ...billForm, next_bill_at: e.target.value })}
               />
               <span className="text-xs text-[var(--muted)]">
-                Tagihan pertama dihitung dari tanggal mulai sampai tanggal ini (default: tanggal 1
-                bulan berikutnya).
+                Tagihan pertama dihitung dari tanggal mulai sampai tanggal ini. Default: tanggal{" "}
+                {cycleStartDay} (Pengaturan → Umum), bisa diubah manual.
               </span>
             </label>
           ) : (

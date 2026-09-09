@@ -422,7 +422,6 @@ func (s *Store) ListSubscriptionsNeedingResume(ctx context.Context, tenantID xid
 	rows, err := s.Pool.Query(ctx, `
 		SELECT s.id
 		FROM subscriptions s
-		JOIN plans p ON p.id = s.plan_id
 		WHERE s.tenant_id = $1
 		  AND s.router_id IS NOT NULL
 		  AND s.status IN ('active','overdue','suspended')
@@ -433,9 +432,9 @@ func (s *Store) ListSubscriptionsNeedingResume(ctx context.Context, tenantID xid
 		      AND i.subscription_id = s.id
 		      AND i.status IN ('issued','partial','overdue')
 		      AND i.total_amount > i.paid_amount
-		      AND (i.due_date::timestamptz + (COALESCE(p.grace_days, 0) || ' days')::interval) < NOW()
+		      AND (i.due_date::timestamptz + make_interval(days => $2)) < NOW()
 		  )
-	`, tenantID)
+	`, tenantID, s.IsolirGraceDays(ctx, tenantID))
 	if err != nil {
 		return nil, err
 	}
@@ -525,14 +524,13 @@ func (s *Store) ListOverdueSubscriptions(ctx context.Context, tenantID xid.ID, g
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, err
 	}
-	// Isolir when an unpaid invoice is past due_date + plan.grace_days.
-	// (Do not use next_bill_at — billing advances that clock when creating invoices.)
-	_ = graceDays // kept for API compat; grace comes from joined plan
+	// Isolir when an unpaid invoice is past due_date + tenant isolir_grace_days.
+	_ = graceDays
+	grace := s.IsolirGraceDays(ctx, tenantID)
 	rows, err := s.Pool.Query(ctx, `
 		SELECT s.id, s.tenant_id, s.customer_id, s.plan_id, s.router_id, s.username, s.service_type, s.status,
 		       s.started_at, s.expires_at, s.next_bill_at, s.suspended_at, '', ''
 		FROM subscriptions s
-		JOIN plans p ON p.id = s.plan_id
 		WHERE s.tenant_id = $1
 		  AND s.status IN ('active','overdue','suspended')
 		  AND EXISTS (
@@ -541,9 +539,9 @@ func (s *Store) ListOverdueSubscriptions(ctx context.Context, tenantID xid.ID, g
 		      AND i.subscription_id = s.id
 		      AND i.status IN ('issued','partial','overdue')
 		      AND i.total_amount > i.paid_amount
-		      AND (i.due_date::timestamptz + (COALESCE(p.grace_days, 0) || ' days')::interval) < NOW()
+		      AND (i.due_date::timestamptz + make_interval(days => $2)) < NOW()
 		  )
-	`, tenantID)
+	`, tenantID, grace)
 	if err != nil {
 		return nil, err
 	}

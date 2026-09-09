@@ -470,7 +470,7 @@ export function PlansPage() {
         total={filteredPlans.length}
       />
       <Table
-        columns={["Nama", "Kode", "Harga dasar", "DL / UL", "Kuota / limit", "Profile", "Tipe", "Portal", "Status", "Aksi"]}
+        columns={["Nama", "Kode", "Harga dasar", "DL / UL", "Kuota / limit", "Profile", "Jatuh tempo", "Tipe", "Portal", "Status", "Aksi"]}
         rows={filteredPlans.map((p) => [
           p.name,
           p.code,
@@ -486,6 +486,7 @@ export function PlansPage() {
                 .join(" · ") || "—"
             : "—",
           p.profile_name || p.code,
+          `${p.grace_days ?? 3} hari`,
           p.service_type,
           p.portal_visible ? "tampil" : "—",
           p.is_active === false ? "nonaktif" : "aktif",
@@ -589,7 +590,7 @@ export function PlansPage() {
             onChange={(e) => setForm({ ...form, isolir_profile: e.target.value })}
           />
           <div className="grid gap-1.5">
-            <Label htmlFor="plan-grace">Grace days (hari setelah jatuh tempo)</Label>
+            <Label htmlFor="plan-grace">Jatuh tempo invoice (hari setelah terbit)</Label>
             <Input
               id="plan-grace"
               type="number"
@@ -597,6 +598,10 @@ export function PlansPage() {
               value={form.grace_days}
               onChange={(e) => setForm({ ...form, grace_days: Number(e.target.value) })}
             />
+            <p className="text-xs text-[var(--muted)]">
+              Invoice baru jatuh tempo N hari setelah terbit. Masa tenggang isolir setelah jatuh tempo diatur di
+              Pengaturan → Umum atau Cronjob.
+            </p>
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="plan-dl">Download / DL (Mbps)</Label>

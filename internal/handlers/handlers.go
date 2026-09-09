@@ -2572,7 +2572,7 @@ func registerSubscriptions(api huma.API, d *Deps) {
 					return nil, httpx.BadRequest("tanggal tagihan berikutnya harus setelah tanggal mulai")
 				}
 			} else {
-				nextBill = d.Billing.NextBillDate(start, plan.BillingCycle)
+				nextBill = billing.NextCycleAnchor(start, d.Store.BillingCycleStartDay(ctx, tid))
 			}
 		} else {
 			nextBill = d.Billing.NextBillDate(start, plan.BillingCycle)

@@ -19,9 +19,10 @@ func registerJobsSettings(api huma.API, d *Deps) {
 		Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, _ *struct{}) (*struct {
 		Body struct {
-			Schedule store.JobScheduleSettings `json:"schedule"`
-			Defaults store.JobScheduleSettings `json:"defaults"`
-			Catalog  []jobCatalogItem          `json:"catalog"`
+			Schedule        store.JobScheduleSettings `json:"schedule"`
+			Defaults        store.JobScheduleSettings `json:"defaults"`
+			Catalog         []jobCatalogItem          `json:"catalog"`
+			IsolirGraceDays int                       `json:"isolir_grace_days"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -32,16 +33,22 @@ func registerJobsSettings(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		gen, err := d.Store.GetGeneralSettings(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
 		out := &struct {
 			Body struct {
-				Schedule store.JobScheduleSettings `json:"schedule"`
-				Defaults store.JobScheduleSettings `json:"defaults"`
-				Catalog  []jobCatalogItem          `json:"catalog"`
+				Schedule        store.JobScheduleSettings `json:"schedule"`
+				Defaults        store.JobScheduleSettings `json:"defaults"`
+				Catalog         []jobCatalogItem          `json:"catalog"`
+				IsolirGraceDays int                       `json:"isolir_grace_days"`
 			}
 		}{}
 		out.Body.Schedule = cfg
 		out.Body.Defaults = store.DefaultJobScheduleSettings()
 		out.Body.Catalog = jobsCatalog()
+		out.Body.IsolirGraceDays = gen.IsolirGraceDays
 		return out, nil
 	})
 
@@ -50,19 +57,30 @@ func registerJobsSettings(api huma.API, d *Deps) {
 		Summary: "Update worker / cronjob schedule settings", Tags: []string{"Settings"},
 		Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		Body store.JobScheduleSettings
+		Body jobsSchedulePayload
 	}) (*struct {
-		Body store.JobScheduleSettings
+		Body jobsSchedulePayload
 	}, error) {
 		tid, err := requireSettings(ctx, d)
 		if err != nil {
 			return nil, err
 		}
-		cfg := store.NormalizeJobScheduleSettings(input.Body)
+		cfg := store.NormalizeJobScheduleSettings(input.Body.JobScheduleSettings)
 		if err := d.Store.UpsertJobScheduleSettings(ctx, tid, cfg); err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body store.JobScheduleSettings }{Body: cfg}, nil
+		gen, err := d.Store.GetGeneralSettings(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		gen.IsolirGraceDays = input.Body.IsolirGraceDays
+		if err := d.Store.UpsertGeneralSettings(ctx, tid, gen); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body jobsSchedulePayload }{Body: jobsSchedulePayload{
+			JobScheduleSettings: cfg,
+			IsolirGraceDays:     store.NormalizeGeneralSettings(gen).IsolirGraceDays,
+		}}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -117,6 +135,11 @@ func registerJobsSettings(api huma.API, d *Deps) {
 	})
 }
 
+type jobsSchedulePayload struct {
+	store.JobScheduleSettings
+	IsolirGraceDays int `json:"isolir_grace_days"`
+}
+
 type jobCatalogItem struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
@@ -126,7 +149,7 @@ type jobCatalogItem struct {
 func jobsCatalog() []jobCatalogItem {
 	items := []jobCatalogItem{
 		{ID: "billing", Label: "Generate tagihan", Description: "Buat invoice untuk langganan yang jatuh tempo (mengikuti interval worker di halaman ini)."},
-		{ID: "isolir", Label: "Auto isolir", Description: "Suspend langganan yang tagihannya lewat jatuh tempo + grace. Setelah lunas, retry resume ke profil paket jika router sempat gagal/offline."},
+		{ID: "isolir", Label: "Auto isolir", Description: "Suspend langganan yang tagihannya lewat jatuh tempo + masa tenggang isolir (Pengaturan → Umum). Setelah lunas, retry resume ke profil paket jika router sempat gagal/offline."},
 		{ID: "dunning", Label: "Pengingat tagihan (dunning)", Description: "Kirim reminder WhatsApp/email pada offset hari relatif jatuh tempo."},
 		{ID: "weekly_reconcile", Label: "Reconcile mingguan", Description: "Dry-run drift RouterOS vs data billing (sekali per jadwal). Alert Telegram ops jika ada drift."},
 		{ID: "monthly_report", Label: "Laporan bulanan", Description: "Email ringkas statistik bisnis ke email tenant."},

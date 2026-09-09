@@ -73,6 +73,18 @@ type PortalUser = {
   is_active: boolean;
 };
 
+function clampIsolirGrace(n: number | undefined) {
+  const v = Math.floor(Number(n) || 0);
+  if (!Number.isFinite(v) || v < 0) return 0;
+  return Math.min(30, v);
+}
+
+function clampCycleStartDay(n: number | undefined) {
+  const v = Math.floor(Number(n) || 1);
+  if (!Number.isFinite(v) || v < 1) return 1;
+  return Math.min(28, v);
+}
+
 const PERM_PRESETS: { key: string; label: string; hint: string }[] = [
   { key: "*", label: "Semua akses (*)", hint: "Akses penuh ke semua menu" },
   { key: "dashboard", label: "Dashboard", hint: "Halaman dashboard" },
@@ -96,6 +108,8 @@ export function GeneralSettingsPage() {
           tenant_name: string;
           timezone: string;
           default_tax_percent: number;
+          isolir_grace_days?: number;
+          billing_cycle_start_day?: number;
           primary_color?: string;
         }
       >("/api/settings/branding"),
@@ -103,6 +117,8 @@ export function GeneralSettingsPage() {
   const [tenantName, setTenantName] = useState("");
   const [timezone, setTimezone] = useState("Asia/Jakarta");
   const [taxPercent, setTaxPercent] = useState(0);
+  const [isolirGraceDays, setIsolirGraceDays] = useState(0);
+  const [cycleStartDay, setCycleStartDay] = useState(1);
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY);
   const [err, setErr] = useState("");
 
@@ -111,8 +127,22 @@ export function GeneralSettingsPage() {
     setTenantName(q.data.tenant_name || q.data.overrides.app_name || "");
     setTimezone(q.data.timezone || "Asia/Jakarta");
     setTaxPercent(Number(q.data.default_tax_percent) || 0);
+    setIsolirGraceDays(clampIsolirGrace(q.data.isolir_grace_days));
+    setCycleStartDay(clampCycleStartDay(q.data.billing_cycle_start_day));
     setPrimaryColor(parseHexColor(q.data.primary_color) || DEFAULT_PRIMARY);
   }, [q.data]);
+
+  function brandingBody(extra?: Record<string, unknown>) {
+    return {
+      tenant_name: tenantName.trim(),
+      timezone: timezone.trim() || "Asia/Jakarta",
+      default_tax_percent: Math.max(0, Number(taxPercent) || 0),
+      isolir_grace_days: clampIsolirGrace(isolirGraceDays),
+      billing_cycle_start_day: clampCycleStartDay(cycleStartDay),
+      primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
+      ...extra,
+    };
+  }
 
   function onPrimaryChange(next: string) {
     const parsed = parseHexColor(next) || primaryColor;
@@ -124,18 +154,14 @@ export function GeneralSettingsPage() {
     mutationFn: () =>
       api("/api/settings/branding", {
         method: "PUT",
-        body: JSON.stringify({
-          tenant_name: tenantName.trim(),
-          timezone: timezone.trim() || "Asia/Jakarta",
-          default_tax_percent: Math.max(0, Number(taxPercent) || 0),
-          primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
-        }),
+        body: JSON.stringify(brandingBody()),
       }),
     onSuccess: () => {
       const parsed = parseHexColor(primaryColor);
       setTenantPrimaryColor(parsed && parsed !== DEFAULT_PRIMARY ? parsed : null);
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
       void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
+      void qc.invalidateQueries({ queryKey: ["jobs-settings"] });
       void toastSuccess("Pengaturan umum disimpan");
       setErr("");
     },
@@ -149,13 +175,7 @@ export function GeneralSettingsPage() {
     mutationFn: (field: BrandingField) =>
       api("/api/settings/branding", {
         method: "PUT",
-        body: JSON.stringify({
-          tenant_name: tenantName.trim(),
-          timezone: timezone.trim() || "Asia/Jakarta",
-          default_tax_percent: Math.max(0, Number(taxPercent) || 0),
-          primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
-          [CLEAR_FLAG[field]]: true,
-        }),
+        body: JSON.stringify(brandingBody({ [CLEAR_FLAG[field]]: true })),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
@@ -237,6 +257,40 @@ export function GeneralSettingsPage() {
               />
               <span className="text-xs text-[var(--muted)]">
                 Diterapkan ke semua tagihan & ganti paket (bukan per paket).
+              </span>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Masa tenggang isolir (hari)</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={30}
+                step={1}
+                value={isolirGraceDays}
+                onChange={(e) => setIsolirGraceDays(clampIsolirGrace(Number(e.target.value)))}
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Hari setelah jatuh tempo invoice sebelum auto-isolir. 0 = isolir pada tanggal jatuh tempo. Maks. 30.
+                Bisa diubah juga di Cronjob.
+              </span>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Awal siklus tagihan (tanggal)</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={28}
+                step={1}
+                value={cycleStartDay}
+                onChange={(e) => setCycleStartDay(clampCycleStartDay(Number(e.target.value)))}
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Hari kalender (1–28) yang jadi jangkar prorata. Aktivasi baru default ke tanggal ini (bisa diubah
+                manual per secret). Contoh: 1 = awal bulan.
               </span>
             </label>
 

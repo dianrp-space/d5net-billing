@@ -55,10 +55,12 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 	}, func(ctx context.Context, _ *struct{}) (*struct {
 		Body struct {
 			store.TenantBrandingView
-			TenantName        string  `json:"tenant_name"`
-			Timezone          string  `json:"timezone"`
-			DefaultTaxPercent float64 `json:"default_tax_percent"`
-			PrimaryColor      string  `json:"primary_color"`
+			TenantName           string  `json:"tenant_name"`
+			Timezone             string  `json:"timezone"`
+			DefaultTaxPercent    float64 `json:"default_tax_percent"`
+			IsolirGraceDays      int     `json:"isolir_grace_days"`
+			BillingCycleStartDay int     `json:"billing_cycle_start_day"`
+			PrimaryColor         string  `json:"primary_color"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -80,16 +82,20 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out := &struct {
 			Body struct {
 				store.TenantBrandingView
-				TenantName        string  `json:"tenant_name"`
-				Timezone          string  `json:"timezone"`
-				DefaultTaxPercent float64 `json:"default_tax_percent"`
-				PrimaryColor      string  `json:"primary_color"`
+				TenantName           string  `json:"tenant_name"`
+				Timezone             string  `json:"timezone"`
+				DefaultTaxPercent    float64 `json:"default_tax_percent"`
+				IsolirGraceDays      int     `json:"isolir_grace_days"`
+				BillingCycleStartDay int     `json:"billing_cycle_start_day"`
+				PrimaryColor         string  `json:"primary_color"`
 			}
 		}{}
 		out.Body.TenantBrandingView = *view
 		out.Body.TenantName = ten.Name
 		out.Body.Timezone = gen.Timezone
 		out.Body.DefaultTaxPercent = gen.DefaultTaxPercent
+		out.Body.IsolirGraceDays = gen.IsolirGraceDays
+		out.Body.BillingCycleStartDay = gen.BillingCycleStartDay
 		out.Body.PrimaryColor = gen.PrimaryColor
 		return out, nil
 	})
@@ -103,6 +109,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			AppName              string  `json:"app_name,omitempty"`
 			Timezone             string  `json:"timezone"`
 			DefaultTaxPercent    float64 `json:"default_tax_percent"`
+			IsolirGraceDays      int     `json:"isolir_grace_days"`
+			BillingCycleStartDay int     `json:"billing_cycle_start_day"`
 			PrimaryColor         string  `json:"primary_color"`
 			LogoURL              *string `json:"logo_url,omitempty"`
 			FaviconURL           *string `json:"favicon_url,omitempty"`
@@ -118,10 +126,12 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 	}) (*struct {
 		Body struct {
 			store.TenantBrandingView
-			TenantName        string  `json:"tenant_name"`
-			Timezone          string  `json:"timezone"`
-			DefaultTaxPercent float64 `json:"default_tax_percent"`
-			PrimaryColor      string  `json:"primary_color"`
+			TenantName           string  `json:"tenant_name"`
+			Timezone             string  `json:"timezone"`
+			DefaultTaxPercent    float64 `json:"default_tax_percent"`
+			IsolirGraceDays      int     `json:"isolir_grace_days"`
+			BillingCycleStartDay int     `json:"billing_cycle_start_day"`
+			PrimaryColor         string  `json:"primary_color"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -150,9 +160,11 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		gen := store.NormalizeGeneralSettings(store.GeneralSettings{
-			Timezone:          input.Body.Timezone,
-			DefaultTaxPercent: input.Body.DefaultTaxPercent,
-			PrimaryColor:      input.Body.PrimaryColor,
+			Timezone:             input.Body.Timezone,
+			DefaultTaxPercent:    input.Body.DefaultTaxPercent,
+			IsolirGraceDays:      input.Body.IsolirGraceDays,
+			BillingCycleStartDay: input.Body.BillingCycleStartDay,
+			PrimaryColor:         input.Body.PrimaryColor,
 		})
 		if err := d.Store.UpsertGeneralSettings(ctx, tid, gen); err != nil {
 			return nil, httpx.Internal(err)
@@ -168,16 +180,20 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out := &struct {
 			Body struct {
 				store.TenantBrandingView
-				TenantName        string  `json:"tenant_name"`
-				Timezone          string  `json:"timezone"`
-				DefaultTaxPercent float64 `json:"default_tax_percent"`
-				PrimaryColor      string  `json:"primary_color"`
+				TenantName           string  `json:"tenant_name"`
+				Timezone             string  `json:"timezone"`
+				DefaultTaxPercent    float64 `json:"default_tax_percent"`
+				IsolirGraceDays      int     `json:"isolir_grace_days"`
+				BillingCycleStartDay int     `json:"billing_cycle_start_day"`
+				PrimaryColor         string  `json:"primary_color"`
 			}
 		}{}
 		out.Body.TenantBrandingView = *view
 		out.Body.TenantName = ten.Name
 		out.Body.Timezone = gen.Timezone
 		out.Body.DefaultTaxPercent = gen.DefaultTaxPercent
+		out.Body.IsolirGraceDays = gen.IsolirGraceDays
+		out.Body.BillingCycleStartDay = gen.BillingCycleStartDay
 		out.Body.PrimaryColor = gen.PrimaryColor
 		return out, nil
 	})

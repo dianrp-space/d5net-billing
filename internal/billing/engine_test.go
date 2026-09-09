@@ -7,6 +7,25 @@ import (
 	"github.com/dianrp/drp-billing/internal/store"
 )
 
+func TestNextCycleAnchor(t *testing.T) {
+	loc := time.FixedZone("WIB", 7*3600)
+	jan5 := time.Date(2026, 1, 5, 9, 0, 0, 0, loc)
+	if got := NextCycleAnchor(jan5, 1); !got.Equal(time.Date(2026, 2, 1, 12, 0, 0, 0, loc)) {
+		t.Fatalf("day1 = %s", got)
+	}
+	if got := NextCycleAnchor(jan5, 25); !got.Equal(time.Date(2026, 1, 25, 12, 0, 0, 0, loc)) {
+		t.Fatalf("day25 = %s", got)
+	}
+	jan1 := time.Date(2026, 1, 1, 12, 0, 0, 0, loc)
+	if got := NextCycleAnchor(jan1, 1); !got.Equal(time.Date(2026, 2, 1, 12, 0, 0, 0, loc)) {
+		t.Fatalf("on-day = %s", got)
+	}
+	jan25 := time.Date(2026, 1, 25, 12, 0, 0, 0, loc)
+	if got := NextCycleAnchor(jan25, 25); !got.Equal(time.Date(2026, 2, 25, 12, 0, 0, 0, loc)) {
+		t.Fatalf("on-anchor = %s", got)
+	}
+}
+
 func TestProrateAmount(t *testing.T) {
 	if ProrateAmount(300_000, 15, 30) != 150_000 {
 		t.Fatal("half month")

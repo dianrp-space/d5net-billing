@@ -26,7 +26,10 @@ type JobsResponse = {
   schedule: JobSchedule;
   defaults: JobSchedule;
   catalog: { id: string; label: string; description: string }[];
+  isolir_grace_days?: number;
 };
+
+type JobsSavePayload = JobSchedule & { isolir_grace_days: number };
 
 type JobRun = {
   id: string;
@@ -69,6 +72,12 @@ function secondsToMinutes(sec: number | undefined) {
   const n = Number(sec);
   if (!Number.isFinite(n) || n < 60) return 1;
   return Math.max(1, Math.min(60, Math.round(n / 60)));
+}
+
+function clampIsolirGrace(n: number | undefined) {
+  const v = Math.floor(Number(n) || 0);
+  if (!Number.isFinite(v) || v < 0) return 0;
+  return Math.min(30, v);
 }
 
 function offsetsToText(offsets: number[] | undefined) {
@@ -129,21 +138,26 @@ export function JobsSettingsPage() {
 
   const [form, setForm] = useState<JobSchedule | null>(null);
   const [offsetsText, setOffsetsText] = useState("-7, -3, 0, 1, 3");
+  const [isolirGraceDays, setIsolirGraceDays] = useState(0);
 
   useEffect(() => {
     if (!q.data?.schedule) return;
     setForm({ ...q.data.schedule });
     setOffsetsText(offsetsToText(q.data.schedule.dunning_offsets));
+    setIsolirGraceDays(clampIsolirGrace(q.data.isolir_grace_days));
   }, [q.data]);
 
   const save = useMutation({
-    mutationFn: (body: JobSchedule) =>
-      api<JobSchedule>("/api/settings/jobs", { method: "PUT", body: JSON.stringify(body) }),
+    mutationFn: (body: JobsSavePayload) =>
+      api<JobsSavePayload>("/api/settings/jobs", { method: "PUT", body: JSON.stringify(body) }),
     onSuccess: (saved) => {
-      setForm(saved);
-      setOffsetsText(offsetsToText(saved.dunning_offsets));
+      const { isolir_grace_days, ...sched } = saved;
+      setForm(sched);
+      setOffsetsText(offsetsToText(sched.dunning_offsets));
+      setIsolirGraceDays(clampIsolirGrace(isolir_grace_days));
       void qc.invalidateQueries({ queryKey: ["jobs-settings"] });
       void qc.invalidateQueries({ queryKey: ["jobs-runs"] });
+      void qc.invalidateQueries({ queryKey: ["settings-branding"] });
       void toastSuccess("Jadwal cronjob disimpan");
     },
     onError: (e: Error) => void toastError(e.message),
@@ -187,7 +201,10 @@ export function JobsSettingsPage() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!form) return;
-    save.mutate(scheduleBody(form));
+    save.mutate({
+      ...scheduleBody(form),
+      isolir_grace_days: clampIsolirGrace(isolirGraceDays),
+    });
   }
 
   async function onRunNow() {
@@ -280,8 +297,26 @@ export function JobsSettingsPage() {
                 checked={form.isolir_enabled}
                 onCheckedChange={(v) => patch("isolir_enabled", v)}
                 title="Auto isolir"
-                hint={catalogHint(catalog, "isolir", "Suspend langganan lewat jatuh tempo + grace, lalu retry resume.")}
-              />
+                hint={catalogHint(
+                  catalog,
+                  "isolir",
+                  "Suspend langganan lewat jatuh tempo + masa tenggang isolir, lalu retry resume.",
+                )}
+              >
+                <Label className="mb-1.5 block">Masa tenggang isolir (hari)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={30}
+                  step={1}
+                  value={isolirGraceDays}
+                  onChange={(e) => setIsolirGraceDays(clampIsolirGrace(Number(e.target.value)))}
+                />
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  Hari setelah jatuh tempo invoice. 0 = isolir pada tanggal jatuh tempo. Maks. 30. Sama dengan
+                  Pengaturan → Umum.
+                </p>
+              </JobRow>
               <JobRow
                 checked={form.dunning_enabled}
                 onCheckedChange={(v) => patch("dunning_enabled", v)}

@@ -215,6 +215,10 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
   return (
     <Section title="Template Isolir">
       {q.isLoading && !hydrated ? <p className="mb-3 text-sm text-[var(--muted)]">Memuat pengaturan…</p> : null}
+      <p className="mb-4 text-sm text-[var(--muted)]">
+        Halaman ini untuk profil RouterOS, pool, dan redirect portal. Masa tenggang sebelum auto-isolir (hari setelah
+        jatuh tempo) diatur di Pengaturan → Umum atau Cronjob.
+      </p>
 
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
         <div className="grid min-w-0 gap-4">
