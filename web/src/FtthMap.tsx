@@ -25,6 +25,7 @@ type MapODP = {
   port_count: number;
   used_ports?: number;
   free_ports?: number;
+  coverage_radius_km?: number | null;
 };
 type MapCustomer = {
   id: string;
@@ -40,6 +41,7 @@ type MapCluster = {
   code: string;
   latitude?: number | null;
   longitude?: number | null;
+  coverage_radius_km?: number | null;
 };
 /** Tenant-custom map icon URLs (nil = use built-in SVG marker). */
 type MapIcons = {
@@ -90,7 +92,7 @@ function formatDistance(meters: number): string {
 
 type MapMarkerKind = "pop" | "odp" | "customer";
 
-const MAP_MARKER = {
+export const MAP_MARKER = {
   pop: { color: "#5A5A40", label: "POP" },
   odp: { color: "#2563eb", label: "ODP" },
   customer: { color: "#15803d", label: "Pelanggan" },
@@ -120,7 +122,7 @@ function mapMarkerSvg(kind: MapMarkerKind, color: string): string {
   </svg>`;
 }
 
-function createMapMarkerIcon(L: Window["L"], kind: MapMarkerKind, iconUrl?: string | null) {
+export function createMapMarkerIcon(L: Window["L"], kind: MapMarkerKind, iconUrl?: string | null) {
   const { color, label } = MAP_MARKER[kind];
   // Tenant custom image marker — rendered as-is (transparency preserved), anchored bottom-centre.
   if (iconUrl) {
@@ -146,10 +148,35 @@ function createMapMarkerIcon(L: Window["L"], kind: MapMarkerKind, iconUrl?: stri
   });
 }
 
-type Basemap = "street" | "satellite";
+export type Basemap = "street" | "satellite";
 const BASEMAP_KEY = "drp_ftth_basemap";
 
-function readBasemap(): Basemap {
+export function addCoverageCircle(
+  L: Window["L"],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  group: any,
+  lat: number,
+  lng: number,
+  km?: number | null,
+  color = "#5A5A40",
+  emphasized = false,
+) {
+  if (km == null || !Number.isFinite(km) || km <= 0) return null;
+  const circle = L.circle([lat, lng], {
+    radius: km * 1000,
+    color: emphasized ? "#15803d" : color,
+    weight: emphasized ? 3.5 : 2.5,
+    fillColor: color,
+    fillOpacity: emphasized ? 0.34 : 0.22,
+    opacity: emphasized ? 1 : 0.9,
+    interactive: false,
+  });
+  circle.addTo(group);
+  circle.bringToBack();
+  return circle;
+}
+
+export function readBasemap(): Basemap {
   try {
     const v = localStorage.getItem(BASEMAP_KEY);
     if (v === "satellite" || v === "street") return v;
@@ -159,7 +186,7 @@ function readBasemap(): Basemap {
   return "street";
 }
 
-function createBasemapLayer(L: Window["L"], kind: Basemap) {
+export function createBasemapLayer(L: Window["L"], kind: Basemap) {
   if (kind === "satellite") {
     return L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
       attribution: "Tiles &copy; Esri",
@@ -517,6 +544,7 @@ export function MapODP({
     group.clearLayers();
 
     const pts: LatLng[] = [];
+    const bounds: [number, number][] = [];
     const snapClick = (lat: number, lng: number) => (e: { originalEvent?: Event }) => {
       if (!drawModeRef.current) return;
       e.originalEvent?.preventDefault?.();
@@ -526,18 +554,37 @@ export function MapODP({
     for (const c of clusters) {
       if (c.latitude == null || c.longitude == null) continue;
       pts.push({ lat: c.latitude, lng: c.longitude });
+      const ring = addCoverageCircle(L, group, c.latitude, c.longitude, c.coverage_radius_km, MAP_MARKER.pop.color);
+      if (ring?.getBounds) {
+        const b = ring.getBounds();
+        bounds.push([b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]);
+      } else {
+        bounds.push([c.latitude, c.longitude]);
+      }
       L.marker([c.latitude, c.longitude], { icon: createMapMarkerIcon(L, "pop", mapIcons?.pop), zIndexOffset: 300 })
-        .bindPopup(`<b>POP ${c.name}</b><br/>${c.code}<br/><span style="opacity:.7">Klik saat mode gambar untuk snap</span>`)
+        .bindPopup(
+          `<b>POP ${c.name}</b><br/>${c.code}` +
+            (c.coverage_radius_km ? `<br/>Coverage ${c.coverage_radius_km} km` : "") +
+            `<br/><span style="opacity:.7">Klik saat mode gambar untuk snap</span>`,
+        )
         .on("click", snapClick(c.latitude, c.longitude))
         .addTo(group);
     }
     for (const o of odpsList) {
       if (o.latitude == null || o.longitude == null) continue;
       pts.push({ lat: o.latitude, lng: o.longitude });
+      const ring = addCoverageCircle(L, group, o.latitude, o.longitude, o.coverage_radius_km, MAP_MARKER.odp.color);
+      if (ring?.getBounds) {
+        const b = ring.getBounds();
+        bounds.push([b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]);
+      } else {
+        bounds.push([o.latitude, o.longitude]);
+      }
       L.marker([o.latitude, o.longitude], { icon: createMapMarkerIcon(L, "odp", mapIcons?.odp), zIndexOffset: 200 })
         .bindPopup(
           `<b>ODP ${o.name}</b><br/>${o.code}<br/>Port terpakai ${o.used_ports ?? 0}/${o.port_count}` +
-            (o.free_ports != null ? ` · sisa ${o.free_ports}` : ""),
+            (o.free_ports != null ? ` · sisa ${o.free_ports}` : "") +
+            (o.coverage_radius_km ? `<br/>Coverage ${o.coverage_radius_km} km` : ""),
         )
         .on("click", snapClick(o.latitude, o.longitude))
         .addTo(group);
@@ -561,11 +608,9 @@ export function MapODP({
       for (const ll of latlngs) pts.push({ lat: ll.lat, lng: ll.lng });
     }
 
-    if (pts.length > 0 && !clusterCenter) {
-      map.fitBounds(
-        L.latLngBounds(pts.map((p) => [p.lat, p.lng] as [number, number])),
-        { padding: [40, 40], maxZoom: 16 },
-      );
+    if ((bounds.length > 0 || pts.length > 0) && !clusterCenter) {
+      const fit = bounds.length > 0 ? bounds : pts.map((p) => [p.lat, p.lng] as [number, number]);
+      map.fitBounds(L.latLngBounds(fit), { padding: [40, 40], maxZoom: 16 });
     }
   }, [odpsList, customers, clusters, routes, editId, clusterCenter, mapIcons]);
 
@@ -604,7 +649,7 @@ export function MapODP({
   const draftMeters = pathLengthMeters(draft);
 
   return (
-    <div className="mt-4 space-y-3">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn" onClick={openCreateOdp} disabled={!clusterId || clusterId === "__none__" || placeOdpMode}>
           + ODP
@@ -680,23 +725,29 @@ export function MapODP({
           </IconButton>
         </span>
       </div>
-      <p className="text-xs text-[var(--muted)]">
-        + ODP (form) atau Pasang di peta (klik koordinat). Tab cluster memfilter POP / ODP / pelanggan /
-        jalur.
-      </p>
-      <div className="ftth-map-legend" aria-label="Legenda marker peta">
-        <span className="ftth-map-legend-item">
-          <span className="ftth-map-legend-swatch ftth-map-legend-swatch--pop" aria-hidden />
-          POP (menara)
-        </span>
-        <span className="ftth-map-legend-item">
-          <span className="ftth-map-legend-swatch ftth-map-legend-swatch--odp" aria-hidden />
-          ODP (kotak)
-        </span>
-        <span className="ftth-map-legend-item">
-          <span className="ftth-map-legend-swatch ftth-map-legend-swatch--customer" aria-hidden />
-          Pelanggan (rumah)
-        </span>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <div className="ftth-map-legend" aria-label="Legenda marker peta">
+          <span className="ftth-map-legend-item">
+            <span className="ftth-map-legend-swatch ftth-map-legend-swatch--pop" aria-hidden />
+            POP
+          </span>
+          <span className="ftth-map-legend-item">
+            <span className="ftth-map-legend-swatch ftth-map-legend-swatch--odp" aria-hidden />
+            ODP
+          </span>
+          <span className="ftth-map-legend-item">
+            <span className="ftth-map-legend-swatch ftth-map-legend-swatch--customer" aria-hidden />
+            Pelanggan
+          </span>
+          <span className="ftth-map-legend-item">
+            <span className="ftth-map-legend-swatch ftth-map-legend-swatch--ring-pop" aria-hidden />
+            Area POP
+          </span>
+          <span className="ftth-map-legend-item">
+            <span className="ftth-map-legend-swatch ftth-map-legend-swatch--ring-odp" aria-hidden />
+            Area ODP
+          </span>
+        </div>
       </div>
       <div className="ftth-map-shell">
         <div className="ftth-map-basemap" role="group" aria-label="Tampilan peta">

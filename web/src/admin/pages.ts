@@ -10,6 +10,7 @@ export type AdminPage =
   | "tickets"
   | "sla-report"
   | "odp"
+  | "coverage"
   | "vouchers"
   | "leads"
   | "accounting"
@@ -38,6 +39,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   "tickets",
   "sla-report",
   "odp",
+  "coverage",
   "vouchers",
   "leads",
   "accounting",
@@ -76,7 +78,8 @@ export const pageTitles: Record<AdminPage, string> = {
   "ip-pool": "IP Pool",
   tickets: "Tiket",
   "sla-report": "Laporan SLA",
-  odp: "ODP / FTTH",
+  odp: "MAP FTTH",
+  coverage: "Coverage",
   vouchers: "Voucher",
   leads: "Lead",
   accounting: "Akunting",

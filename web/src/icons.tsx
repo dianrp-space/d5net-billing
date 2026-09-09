@@ -175,11 +175,33 @@ export function IconTicket(props: IconProps) {
   );
 }
 
+export function IconRadar(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="2.2" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="10" />
+    </svg>
+  );
+}
+
 export function IconMapPin(props: IconProps) {
   return (
     <svg {...base(props)}>
       <path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11Z" />
       <circle cx="12" cy="10" r="2.5" />
+    </svg>
+  );
+}
+
+/** Peta lipat — MAP FTTH. */
+export function IconMap(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M9 3.2 3.6 5.5A1 1 0 0 0 3 6.4v12.3a1 1 0 0 0 1.4.9L9 17.4" />
+      <path d="M9 3.2 15 6l6-2.8v12.4L15 18.4 9 15.6Z" />
+      <path d="M9 3.2v12.4" />
+      <path d="M15 6v12.4" />
     </svg>
   );
 }
@@ -406,7 +428,7 @@ export function IconServer(props: IconProps) {
   );
 }
 
-/** ODP / FTTH — kabel serat / distribusi. */
+/** MAP FTTH — kabel serat / distribusi. */
 export function IconCable(props: IconProps) {
   return (
     <svg {...base(props)}>

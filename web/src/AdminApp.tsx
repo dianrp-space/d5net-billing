@@ -19,15 +19,16 @@ import {
   IconBell,
   IconBox,
   IconBriefcase,
-  IconCable,
   IconChart,
   IconClock,
   IconDownload,
   IconGauge,
   IconHeadset,
   IconHome,
+  IconMap,
   IconMapPin,
   IconPlug,
+  IconRadar,
   IconReceipt,
   IconRouter,
   IconSend,
@@ -73,6 +74,9 @@ const RoutersPage = lazy(() =>
   import("./pages/RoutersPage").then((m) => ({ default: m.RoutersPage })),
 );
 const OdpPage = lazy(() => import("./pages/OdpPage").then((m) => ({ default: m.OdpPage })));
+const CoveragePage = lazy(() =>
+  import("./pages/CoveragePage").then((m) => ({ default: m.CoveragePage })),
+);
 const IPPoolPage = lazy(() => import("./pages/IPPoolPage").then((m) => ({ default: m.IPPoolPage })));
 const TicketsPage = lazy(() => import("./TicketsPage").then((m) => ({ default: m.TicketsPage })));
 const SLAReportPage = lazy(() =>
@@ -125,8 +129,11 @@ type NavGroup = { label: string; items: NavItem[] };
 const navGroups: NavGroup[] = [
   {
     label: "Main Menu",
+    items: [{ id: "dashboard", label: "Dashboard", icon: <IconHome /> }],
+  },
+  {
+    label: "Finance",
     items: [
-      { id: "dashboard", label: "Dashboard", icon: <IconHome /> },
       { id: "plans", label: "Paket", icon: <IconBox /> },
       { id: "invoices", label: "Tagihan", icon: <IconChart /> },
       { id: "accounting", label: "Akunting", icon: <IconBanknote /> },
@@ -137,6 +144,7 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "customers", label: "Pelanggan", icon: <IconUsers /> },
       { id: "leads", label: "Lead", icon: <IconUserPlus /> },
+      { id: "coverage", label: "Coverage", icon: <IconRadar /> },
       { id: "resellers", label: "Reseller & Komisi", icon: <IconBriefcase /> },
     ],
   },
@@ -146,7 +154,7 @@ const navGroups: NavGroup[] = [
       { id: "clusters", label: "Cluster / POP", icon: <IconMapPin /> },
       { id: "routers", label: "Router", icon: <IconRouter /> },
       { id: "ip-pool", label: "IP Pool", icon: <IconServer /> },
-      { id: "odp", label: "ODP / FTTH", icon: <IconCable /> },
+      { id: "odp", label: "MAP FTTH", icon: <IconMap /> },
       { id: "vouchers", label: "Voucher", icon: <IconTicket /> },
     ],
   },
@@ -470,6 +478,15 @@ export function AdminApp({
               {page === "tickets" && <TicketsPage />}
               {page === "sla-report" && <SLAReportPage />}
               {page === "odp" && <OdpPage tenantSlug={tenantSlug} />}
+              {page === "coverage" && (
+                <CoveragePage
+                  canEdit={
+                    canAccessPage(perms, "clusters") ||
+                    canAccessPage(perms, "odp") ||
+                    canAccessPage(perms, "network")
+                  }
+                />
+              )}
               {page === "vouchers" && <VouchersPage />}
               {page === "leads" && <LeadsPage />}
               {page === "accounting" && <AccountingPage />}

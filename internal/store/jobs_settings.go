@@ -26,6 +26,8 @@ type JobScheduleSettings struct {
 	NotifyBatchSize        int   `json:"notify_batch_size"`
 	// CycleIntervalSeconds is how often this tenant's worker tasks run (billing, isolir, dunning).
 	CycleIntervalSeconds int `json:"cycle_interval_seconds"`
+	// PollerIntervalSeconds is how often the worker logs into MikroTik API for sessions/metrics.
+	PollerIntervalSeconds int `json:"poller_interval_seconds"`
 }
 
 func DefaultJobScheduleSettings() JobScheduleSettings {
@@ -43,6 +45,7 @@ func DefaultJobScheduleSettings() JobScheduleSettings {
 		MonthlyReportHour:      8,
 		NotifyBatchSize:        100,
 		CycleIntervalSeconds:   60,
+		PollerIntervalSeconds:  300,
 	}
 }
 
@@ -96,6 +99,18 @@ func NormalizeJobScheduleSettings(cfg JobScheduleSettings) JobScheduleSettings {
 		cfg.CycleIntervalSeconds -= rest
 		if cfg.CycleIntervalSeconds < 60 {
 			cfg.CycleIntervalSeconds = 60
+		}
+	}
+	if cfg.PollerIntervalSeconds < 60 {
+		cfg.PollerIntervalSeconds = def.PollerIntervalSeconds
+	}
+	if cfg.PollerIntervalSeconds > 3600 {
+		cfg.PollerIntervalSeconds = 3600
+	}
+	if rest := cfg.PollerIntervalSeconds % 60; rest != 0 {
+		cfg.PollerIntervalSeconds -= rest
+		if cfg.PollerIntervalSeconds < 60 {
+			cfg.PollerIntervalSeconds = def.PollerIntervalSeconds
 		}
 	}
 	// Dedup / clamp dunning offsets to [-30, 30]

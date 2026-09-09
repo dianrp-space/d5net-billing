@@ -151,8 +151,9 @@ func jobsCatalog() []jobCatalogItem {
 		{ID: "billing", Label: "Generate tagihan", Description: "Buat invoice untuk langganan yang jatuh tempo (mengikuti interval worker di halaman ini)."},
 		{ID: "isolir", Label: "Auto isolir", Description: "Suspend langganan yang tagihannya lewat jatuh tempo + masa tenggang isolir (Pengaturan → Umum). Setelah lunas, retry resume ke profil paket jika router sempat gagal/offline."},
 		{ID: "dunning", Label: "Pengingat tagihan (dunning)", Description: "Kirim reminder WhatsApp/email pada offset hari relatif jatuh tempo."},
-		{ID: "weekly_reconcile", Label: "Reconcile mingguan", Description: "Dry-run drift RouterOS vs data billing (sekali per jadwal). Alert Telegram ops jika ada drift."},
+		{ID: "weekly_reconcile", Label: "Reconcile mingguan", Description: "Dry-run drift RouterOS vs billing (sekali per jadwal). Alert Telegram ops jika ada drift."},
 		{ID: "monthly_report", Label: "Laporan bulanan", Description: "Email ringkas statistik bisnis ke email tenant."},
+		{ID: "poller", Label: "Poller router", Description: "Login API MikroTik untuk sesi PPPoE aktif dan metrik CPU/memori. Terpisah dari interval worker (tagihan/isolir)."},
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	return items

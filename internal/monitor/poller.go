@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/dianrp/drp-billing/internal/auth"
@@ -12,18 +13,26 @@ import (
 	"github.com/dianrp/drp-billing/internal/xid"
 )
 
+const pollerTick = 15 * time.Second
+
 type Poller struct {
 	store    *store.Store
 	routeros *ros.Client
 	interval time.Duration
 	notify   *notify.Service
+
+	lastPollMu sync.Mutex
+	lastPollAt map[xid.ID]time.Time
 }
 
 func NewPoller(st *store.Store, enc *auth.Encryptor, interval time.Duration) *Poller {
 	if interval <= 0 {
-		interval = 5 * time.Minute
+		interval = pollerTick
 	}
-	return &Poller{store: st, routeros: ros.New(st, enc), interval: interval}
+	return &Poller{
+		store: st, routeros: ros.New(st, enc), interval: interval,
+		lastPollAt: map[xid.ID]time.Time{},
+	}
 }
 
 func (p *Poller) WithNotify(n *notify.Service) *Poller {
@@ -34,6 +43,7 @@ func (p *Poller) WithNotify(n *notify.Service) *Poller {
 func (p *Poller) Run(ctx context.Context) {
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
+	_ = p.PollAll(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -52,16 +62,60 @@ func (p *Poller) PollAll(ctx context.Context) error {
 		return err
 	}
 	defer rows.Close()
+	intervals := map[xid.ID]time.Duration{}
+	now := time.Now()
 	for rows.Next() {
 		var id, tenantID xid.ID
 		if err := rows.Scan(&id, &tenantID); err != nil {
 			continue
 		}
+		interval, ok := intervals[tenantID]
+		if !ok {
+			interval = defaultPollerInterval()
+			if cfg, err := p.store.GetJobScheduleSettings(ctx, tenantID); err == nil {
+				interval = time.Duration(cfg.PollerIntervalSeconds) * time.Second
+			}
+			intervals[tenantID] = interval
+		}
+		if !p.routerPollDue(id, interval, now) {
+			continue
+		}
+		p.rememberPoll(id, now)
 		if err := p.PollRouter(ctx, tenantID, id); err != nil {
 			slog.Warn("poll router failed", "router_id", id, "err", err)
 		}
 	}
 	return rows.Err()
+}
+
+func defaultPollerInterval() time.Duration {
+	return time.Duration(store.DefaultJobScheduleSettings().PollerIntervalSeconds) * time.Second
+}
+
+func (p *Poller) routerPollDue(routerID xid.ID, interval time.Duration, now time.Time) bool {
+	p.lastPollMu.Lock()
+	defer p.lastPollMu.Unlock()
+	last, ok := p.lastPollAt[routerID]
+	return pollDue(last, ok, interval, now)
+}
+
+func (p *Poller) rememberPoll(routerID xid.ID, at time.Time) {
+	p.lastPollMu.Lock()
+	defer p.lastPollMu.Unlock()
+	if p.lastPollAt == nil {
+		p.lastPollAt = map[xid.ID]time.Time{}
+	}
+	p.lastPollAt[routerID] = at
+}
+
+func pollDue(last time.Time, ok bool, interval time.Duration, now time.Time) bool {
+	if interval < time.Minute {
+		interval = time.Minute
+	}
+	if !ok {
+		return true
+	}
+	return !now.Before(last.Add(interval))
 }
 
 func (p *Poller) PollRouter(ctx context.Context, tenantID xid.ID, routerID xid.ID) error {

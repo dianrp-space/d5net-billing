@@ -1056,18 +1056,19 @@ func (s *Store) RedeemVoucher(ctx context.Context, tenantID xid.ID, code string,
 }
 
 type ODP struct {
-	ID        xid.ID   `json:"id"`
-	TenantID  xid.ID   `json:"tenant_id"`
-	ClusterID *xid.ID  `json:"cluster_id,omitempty"`
-	ODCID     *xid.ID  `json:"odc_id,omitempty"`
-	Name      string   `json:"name"`
-	Code      string   `json:"code"`
-	Address   *string  `json:"address,omitempty"`
-	Latitude  *float64 `json:"latitude,omitempty"`
-	Longitude *float64 `json:"longitude,omitempty"`
-	PortCount int      `json:"port_count"`
-	UsedPorts int      `json:"used_ports"`
-	FreePorts int      `json:"free_ports"`
+	ID               xid.ID   `json:"id"`
+	TenantID         xid.ID   `json:"tenant_id"`
+	ClusterID        *xid.ID  `json:"cluster_id,omitempty"`
+	ODCID            *xid.ID  `json:"odc_id,omitempty"`
+	Name             string   `json:"name"`
+	Code             string   `json:"code"`
+	Address          *string  `json:"address,omitempty"`
+	Latitude         *float64 `json:"latitude,omitempty"`
+	Longitude        *float64 `json:"longitude,omitempty"`
+	CoverageRadiusKm *float64 `json:"coverage_radius_km,omitempty"`
+	PortCount        int      `json:"port_count"`
+	UsedPorts        int      `json:"used_ports"`
+	FreePorts        int      `json:"free_ports"`
 }
 
 type ODPPort struct {
@@ -1084,7 +1085,7 @@ type ODPPort struct {
 
 func (s *Store) ListODPs(ctx context.Context, tenantID xid.ID) ([]ODP, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT o.id, o.tenant_id, o.cluster_id, o.odc_id, o.name, o.code, o.address, o.latitude, o.longitude, o.port_count,
+		SELECT o.id, o.tenant_id, o.cluster_id, o.odc_id, o.name, o.code, o.address, o.latitude, o.longitude, o.coverage_radius_km, o.port_count,
 		       COALESCE((SELECT COUNT(*) FROM odp_ports p WHERE p.odp_id = o.id AND p.status = 'used'), 0),
 		       COALESCE((SELECT COUNT(*) FROM odp_ports p WHERE p.odp_id = o.id AND p.status = 'available'), 0)
 		FROM odps o WHERE o.tenant_id = $1 ORDER BY o.name
@@ -1096,7 +1097,7 @@ func (s *Store) ListODPs(ctx context.Context, tenantID xid.ID) ([]ODP, error) {
 	var list []ODP
 	for rows.Next() {
 		var o ODP
-		if err := rows.Scan(&o.ID, &o.TenantID, &o.ClusterID, &o.ODCID, &o.Name, &o.Code, &o.Address, &o.Latitude, &o.Longitude, &o.PortCount, &o.UsedPorts, &o.FreePorts); err != nil {
+		if err := rows.Scan(&o.ID, &o.TenantID, &o.ClusterID, &o.ODCID, &o.Name, &o.Code, &o.Address, &o.Latitude, &o.Longitude, &o.CoverageRadiusKm, &o.PortCount, &o.UsedPorts, &o.FreePorts); err != nil {
 			return nil, err
 		}
 		list = append(list, o)
@@ -1106,13 +1107,13 @@ func (s *Store) ListODPs(ctx context.Context, tenantID xid.ID) ([]ODP, error) {
 
 func (s *Store) GetODP(ctx context.Context, tenantID, id xid.ID) (*ODP, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT o.id, o.tenant_id, o.cluster_id, o.odc_id, o.name, o.code, o.address, o.latitude, o.longitude, o.port_count,
+		SELECT o.id, o.tenant_id, o.cluster_id, o.odc_id, o.name, o.code, o.address, o.latitude, o.longitude, o.coverage_radius_km, o.port_count,
 		       COALESCE((SELECT COUNT(*) FROM odp_ports p WHERE p.odp_id = o.id AND p.status = 'used'), 0),
 		       COALESCE((SELECT COUNT(*) FROM odp_ports p WHERE p.odp_id = o.id AND p.status = 'available'), 0)
 		FROM odps o WHERE o.tenant_id = $1 AND o.id = $2
 	`, tenantID, id)
 	var o ODP
-	err := row.Scan(&o.ID, &o.TenantID, &o.ClusterID, &o.ODCID, &o.Name, &o.Code, &o.Address, &o.Latitude, &o.Longitude, &o.PortCount, &o.UsedPorts, &o.FreePorts)
+	err := row.Scan(&o.ID, &o.TenantID, &o.ClusterID, &o.ODCID, &o.Name, &o.Code, &o.Address, &o.Latitude, &o.Longitude, &o.CoverageRadiusKm, &o.PortCount, &o.UsedPorts, &o.FreePorts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1123,10 +1124,11 @@ func (s *Store) GetODP(ctx context.Context, tenantID, id xid.ID) (*ODP, error) {
 }
 
 func (s *Store) CreateODP(ctx context.Context, o *ODP) error {
+	o.CoverageRadiusKm = NormalizeCoverageRadiusKm(o.CoverageRadiusKm)
 	err := s.Pool.QueryRow(ctx, `
-		INSERT INTO odps (tenant_id, cluster_id, odc_id, name, code, address, latitude, longitude, port_count)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id
-	`, o.TenantID, o.ClusterID, o.ODCID, o.Name, o.Code, o.Address, o.Latitude, o.Longitude, o.PortCount).Scan(&o.ID)
+		INSERT INTO odps (tenant_id, cluster_id, odc_id, name, code, address, latitude, longitude, coverage_radius_km, port_count)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id
+	`, o.TenantID, o.ClusterID, o.ODCID, o.Name, o.Code, o.Address, o.Latitude, o.Longitude, o.CoverageRadiusKm, o.PortCount).Scan(&o.ID)
 	if err != nil {
 		return err
 	}
@@ -1144,10 +1146,11 @@ func (s *Store) CreateODP(ctx context.Context, o *ODP) error {
 }
 
 func (s *Store) UpdateODP(ctx context.Context, o *ODP) error {
+	o.CoverageRadiusKm = NormalizeCoverageRadiusKm(o.CoverageRadiusKm)
 	tag, err := s.Pool.Exec(ctx, `
-		UPDATE odps SET name=$3, code=$4, address=$5, latitude=$6, longitude=$7, odc_id=$8, cluster_id=$9
+		UPDATE odps SET name=$3, code=$4, address=$5, latitude=$6, longitude=$7, coverage_radius_km=$8, odc_id=$9, cluster_id=$10
 		WHERE tenant_id=$1 AND id=$2
-	`, o.TenantID, o.ID, o.Name, o.Code, o.Address, o.Latitude, o.Longitude, o.ODCID, o.ClusterID)
+	`, o.TenantID, o.ID, o.Name, o.Code, o.Address, o.Latitude, o.Longitude, o.CoverageRadiusKm, o.ODCID, o.ClusterID)
 	if err != nil {
 		return err
 	}
@@ -1159,13 +1162,13 @@ func (s *Store) UpdateODP(ctx context.Context, o *ODP) error {
 
 func (s *Store) GetODPByCode(ctx context.Context, tenantID xid.ID, code string) (*ODP, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT o.id, o.tenant_id, o.cluster_id, o.odc_id, o.name, o.code, o.address, o.latitude, o.longitude, o.port_count,
+		SELECT o.id, o.tenant_id, o.cluster_id, o.odc_id, o.name, o.code, o.address, o.latitude, o.longitude, o.coverage_radius_km, o.port_count,
 		       COALESCE((SELECT COUNT(*) FROM odp_ports p WHERE p.odp_id = o.id AND p.status = 'used'), 0),
 		       COALESCE((SELECT COUNT(*) FROM odp_ports p WHERE p.odp_id = o.id AND p.status = 'available'), 0)
 		FROM odps o WHERE o.tenant_id = $1 AND o.code = $2
 	`, tenantID, code)
 	var o ODP
-	err := row.Scan(&o.ID, &o.TenantID, &o.ClusterID, &o.ODCID, &o.Name, &o.Code, &o.Address, &o.Latitude, &o.Longitude, &o.PortCount, &o.UsedPorts, &o.FreePorts)
+	err := row.Scan(&o.ID, &o.TenantID, &o.ClusterID, &o.ODCID, &o.Name, &o.Code, &o.Address, &o.Latitude, &o.Longitude, &o.CoverageRadiusKm, &o.PortCount, &o.UsedPorts, &o.FreePorts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1263,7 +1266,7 @@ func (s *Store) ReleaseODPPortBySubscription(ctx context.Context, tenantID, subs
 
 func (s *Store) FindNearestAvailableODP(ctx context.Context, tenantID xid.ID, lat, lng float64) (*ODP, error) {
 	row := s.Pool.QueryRow(ctx, `
-		SELECT o.id, o.tenant_id, o.cluster_id, o.odc_id, o.name, o.code, o.address, o.latitude, o.longitude, o.port_count,
+		SELECT o.id, o.tenant_id, o.cluster_id, o.odc_id, o.name, o.code, o.address, o.latitude, o.longitude, o.coverage_radius_km, o.port_count,
 		       COALESCE((SELECT COUNT(*) FROM odp_ports p WHERE p.odp_id = o.id AND p.status = 'used'), 0),
 		       COALESCE((SELECT COUNT(*) FROM odp_ports p WHERE p.odp_id = o.id AND p.status = 'available'), 0)
 		FROM odps o
@@ -1274,7 +1277,7 @@ func (s *Store) FindNearestAvailableODP(ctx context.Context, tenantID xid.ID, la
 		LIMIT 1
 	`, tenantID, lat, lng)
 	var o ODP
-	err := row.Scan(&o.ID, &o.TenantID, &o.ClusterID, &o.ODCID, &o.Name, &o.Code, &o.Address, &o.Latitude, &o.Longitude, &o.PortCount, &o.UsedPorts, &o.FreePorts)
+	err := row.Scan(&o.ID, &o.TenantID, &o.ClusterID, &o.ODCID, &o.Name, &o.Code, &o.Address, &o.Latitude, &o.Longitude, &o.CoverageRadiusKm, &o.PortCount, &o.UsedPorts, &o.FreePorts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

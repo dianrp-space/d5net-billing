@@ -14,19 +14,20 @@ import (
 
 // Cluster is a POP / area within a tenant (stored in sites table).
 type Cluster struct {
-	ID                   xid.ID    `json:"id"`
-	TenantID             xid.ID    `json:"tenant_id"`
-	Name                 string    `json:"name"`
-	Code                 string    `json:"code"`
-	CustomerCodePrefix   string    `json:"customer_code_prefix"`
-	CustomerCodePattern  string    `json:"customer_code_pattern"`
-	SeqWidth             int       `json:"seq_width"`
-	Address              *string   `json:"address,omitempty"`
-	Latitude             *float64  `json:"latitude,omitempty"`
-	Longitude            *float64  `json:"longitude,omitempty"`
-	Notes                *string   `json:"notes,omitempty"`
-	IsActive             bool      `json:"is_active"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                  xid.ID    `json:"id"`
+	TenantID            xid.ID    `json:"tenant_id"`
+	Name                string    `json:"name"`
+	Code                string    `json:"code"`
+	CustomerCodePrefix  string    `json:"customer_code_prefix"`
+	CustomerCodePattern string    `json:"customer_code_pattern"`
+	SeqWidth            int       `json:"seq_width"`
+	Address             *string   `json:"address,omitempty"`
+	Latitude            *float64  `json:"latitude,omitempty"`
+	Longitude           *float64  `json:"longitude,omitempty"`
+	CoverageRadiusKm    *float64  `json:"coverage_radius_km,omitempty"`
+	Notes               *string   `json:"notes,omitempty"`
+	IsActive            bool      `json:"is_active"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 const defaultCustomerCodePattern = "{prefix}-{yyyymm}-{seq}"
@@ -79,7 +80,7 @@ func (s *Store) ListClusters(ctx context.Context, tenantID xid.ID) ([]Cluster, e
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT id, tenant_id, name, code, customer_code_prefix, customer_code_pattern, seq_width,
-			       address, latitude, longitude, notes, is_active, created_at
+			       address, latitude, longitude, coverage_radius_km, notes, is_active, created_at
 			FROM sites WHERE tenant_id = $1 ORDER BY name
 		`, tenantID)
 		if err != nil {
@@ -89,7 +90,7 @@ func (s *Store) ListClusters(ctx context.Context, tenantID xid.ID) ([]Cluster, e
 		for rows.Next() {
 			var c Cluster
 			if err := rows.Scan(&c.ID, &c.TenantID, &c.Name, &c.Code, &c.CustomerCodePrefix, &c.CustomerCodePattern,
-				&c.SeqWidth, &c.Address, &c.Latitude, &c.Longitude, &c.Notes, &c.IsActive, &c.CreatedAt); err != nil {
+				&c.SeqWidth, &c.Address, &c.Latitude, &c.Longitude, &c.CoverageRadiusKm, &c.Notes, &c.IsActive, &c.CreatedAt); err != nil {
 				return err
 			}
 			list = append(list, c)
@@ -104,11 +105,11 @@ func (s *Store) GetCluster(ctx context.Context, tenantID, id xid.ID) (*Cluster, 
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
 			SELECT id, tenant_id, name, code, customer_code_prefix, customer_code_pattern, seq_width,
-			       address, latitude, longitude, notes, is_active, created_at
+			       address, latitude, longitude, coverage_radius_km, notes, is_active, created_at
 			FROM sites WHERE tenant_id = $1 AND id = $2
 		`, tenantID, id)
 		err := row.Scan(&c.ID, &c.TenantID, &c.Name, &c.Code, &c.CustomerCodePrefix, &c.CustomerCodePattern,
-			&c.SeqWidth, &c.Address, &c.Latitude, &c.Longitude, &c.Notes, &c.IsActive, &c.CreatedAt)
+			&c.SeqWidth, &c.Address, &c.Latitude, &c.Longitude, &c.CoverageRadiusKm, &c.Notes, &c.IsActive, &c.CreatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -137,14 +138,15 @@ func (s *Store) CreateCluster(ctx context.Context, c *Cluster) error {
 	if c.SeqWidth <= 0 {
 		c.SeqWidth = 4
 	}
+	c.CoverageRadiusKm = NormalizeCoverageRadiusKm(c.CoverageRadiusKm)
 	return s.withTenant(ctx, c.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			INSERT INTO sites (tenant_id, name, code, customer_code_prefix, customer_code_pattern, seq_width,
-			                   address, latitude, longitude, notes, is_active)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			                   address, latitude, longitude, coverage_radius_km, notes, is_active)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 			RETURNING id, created_at
 		`, c.TenantID, c.Name, c.Code, c.CustomerCodePrefix, c.CustomerCodePattern, c.SeqWidth,
-			c.Address, c.Latitude, c.Longitude, c.Notes, c.IsActive).Scan(&c.ID, &c.CreatedAt)
+			c.Address, c.Latitude, c.Longitude, c.CoverageRadiusKm, c.Notes, c.IsActive).Scan(&c.ID, &c.CreatedAt)
 	})
 }
 
@@ -165,13 +167,14 @@ func (s *Store) UpdateCluster(ctx context.Context, c *Cluster) error {
 	if c.SeqWidth <= 0 {
 		c.SeqWidth = 4
 	}
+	c.CoverageRadiusKm = NormalizeCoverageRadiusKm(c.CoverageRadiusKm)
 	return s.withTenant(ctx, c.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			UPDATE sites SET name=$3, code=$4, customer_code_prefix=$5, customer_code_pattern=$6, seq_width=$7,
-			                 address=$8, latitude=$9, longitude=$10, notes=$11, is_active=$12, updated_at=NOW()
+			                 address=$8, latitude=$9, longitude=$10, coverage_radius_km=$11, notes=$12, is_active=$13, updated_at=NOW()
 			WHERE tenant_id=$1 AND id=$2
 		`, c.TenantID, c.ID, c.Name, c.Code, c.CustomerCodePrefix, c.CustomerCodePattern, c.SeqWidth,
-			c.Address, c.Latitude, c.Longitude, c.Notes, c.IsActive)
+			c.Address, c.Latitude, c.Longitude, c.CoverageRadiusKm, c.Notes, c.IsActive)
 		if err != nil {
 			return err
 		}
@@ -202,11 +205,11 @@ func (s *Store) NextCustomerCodeForCluster(ctx context.Context, tenantID, cluste
 		var c Cluster
 		row := tx.QueryRow(ctx, `
 			SELECT id, tenant_id, name, code, customer_code_prefix, customer_code_pattern, seq_width,
-			       address, latitude, longitude, notes, is_active, created_at
+			       address, latitude, longitude, coverage_radius_km, notes, is_active, created_at
 			FROM sites WHERE tenant_id = $1 AND id = $2
 		`, tenantID, clusterID)
 		if err := row.Scan(&c.ID, &c.TenantID, &c.Name, &c.Code, &c.CustomerCodePrefix, &c.CustomerCodePattern,
-			&c.SeqWidth, &c.Address, &c.Latitude, &c.Longitude, &c.Notes, &c.IsActive, &c.CreatedAt); err != nil {
+			&c.SeqWidth, &c.Address, &c.Latitude, &c.Longitude, &c.CoverageRadiusKm, &c.Notes, &c.IsActive, &c.CreatedAt); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}

@@ -19,3 +19,18 @@ func TestNormalizeJobScheduleCycleInterval(t *testing.T) {
 		t.Fatalf("cap = %d", got)
 	}
 }
+
+func TestNormalizeJobSchedulePollerInterval(t *testing.T) {
+	if got := NormalizeJobScheduleSettings(JobScheduleSettings{}).PollerIntervalSeconds; got != 300 {
+		t.Fatalf("zero = %d", got)
+	}
+	if got := NormalizeJobScheduleSettings(JobScheduleSettings{PollerIntervalSeconds: 30}).PollerIntervalSeconds; got != 300 {
+		t.Fatalf("below min = %d", got)
+	}
+	if got := NormalizeJobScheduleSettings(JobScheduleSettings{PollerIntervalSeconds: 600}).PollerIntervalSeconds; got != 600 {
+		t.Fatalf("10 min = %d", got)
+	}
+	if got := NormalizeJobScheduleSettings(JobScheduleSettings{PollerIntervalSeconds: 7200}).PollerIntervalSeconds; got != 3600 {
+		t.Fatalf("cap = %d", got)
+	}
+}

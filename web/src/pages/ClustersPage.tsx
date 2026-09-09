@@ -20,6 +20,7 @@ export function ClustersPage() {
     address?: string | null;
     latitude?: number | null;
     longitude?: number | null;
+    coverage_radius_km?: number | null;
     notes?: string | null;
     is_active: boolean;
   };
@@ -32,6 +33,7 @@ export function ClustersPage() {
     address: string;
     latitude: string;
     longitude: string;
+    coverage_radius_km: string;
     notes: string;
     is_active: boolean;
   };
@@ -44,6 +46,7 @@ export function ClustersPage() {
     address: "",
     latitude: "",
     longitude: "",
+    coverage_radius_km: "",
     notes: "",
     is_active: true,
   };
@@ -62,9 +65,11 @@ export function ClustersPage() {
   };
 
   function coordsBody() {
+    const km = form.coverage_radius_km.trim() ? Number(form.coverage_radius_km) : null;
     return {
       latitude: form.latitude.trim() ? Number(form.latitude) : null,
       longitude: form.longitude.trim() ? Number(form.longitude) : null,
+      coverage_radius_km: km && km > 0 ? km : null,
     };
   }
 
@@ -155,6 +160,7 @@ export function ClustersPage() {
       address: c.address || "",
       latitude: c.latitude != null ? String(c.latitude) : "",
       longitude: c.longitude != null ? String(c.longitude) : "",
+      coverage_radius_km: c.coverage_radius_km != null && c.coverage_radius_km > 0 ? String(c.coverage_radius_km) : "",
       notes: c.notes || "",
       is_active: c.is_active,
     });
@@ -204,7 +210,8 @@ export function ClustersPage() {
       }
     >
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Satu tenant bisa punya banyak POP/cluster. Isi lat/long agar muncul di peta FTTH (titik awal jalur kabel).
+        Satu tenant bisa punya banyak POP/cluster. Isi lat/long agar muncul di peta, dan radius coverage (km) untuk
+        cek jangkauan sales di menu Coverage.
         Placeholder kode: <code className="text-xs">{"{prefix}"}</code>, <code className="text-xs">{"{yyyymm}"}</code>,{" "}
         <code className="text-xs">{"{seq}"}</code>.
       </p>
@@ -216,12 +223,13 @@ export function ClustersPage() {
         total={filtered.length}
       />
       <Table
-        columns={["Nama", "Kode", "Prefix", "Koordinat", "Status", "Aksi"]}
+        columns={["Nama", "Kode", "Prefix", "Koordinat", "Coverage", "Status", "Aksi"]}
         rows={filtered.map((c) => [
           c.name,
           c.code,
           c.customer_code_prefix,
           c.latitude != null && c.longitude != null ? `${c.latitude.toFixed(5)}, ${c.longitude.toFixed(5)}` : "—",
+          c.coverage_radius_km ? `${c.coverage_radius_km} km` : "—",
           c.is_active ? "aktif" : "nonaktif",
           <span key="act" className="flex flex-wrap items-center gap-1.5">
             <IconButton label="Edit cluster" onClick={() => startEdit(c)}>
@@ -323,6 +331,19 @@ export function ClustersPage() {
             value={form.longitude}
             onChange={(e) => setForm({ ...form, longitude: e.target.value })}
           />
+          <input
+            className="input"
+            type="number"
+            min={0}
+            max={50}
+            step={0.05}
+            placeholder="Coverage (km)"
+            value={form.coverage_radius_km}
+            onChange={(e) => setForm({ ...form, coverage_radius_km: e.target.value })}
+          />
+          <p className="text-xs text-[var(--muted)] sm:col-span-2">
+            Radius coverage untuk cek calon pelanggan di menu Coverage. Kosong = belum di-set.
+          </p>
           <textarea
             className="input sm:col-span-2 min-h-[72px]"
             placeholder="Catatan"

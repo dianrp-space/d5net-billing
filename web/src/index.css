@@ -742,6 +742,26 @@ input, select, textarea, button { font: inherit; }
   background: #15803d;
   border-radius: 999px;
 }
+.ftth-map-legend-swatch--ring-pop,
+.ftth-map-legend-swatch--ring-odp {
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+}
+.ftth-map-legend-swatch--ring-pop {
+  border: 2px solid #5a5a40;
+  background: color-mix(in srgb, #5a5a40 28%, transparent);
+}
+.ftth-map-legend-swatch--ring-odp {
+  border: 2px solid #2563eb;
+  background: color-mix(in srgb, #2563eb 28%, transparent);
+}
+.ftth-map-legend-swatch--ring-hit {
+  border-radius: 999px;
+  border: 2px solid #15803d;
+  background: color-mix(in srgb, #15803d 28%, transparent);
+  box-shadow: none;
+}
 .ftth-map-frame {
   height: 28rem;
   min-height: 22rem;

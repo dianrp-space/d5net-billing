@@ -1396,6 +1396,7 @@ func registerClusters(api huma.API, d *Deps) {
 			Address             *string  `json:"address,omitempty"`
 			Latitude            *float64 `json:"latitude,omitempty"`
 			Longitude           *float64 `json:"longitude,omitempty"`
+			CoverageRadiusKm    *float64 `json:"coverage_radius_km,omitempty"`
 			Notes               *string  `json:"notes,omitempty"`
 		}
 	}) (*struct{ Body store.Cluster }, error) {
@@ -1416,6 +1417,7 @@ func registerClusters(api huma.API, d *Deps) {
 			Address:             input.Body.Address,
 			Latitude:            input.Body.Latitude,
 			Longitude:           input.Body.Longitude,
+			CoverageRadiusKm:    input.Body.CoverageRadiusKm,
 			Notes:               input.Body.Notes,
 			IsActive:            true,
 		}
@@ -1459,6 +1461,7 @@ func registerClusters(api huma.API, d *Deps) {
 			Address             *string  `json:"address,omitempty"`
 			Latitude            *float64 `json:"latitude,omitempty"`
 			Longitude           *float64 `json:"longitude,omitempty"`
+			CoverageRadiusKm    *float64 `json:"coverage_radius_km,omitempty"`
 			Notes               *string  `json:"notes,omitempty"`
 			IsActive            bool     `json:"is_active"`
 		}
@@ -1487,9 +1490,36 @@ func registerClusters(api huma.API, d *Deps) {
 		c.Address = input.Body.Address
 		c.Latitude = input.Body.Latitude
 		c.Longitude = input.Body.Longitude
+		c.CoverageRadiusKm = input.Body.CoverageRadiusKm
 		c.Notes = input.Body.Notes
 		c.IsActive = input.Body.IsActive
 		if err := d.Store.UpdateCluster(ctx, c); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.Cluster }{Body: *c}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "put-cluster-coverage", Method: http.MethodPut, Path: "/api/clusters/{id}/coverage",
+		Summary: "Set POP coverage radius (km)", Tags: []string{"Clusters"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			CoverageRadiusKm *float64 `json:"coverage_radius_km"`
+		}
+	}) (*struct{ Body store.Cluster }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.UpdateClusterCoverage(ctx, tid, input.ID, input.Body.CoverageRadiusKm); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("cluster not found")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		c, err := d.Store.GetCluster(ctx, tid, input.ID)
+		if err != nil {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body store.Cluster }{Body: *c}, nil
@@ -3631,14 +3661,15 @@ func registerODP(api huma.API, d *Deps) {
 		Tags: []string{"FTTH"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
-			Name      string   `json:"name"`
-			Code      string   `json:"code"`
-			Address   *string  `json:"address,omitempty"`
-			Latitude  *float64 `json:"latitude,omitempty"`
-			Longitude *float64 `json:"longitude,omitempty"`
-			PortCount int      `json:"port_count,omitempty"`
-			ClusterID *xid.ID  `json:"cluster_id,omitempty"`
-			ODCID     *xid.ID  `json:"odc_id,omitempty"`
+			Name             string   `json:"name"`
+			Code             string   `json:"code"`
+			Address          *string  `json:"address,omitempty"`
+			Latitude         *float64 `json:"latitude,omitempty"`
+			Longitude        *float64 `json:"longitude,omitempty"`
+			CoverageRadiusKm *float64 `json:"coverage_radius_km,omitempty"`
+			PortCount        int      `json:"port_count,omitempty"`
+			ClusterID        *xid.ID  `json:"cluster_id,omitempty"`
+			ODCID            *xid.ID  `json:"odc_id,omitempty"`
 		}
 	}) (*struct{ Body store.ODP }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -3660,7 +3691,8 @@ func registerODP(api huma.API, d *Deps) {
 		o := store.ODP{
 			TenantID: tid, ClusterID: input.Body.ClusterID, ODCID: input.Body.ODCID, Name: name, Code: code,
 			Address: input.Body.Address, Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
-			PortCount: input.Body.PortCount,
+			CoverageRadiusKm: input.Body.CoverageRadiusKm,
+			PortCount:        input.Body.PortCount,
 		}
 		if o.PortCount <= 0 {
 			o.PortCount = 8
@@ -3677,13 +3709,14 @@ func registerODP(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			Name      string   `json:"name"`
-			Code      string   `json:"code"`
-			Address   *string  `json:"address,omitempty"`
-			Latitude  *float64 `json:"latitude,omitempty"`
-			Longitude *float64 `json:"longitude,omitempty"`
-			ClusterID *xid.ID  `json:"cluster_id,omitempty"`
-			ODCID     *xid.ID  `json:"odc_id,omitempty"`
+			Name             string   `json:"name"`
+			Code             string   `json:"code"`
+			Address          *string  `json:"address,omitempty"`
+			Latitude         *float64 `json:"latitude,omitempty"`
+			Longitude        *float64 `json:"longitude,omitempty"`
+			CoverageRadiusKm *float64 `json:"coverage_radius_km,omitempty"`
+			ClusterID        *xid.ID  `json:"cluster_id,omitempty"`
+			ODCID            *xid.ID  `json:"odc_id,omitempty"`
 		}
 	}) (*struct{ Body store.ODP }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -3706,6 +3739,7 @@ func registerODP(api huma.API, d *Deps) {
 			ID: input.ID, TenantID: tid, ClusterID: input.Body.ClusterID, ODCID: input.Body.ODCID,
 			Name: name, Code: code, Address: input.Body.Address,
 			Latitude: input.Body.Latitude, Longitude: input.Body.Longitude,
+			CoverageRadiusKm: input.Body.CoverageRadiusKm,
 		}
 		if err := d.Store.UpdateODP(ctx, &o); errors.Is(err, store.ErrNotFound) {
 			return nil, httpx.NotFound("odp not found")
@@ -3713,6 +3747,32 @@ func registerODP(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body store.ODP }{Body: o}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "put-odp-coverage", Method: http.MethodPut, Path: "/api/odps/{id}/coverage",
+		Summary: "Set ODP coverage radius (km)", Tags: []string{"FTTH"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID   xid.ID `path:"id"`
+		Body struct {
+			CoverageRadiusKm *float64 `json:"coverage_radius_km"`
+		}
+	}) (*struct{ Body store.ODP }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.UpdateODPCoverage(ctx, tid, input.ID, input.Body.CoverageRadiusKm); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("odp not found")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		o, err := d.Store.GetODP(ctx, tid, input.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.ODP }{Body: *o}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -3820,23 +3880,21 @@ func registerODP(api huma.API, d *Deps) {
 
 	huma.Register(api, huma.Operation{
 		OperationID: "coverage-check", Method: http.MethodGet, Path: "/api/coverage-check",
-		Tags: []string{"FTTH"}, Security: []map[string][]string{{"bearer": {}}},
+		Summary: "Check whether a lat/lng is inside POP or ODP coverage",
+		Tags:    []string{"FTTH"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Lat float64 `query:"lat"`
 		Lng float64 `query:"lng"`
-	}) (*struct{ Body store.ODP }, error) {
+	}) (*struct{ Body store.CoverageCheckResult }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		odp, err := d.Store.FindNearestAvailableODP(ctx, tid, input.Lat, input.Lng)
+		res, err := d.Store.CheckCoverage(ctx, tid, input.Lat, input.Lng)
 		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				return nil, httpx.NotFound("no available ODP nearby")
-			}
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body store.ODP }{Body: *odp}, nil
+		return &struct{ Body store.CoverageCheckResult }{Body: res}, nil
 	})
 }
 

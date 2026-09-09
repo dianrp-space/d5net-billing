@@ -20,6 +20,7 @@ type JobSchedule = {
   monthly_report_hour: number;
   notify_batch_size: number;
   cycle_interval_seconds: number;
+  poller_interval_seconds: number;
 };
 
 type JobsResponse = {
@@ -177,9 +178,13 @@ export function JobsSettingsPage() {
   const catalog = q.data?.catalog ?? [];
   const runs = runsQ.data?.data ?? [];
   const intervalMins = form ? secondsToMinutes(form.cycle_interval_seconds) : 1;
+  const pollerMins = form ? secondsToMinutes(form.poller_interval_seconds || 300) : 5;
   const intervalOptions = INTERVAL_MINUTES.includes(intervalMins)
     ? INTERVAL_MINUTES
     : [...INTERVAL_MINUTES, intervalMins].sort((a, b) => a - b);
+  const pollerOptions = INTERVAL_MINUTES.includes(pollerMins)
+    ? INTERVAL_MINUTES
+    : [...INTERVAL_MINUTES, pollerMins].sort((a, b) => a - b);
 
   function patch<K extends keyof JobSchedule>(key: K, value: JobSchedule[K]) {
     setForm((f) => (f ? { ...f, [key]: value } : f));
@@ -195,6 +200,7 @@ export function JobsSettingsPage() {
       monthly_report_hour: Number(src.monthly_report_hour),
       notify_batch_size: Number(src.notify_batch_size),
       cycle_interval_seconds: secondsToMinutes(src.cycle_interval_seconds) * 60,
+      poller_interval_seconds: secondsToMinutes(src.poller_interval_seconds || 300) * 60,
     };
   }
 
@@ -221,7 +227,8 @@ export function JobsSettingsPage() {
   return (
     <Section title="Cronjob">
       <p className="mb-5 max-w-2xl text-sm text-[var(--muted)]">
-        Atur interval dan tugas worker untuk tenant ini. Reconcile dan laporan tetap sekali per jadwal (idempoten).
+        Atur interval worker (tagihan/isolir) dan poller router (login API MikroTik untuk metrik).
+        Reconcile dan laporan tetap sekali per jadwal (idempoten).
       </p>
 
       {q.isLoading || !form ? (
@@ -231,7 +238,7 @@ export function JobsSettingsPage() {
           <div className="panel-card flex flex-col gap-4 p-4 sm:flex-row sm:items-end sm:justify-between">
             <div className="grid flex-1 gap-4 sm:grid-cols-3">
               <div>
-                <Label className="mb-1.5 block">Interval</Label>
+                <Label className="mb-1.5 block">Interval worker</Label>
                 <Select
                   value={String(intervalMins)}
                   onValueChange={(v) => patch("cycle_interval_seconds", Number(v) * 60)}
@@ -247,6 +254,26 @@ export function JobsSettingsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="mt-1 text-xs text-[var(--muted)]">Tagihan, isolir, pengingat.</p>
+              </div>
+              <div>
+                <Label className="mb-1.5 block">Interval poller router</Label>
+                <Select
+                  value={String(pollerMins)}
+                  onValueChange={(v) => patch("poller_interval_seconds", Number(v) * 60)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pollerOptions.map((m) => (
+                      <SelectItem key={m} value={String(m)}>
+                        Setiap {m} menit
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-xs text-[var(--muted)]">Login API MikroTik (sesi &amp; CPU). Default 5 menit.</p>
               </div>
               <div>
                 <Label className="mb-1.5 block">Batch notifikasi</Label>

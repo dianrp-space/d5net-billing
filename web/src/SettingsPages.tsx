@@ -88,10 +88,10 @@ function clampCycleStartDay(n: number | undefined) {
 const PERM_PRESETS: { key: string; label: string; hint: string }[] = [
   { key: "*", label: "Semua akses (*)", hint: "Akses penuh ke semua menu" },
   { key: "dashboard", label: "Dashboard", hint: "Halaman dashboard" },
-  { key: "customers", label: "Pelanggan & Lead", hint: "Pelanggan, Lead, Reseller & Komisi" },
-  { key: "leads", label: "Lead saja", hint: "Hanya menu Lead" },
+  { key: "customers", label: "Pelanggan & Lead", hint: "Pelanggan, Lead, Reseller, Coverage" },
+  { key: "leads", label: "Lead saja", hint: "Lead + Coverage peta jangkauan" },
   { key: "billing", label: "Billing", hint: "Paket, Tagihan, Akunting" },
-  { key: "network", label: "Jaringan", hint: "Cluster, Router, IP Pool, ODP, Voucher (+ Secrets lewat Pelanggan)" },
+  { key: "network", label: "Jaringan", hint: "Cluster, Router, IP Pool, ODP, Coverage, Voucher (+ Secrets lewat Pelanggan)" },
   { key: "ops", label: "Operasional", hint: "Menu Tiket (instalasi & support)" },
   { key: "tickets", label: "Tiket saja", hint: "Hanya menu Tiket" },
   { key: "sla-report", label: "Laporan SLA", hint: "Evaluasi SLA & waktu resolve tiket" },

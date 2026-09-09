@@ -32,9 +32,17 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
     free_ports: number;
     latitude?: number | null;
     longitude?: number | null;
+    coverage_radius_km?: number | null;
   };
-  type OdpForm = { name: string; code: string; latitude: string; longitude: string; port_count: number };
-  const emptyForm: OdpForm = { name: "", code: "", latitude: "", longitude: "", port_count: 8 };
+  type OdpForm = {
+    name: string;
+    code: string;
+    latitude: string;
+    longitude: string;
+    coverage_radius_km: string;
+    port_count: number;
+  };
+  const emptyForm: OdpForm = { name: "", code: "", latitude: "", longitude: "", coverage_radius_km: "", port_count: 8 };
 
   const clustersQ = useQuery({
     queryKey: ["clusters"],
@@ -202,6 +210,8 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
       else body.latitude = null;
       if (form.longitude.trim()) body.longitude = Number(form.longitude);
       else body.longitude = null;
+      const km = form.coverage_radius_km.trim() ? Number(form.coverage_radius_km) : null;
+      body.coverage_radius_km = km && km > 0 ? km : null;
       return api(`/api/odps/${editId}`, { method: "PUT", body: JSON.stringify(body) });
     },
     onSuccess: () => {
@@ -241,6 +251,8 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
       code: o.code,
       latitude: o.latitude != null ? String(o.latitude) : "",
       longitude: o.longitude != null ? String(o.longitude) : "",
+      coverage_radius_km:
+        o.coverage_radius_km != null && o.coverage_radius_km > 0 ? String(o.coverage_radius_km) : "",
       port_count: o.port_count,
     });
   }
@@ -252,19 +264,7 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
   }
 
   return (
-    <Section
-      title="ODP / FTTH"
-      actions={
-        <span className="flex flex-wrap items-center gap-1.5">
-          <IconButton label="Export CSV" onClick={() => void exportCsv()}>
-            <IconDownload />
-          </IconButton>
-          <IconButton label="Import CSV" onClick={() => { setImportMsg(""); setImportOpen(true); }}>
-            <IconUpload />
-          </IconButton>
-        </span>
-      }
-    >
+    <Section title="MAP FTTH">
       {clusters.length === 0 && unassignedCount === 0 ? (
         <p className="mb-4 text-sm text-[var(--muted)]">
           Belum ada cluster. Buat Cluster/POP dulu (isi lat/long) agar tab &amp; peta bisa dipakai.
@@ -302,16 +302,28 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
         <p className="mb-3 text-sm text-[var(--muted)]">ODP tanpa cluster. Edit lalu pindahkan ke tab cluster yang sesuai.</p>
       )}
 
-      {formErr && !editId && <p className="mb-3 text-sm text-[var(--danger)]">{formErr}</p>}
-      {importMsg && !importOpen && <p className="mb-3 text-sm text-[var(--muted)]">{importMsg}</p>}
+      {tabId ? <MapODP odps={filtered} clusterId={tabId} clusterCenter={clusterCenter} /> : null}
+
+      {formErr && !editId && <p className="mb-3 mt-8 text-sm text-[var(--danger)]">{formErr}</p>}
+      {importMsg && !importOpen && <p className="mb-3 mt-8 text-sm text-[var(--muted)]">{importMsg}</p>}
+      <div className="mt-8">
       <ListToolbar
         search={odpSearch}
         onSearchChange={setOdpSearch}
         searchPlaceholder="Nama atau kode ODP…"
         total={filtered.length}
-      />
+      >
+        <span className="ml-auto flex flex-wrap items-center gap-1.5">
+          <IconButton label="Export CSV" onClick={() => void exportCsv()}>
+            <IconDownload />
+          </IconButton>
+          <IconButton label="Import CSV" onClick={() => { setImportMsg(""); setImportOpen(true); }}>
+            <IconUpload />
+          </IconButton>
+        </span>
+      </ListToolbar>
       <Table
-        columns={["Nama", "Kode", "Port", "Terpakai", "Sisa", "Koordinat", "Aksi"]}
+        columns={["Nama", "Kode", "Port", "Terpakai", "Sisa", "Koordinat", "Coverage", "Aksi"]}
         rows={filtered.map((o) => [
           o.name,
           o.code,
@@ -319,6 +331,7 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
           o.used_ports,
           o.free_ports ?? Math.max(0, o.port_count - o.used_ports),
           o.latitude != null && o.longitude != null ? `${o.latitude}, ${o.longitude}` : "—",
+          o.coverage_radius_km ? `${o.coverage_radius_km} km` : "—",
           <span key="act" className="flex flex-wrap items-center gap-1.5">
             <IconButton label="Lihat slot port" onClick={() => setPortsOdpId(o.id)}>
               <IconEye />
@@ -345,6 +358,7 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
           </span>,
         ])}
       />
+      </div>
 
       <FormDialog
         open={Boolean(portsOdpId)}
@@ -440,6 +454,16 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
             value={form.longitude}
             onChange={(e) => setForm({ ...form, longitude: e.target.value })}
           />
+          <input
+            className="input"
+            type="number"
+            min={0}
+            max={50}
+            step={0.05}
+            placeholder="Coverage (km)"
+            value={form.coverage_radius_km}
+            onChange={(e) => setForm({ ...form, coverage_radius_km: e.target.value })}
+          />
           <p className="text-sm text-[var(--muted)] sm:col-span-2">
             Port: {form.port_count}. Cluster tab aktif: {activeCluster?.name || "tanpa cluster"}.
           </p>
@@ -454,8 +478,6 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
           {formErr && <p className="text-sm text-[var(--danger)] sm:col-span-2">{formErr}</p>}
         </form>
       </FormDialog>
-
-      {tabId ? <MapODP odps={filtered} clusterId={tabId} clusterCenter={clusterCenter} /> : null}
     </Section>
   );
 }

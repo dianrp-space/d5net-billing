@@ -661,7 +661,6 @@ func (c *Client) CollectResourceMetrics(ctx context.Context, routerID xid.ID) (*
 	if err != nil {
 		return nil, err
 	}
-	defer client.Close()
 
 	reply, err := client.Run("/system/resource/print")
 	if err != nil {
