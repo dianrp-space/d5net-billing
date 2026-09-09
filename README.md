@@ -91,7 +91,15 @@ sudo git clone git@github.com:dianrp-space/drp-billing.git /www/wwwroot/billing.
 sudo chown -R dianrp:dianrp /www/wwwroot/billing.dianrp.com
 ```
 
-User root yang menjalankan `update.sh` harus bisa `git pull` (deploy key / credential).
+User **`dianrp`** yang punya akses git (SSH key / credential). `update.sh` memakai `sudo` hanya untuk systemd; `git pull` dijalankan sebagai `dianrp`.
+
+Kalau skrip lama masih `git pull` sebagai root, tarik dulu tanpa sudo:
+
+```bash
+cd /www/wwwroot/billing.dianrp.com
+git pull
+sudo bash deploy/scripts/update.sh
+```
 
 ### 3. File env
 

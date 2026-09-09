@@ -33,6 +33,15 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "perintah '$1' tidak ditemukan. Pasang dulu, lalu ulangi."
 }
 
+# Root tidak punya akses repo GitHub private. Git/SSH memakai HOME + kunci APP_USER.
+as_app() {
+  if [[ -n "${SSH_AUTH_SOCK:-}" && -S "${SSH_AUTH_SOCK}" ]]; then
+    sudo -u "${APP_USER}" -H --preserve-env=SSH_AUTH_SOCK -- "$@"
+  else
+    sudo -u "${APP_USER}" -H -- "$@"
+  fi
+}
+
 database_url_from_env() {
   local f="$1" line
   [[ -f "$f" ]] || die "file env tidak ada: $f"
@@ -78,11 +87,12 @@ flock -n 9 || die "update lain sedang berjalan"
 
 cd "${APP_DIR}"
 
-log "git fetch/pull ${REMOTE}/${BRANCH}"
-git fetch --prune "${REMOTE}"
-git checkout "${BRANCH}"
-git pull --ff-only "${REMOTE}" "${BRANCH}"
-git submodule update --init --recursive 2>/dev/null || true
+log "git fetch/pull ${REMOTE}/${BRANCH} sebagai ${APP_USER}"
+chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
+as_app git -C "${APP_DIR}" fetch --prune "${REMOTE}"
+as_app git -C "${APP_DIR}" checkout "${BRANCH}"
+as_app git -C "${APP_DIR}" pull --ff-only "${REMOTE}" "${BRANCH}"
+as_app git -C "${APP_DIR}" submodule update --init --recursive 2>/dev/null || true
 printf '    HEAD: %s\n' "$(git log -1 --oneline)"
 
 log "build frontend"
