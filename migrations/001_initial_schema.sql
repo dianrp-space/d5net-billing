@@ -1,7 +1,25 @@
 -- +goose Up
 -- +goose StatementBegin
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-CREATE EXTENSION IF NOT EXISTS "citext";
+-- gen_random_uuid() sudah built-in sejak PostgreSQL 13 (termasuk 18).
+-- pgcrypto/citext butuh paket contrib; aaPanel sering tidak memasangnya.
+DO $ext$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'pgcrypto dilewati (tidak wajib di PG 13+): %', SQLERRM;
+END
+$ext$;
+
+DO $ext$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS citext;
+EXCEPTION WHEN OTHERS THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'citext') THEN
+    CREATE DOMAIN citext AS TEXT;
+  END IF;
+  RAISE NOTICE 'citext extension tidak ada; domain TEXT dipakai: %', SQLERRM;
+END
+$ext$;
 
 CREATE TABLE tenants (
     id          BIGSERIAL PRIMARY KEY,

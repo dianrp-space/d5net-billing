@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Update produksi: git pull → build → migrate → restart systemd.
+# Update produksi (idempotent): git pull → build jika ada perubahan → migrate → restart bila perlu.
 #
 # Semua path di folder situs (user dianrp):
 #   APP_DIR=/www/wwwroot/billing.dianrp.com
@@ -11,8 +11,7 @@
 # Jalankan sebagai root:
 #   sudo bash /www/wwwroot/billing.dianrp.com/deploy/scripts/update.sh
 #
-# Override:
-#   APP_DIR=... WEB_ROOT=... BRANCH=main sudo -E bash deploy/scripts/update.sh
+# Paksa ulang: FORCE_NPM=1 FORCE_WEB=1 FORCE_GO=1 FORCE_RESTART=1
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/www/wwwroot/billing.dianrp.com}"
@@ -20,11 +19,16 @@ WEB_ROOT="${WEB_ROOT:-${APP_DIR}/web/dist}"
 BIN_DIR="${BIN_DIR:-${APP_DIR}/bin}"
 ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
 DATA_DIR="${DATA_DIR:-${APP_DIR}/data}"
+CACHE_DIR="${CACHE_DIR:-${APP_DIR}/.update-cache}"
 APP_USER="${APP_USER:-dianrp}"
 BRANCH="${BRANCH:-main}"
 REMOTE="${REMOTE:-origin}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8087/api/health}"
 SERVICES="${SERVICES:-drp-api drp-worker}"
+FORCE_NPM="${FORCE_NPM:-0}"
+FORCE_WEB="${FORCE_WEB:-0}"
+FORCE_GO="${FORCE_GO:-0}"
+FORCE_RESTART="${FORCE_RESTART:-0}"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf '!! %s\n' "$*" >&2; exit 1; }
@@ -36,9 +40,9 @@ need_cmd() {
 # Root tidak punya akses repo GitHub private. Git/SSH memakai HOME + kunci APP_USER.
 as_app() {
   if [[ -n "${SSH_AUTH_SOCK:-}" && -S "${SSH_AUTH_SOCK}" ]]; then
-    sudo -u "${APP_USER}" -H --preserve-env=SSH_AUTH_SOCK -- "$@"
+    sudo -u "${APP_USER}" -H --preserve-env=SSH_AUTH_SOCK env PATH="${PATH}" "$@"
   else
-    sudo -u "${APP_USER}" -H -- "$@"
+    sudo -u "${APP_USER}" -H env PATH="${PATH}" "$@"
   fi
 }
 
@@ -48,6 +52,32 @@ database_url_from_env() {
   line="$(grep -E '^[[:space:]]*DATABASE_URL=' "$f" | tail -n1 || true)"
   [[ -n "$line" ]] || die "DATABASE_URL tidak ada di $f"
   printf '%s\n' "${line#*=}"
+}
+
+paths_digest() {
+  local f
+  {
+    for f in "$@"; do
+      if [[ -f "$f" ]]; then
+        sha256sum "$f"
+      elif [[ -d "$f" ]]; then
+        find "$f" -type f ! -path '*/node_modules/*' ! -path '*/dist/*' -print0 \
+          | sort -z | xargs -0 -r sha256sum
+      fi
+    done
+  } | sha256sum | awk '{print $1}'
+}
+
+stamp_ok() {
+  local stamp="$1" digest="$2"
+  [[ -f "$stamp" ]] && [[ "$(cat "$stamp")" == "$digest" ]]
+}
+
+write_stamp() {
+  local stamp="$1" digest="$2"
+  mkdir -p "$(dirname "$stamp")"
+  printf '%s\n' "$digest" >"$stamp"
+  chown "${APP_USER}:${APP_USER}" "$stamp" "$(dirname "$stamp")" 2>/dev/null || true
 }
 
 # Node/npm: nvm user situs (dianrp), aaPanel, lalu PATH sistem.
@@ -81,38 +111,76 @@ printf '    npm: %s\n' "$(command -v npm)"
 need_cmd rsync
 need_cmd systemctl
 need_cmd curl
+need_cmd sha256sum
+need_cmd find
 
 exec 9>"/tmp/drp-billing-update.lock"
 flock -n 9 || die "update lain sedang berjalan"
 
 cd "${APP_DIR}"
+mkdir -p "${CACHE_DIR}" "${BIN_DIR}" "${DATA_DIR}"/{uploads,exports,router-backups,whatsapp,db-backups}
 
 log "git fetch/pull ${REMOTE}/${BRANCH} sebagai ${APP_USER}"
-chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
+chown "${APP_USER}:${APP_USER}" "${APP_DIR}"
+chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}/.git"
 as_app git -C "${APP_DIR}" fetch --prune "${REMOTE}"
 as_app git -C "${APP_DIR}" checkout "${BRANCH}"
 as_app git -C "${APP_DIR}" pull --ff-only "${REMOTE}" "${BRANCH}"
 as_app git -C "${APP_DIR}" submodule update --init --recursive 2>/dev/null || true
 printf '    HEAD: %s\n' "$(git log -1 --oneline)"
 
-log "build frontend"
-(
-  cd web
-  if [[ -f package-lock.json ]]; then
-    npm ci
-  else
-    npm install
-  fi
-  npm run build
-)
+npm_digest="$(paths_digest web/package.json web/package-lock.json)"
+web_digest="$(paths_digest web/package.json web/package-lock.json web/vite.config.ts web/tsconfig.json web/index.html web/src)"
+go_digest="$(paths_digest go.mod go.sum cmd internal)"
 
-log "build Go (api, worker, migrate, drpctl) → ${BIN_DIR}"
-mkdir -p "${BIN_DIR}" "${DATA_DIR}"/{uploads,exports,router-backups,whatsapp,db-backups}
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-api" ./cmd/api
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-worker" ./cmd/worker
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-migrate" ./cmd/migrate
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drpctl" ./cmd/drpctl
-chmod 0755 "${BIN_DIR}/drp-api" "${BIN_DIR}/drp-worker" "${BIN_DIR}/drp-migrate" "${BIN_DIR}/drpctl"
+rebuilt_web=0
+rebuilt_go=0
+
+log "frontend (npm + vite)"
+if [[ "${FORCE_NPM}" != "1" ]] && [[ -d web/node_modules ]] && stamp_ok "${CACHE_DIR}/npm-ci" "${npm_digest}"; then
+  printf '    skip npm ci (package-lock tidak berubah)\n'
+else
+  (
+    cd web
+    if [[ -f package-lock.json ]]; then
+      as_app npm ci --prefix "${APP_DIR}/web"
+    else
+      as_app npm install --prefix "${APP_DIR}/web"
+    fi
+  )
+  write_stamp "${CACHE_DIR}/npm-ci" "${npm_digest}"
+fi
+
+if [[ "${FORCE_WEB}" != "1" ]] && [[ -f "${APP_DIR}/web/dist/index.html" ]] && stamp_ok "${CACHE_DIR}/web-build" "${web_digest}"; then
+  printf '    skip vite build (sumber frontend tidak berubah)\n'
+else
+  as_app npm run build --prefix "${APP_DIR}/web"
+  write_stamp "${CACHE_DIR}/web-build" "${web_digest}"
+  rebuilt_web=1
+fi
+
+log "Go (api, worker, migrate, drpctl) → ${BIN_DIR}"
+need_go=0
+if [[ "${FORCE_GO}" == "1" ]]; then
+  need_go=1
+elif ! stamp_ok "${CACHE_DIR}/go-build" "${go_digest}"; then
+  need_go=1
+else
+  for b in drp-api drp-worker drp-migrate drpctl; do
+    [[ -x "${BIN_DIR}/${b}" ]] || need_go=1
+  done
+fi
+if [[ "${need_go}" -eq 0 ]]; then
+  printf '    skip go build (sumber Go tidak berubah)\n'
+else
+  as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-api" ./cmd/api
+  as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-worker" ./cmd/worker
+  as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-migrate" ./cmd/migrate
+  as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drpctl" ./cmd/drpctl
+  chmod 0755 "${BIN_DIR}/drp-api" "${BIN_DIR}/drp-worker" "${BIN_DIR}/drp-migrate" "${BIN_DIR}/drpctl"
+  write_stamp "${CACHE_DIR}/go-build" "${go_digest}"
+  rebuilt_go=1
+fi
 
 log "publish frontend → ${WEB_ROOT}"
 mkdir -p "${WEB_ROOT}"
@@ -130,8 +198,9 @@ else
 fi
 
 log "hak akses ${APP_USER}"
-chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
+chown -R "${APP_USER}:${APP_USER}" "${BIN_DIR}" "${DATA_DIR}" "${CACHE_DIR}" "${APP_DIR}/web/dist" 2>/dev/null || true
 if [[ -f "${ENV_FILE}" ]]; then
+  chown "${APP_USER}:${APP_USER}" "${ENV_FILE}"
   chmod 600 "${ENV_FILE}"
 fi
 
@@ -142,21 +211,32 @@ DATABASE_URL="${DATABASE_URL#\"}"
 DATABASE_URL="${DATABASE_URL%\'}"
 DATABASE_URL="${DATABASE_URL#\'}"
 [[ -n "${DATABASE_URL}" ]] || die "DATABASE_URL kosong di ${ENV_FILE}"
-sudo -u "${APP_USER}" env \
+as_app env \
   DATABASE_URL="${DATABASE_URL}" \
   MIGRATIONS_DIR="${APP_DIR}/migrations" \
   "${BIN_DIR}/drp-migrate" up
 
-log "restart systemd: ${SERVICES}"
-# shellcheck disable=SC2086
-systemctl restart ${SERVICES}
-sleep 2
-# shellcheck disable=SC2086
-systemctl is-active --quiet ${SERVICES} || {
+if [[ "${FORCE_RESTART}" == "1" || "${rebuilt_go}" -eq 1 || "${rebuilt_web}" -eq 1 ]]; then
+  log "restart systemd: ${SERVICES}"
   # shellcheck disable=SC2086
-  systemctl status ${SERVICES} --no-pager -l || true
-  die "service tidak aktif setelah restart"
-}
+  systemctl restart ${SERVICES}
+  sleep 2
+  # shellcheck disable=SC2086
+  systemctl is-active --quiet ${SERVICES} || {
+    # shellcheck disable=SC2086
+    systemctl status ${SERVICES} --no-pager -l || true
+    die "service tidak aktif setelah restart"
+  }
+else
+  log "skip restart (binary/frontend tidak berubah; FORCE_RESTART=1 untuk memaksa)"
+  # shellcheck disable=SC2086
+  systemctl is-active --quiet ${SERVICES} || {
+    log "service belum aktif — start ${SERVICES}"
+    # shellcheck disable=SC2086
+    systemctl start ${SERVICES}
+    sleep 2
+  }
+fi
 
 log "health check ${HEALTH_URL}"
 ok=0

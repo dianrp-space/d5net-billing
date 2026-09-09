@@ -69,9 +69,18 @@ Unit systemd memakai `ProtectSystem=strict` dan hanya boleh tulis ke `data/`. Lo
 
 ### Prasyarat
 
-- aaPanel: Nginx, PostgreSQL 16+ (atau 14+), SSL Let's Encrypt
-- Di server: `git`, **Go 1.26+** (toolchain `go1.27.1`), **Node.js 20+** + `npm`, `rsync`, `curl`
+- aaPanel: Nginx, PostgreSQL 16+ / 18, SSL Let's Encrypt
+- Di server: `git`, **Go 1.26+** (toolchain `go1.27.1`), **Node.js 20+** + `npm` (nvm OK), `rsync`, `curl`
 - User **`dianrp`** (sudah ada; proses API/worker jalan sebagai user ini)
+
+PostgreSQL 18 **tidak butuh** extension `pgcrypto` untuk UUID (`gen_random_uuid()` sudah di core sejak PG 13). Error `extension "pgcrypto" is not available` artinya paket contrib belum terpasang. Migrasi sudah mengabaikan pgcrypto jika tidak ada. `citext` (email case-insensitive) tetap lebih baik dari paket contrib:
+
+```bash
+# Debian/Ubuntu / aaPanel
+sudo apt-get install -y postgresql-18-contrib
+# lalu di database:
+#   CREATE EXTENSION IF NOT EXISTS citext;
+```
 
 ### 1. Database
 
@@ -144,7 +153,7 @@ Jangan `start` dulu sebelum binary ada (langkah 5). Kalau unit lama masih memaka
 sudo bash /www/wwwroot/billing.dianrp.com/deploy/scripts/update.sh
 ```
 
-Skrip ini: `git pull` → `npm ci` + Vite build → compile Go ke `bin/` → `migrate up` → restart service → `GET /api/health`.
+Skrip ini aman diulang: `git pull` sebagai `dianrp`, **skip `npm ci`** jika `package-lock.json` tidak berubah, skip Vite/Go build jika sumber tidak berubah, `migrate up`, restart systemd hanya jika binary/frontend berubah. Paksa: `FORCE_NPM=1 FORCE_WEB=1 FORCE_GO=1 FORCE_RESTART=1`.
 
 Cek:
 

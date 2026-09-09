@@ -8,6 +8,7 @@ dist/
 .idea/
 .vscode/
 coverage/
+.update-cache/
 data/uploads/
 data/exports/
 data/router-backups/
