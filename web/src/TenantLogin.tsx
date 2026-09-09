@@ -94,8 +94,8 @@ export function TenantLogin({
     applyBrandingMeta({
       appName: tenant.name || tenant.app_name,
       faviconUrl: tenant.favicon_url,
-      titleSuffix: isAdmin ? "Admin" : "Pelanggan",
-      separator: isAdmin ? undefined : "-",
+      titleSuffix: isAdmin ? "Admin" : "Login Portal Pelanggan",
+      separator: "-",
     });
   }, [tenant, isAdmin]);
 
@@ -142,7 +142,7 @@ export function TenantLogin({
       <LoginShell
         brand={brand}
         logoUrl={tenant?.logo_url}
-        title={isAdmin ? "Masuk admin" : "Portal pelanggan"}
+        title={isAdmin ? "Masuk admin" : "Login Portal Pelanggan"}
         subtitle={isAdmin ? `Panel tenant /${slug}` : "Cek paket & tagihan · password default = nomor HP"}
       >
         {isAdmin ? (
