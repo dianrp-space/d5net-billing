@@ -22,4 +22,4 @@ if ! curl -sf http://127.0.0.1:8080/api/health > /dev/null; then
   exit 1
 fi
 
-echo "==> Upgrade successful"
+echo "==> Upgrade successful (tarball). Untuk update dari git: deploy/scripts/update.sh"
