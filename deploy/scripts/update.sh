@@ -41,7 +41,18 @@ database_url_from_env() {
   printf '%s\n' "${line#*=}"
 }
 
-# aaPanel / instalasi Go-Node umum
+# Node/npm: nvm user situs (dianrp), aaPanel, lalu PATH sistem.
+# `sudo` memakai HOME=/root, jadi nvm di /home/dianrp/.nvm tidak ketemu tanpa ini.
+APP_HOME="$(getent passwd "${APP_USER}" | cut -d: -f6 || true)"
+if [[ -n "${APP_HOME}" ]]; then
+  shopt -s nullglob
+  nvm_bins=("${APP_HOME}/.nvm/versions/node"/v*/bin)
+  shopt -u nullglob
+  if ((${#nvm_bins[@]} > 0)); then
+    nvm_bin="$(printf '%s\n' "${nvm_bins[@]}" | sort -V | tail -n1)"
+    export PATH="${nvm_bin}:${PATH}"
+  fi
+fi
 export PATH="/usr/local/go/bin:/usr/local/bin:${HOME}/go/bin:${PATH}"
 shopt -s nullglob
 for d in /www/server/nodejs/v*/bin; do
@@ -57,6 +68,7 @@ id "${APP_USER}" &>/dev/null || die "user '${APP_USER}' tidak ada"
 need_cmd git
 need_cmd go
 need_cmd npm
+printf '    npm: %s\n' "$(command -v npm)"
 need_cmd rsync
 need_cmd systemctl
 need_cmd curl
