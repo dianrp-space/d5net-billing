@@ -778,43 +778,6 @@ input, select, textarea, button { font: inherit; }
   }
 }
 
-.cluster-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-bottom: 1rem;
-  padding: 0.35rem;
-  background: var(--panel-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.cluster-tab {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  padding: 0.45rem 0.85rem;
-  border-radius: calc(var(--radius) - 2px);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.cluster-tab:hover {
-  color: var(--text);
-  background: var(--panel);
-}
-.cluster-tab.is-active {
-  background: var(--panel);
-  color: var(--accent);
-  box-shadow: var(--shadow-sm);
-}
-.cluster-tab-meta {
-  font-weight: 500;
-  opacity: 0.65;
-  margin-left: 0.35rem;
-  font-size: 0.75rem;
-}
 .eyebrow {
   font-size: 0.625rem;
   font-weight: 700;

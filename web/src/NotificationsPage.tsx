@@ -4,6 +4,7 @@ import { api } from "./api";
 import { IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { Button, IconButton, Input, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table } from "./ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePersistedTab } from "./navPersist";
 
 type NotifTemplate = {
@@ -83,17 +84,19 @@ export function NotificationsPage() {
 
   return (
     <Section title="Notifikasi">
-      <div className="cluster-tabs mb-4">
-        <button type="button" className={`cluster-tab ${tab === "broadcast" ? "is-active" : ""}`} onClick={() => setTab("broadcast")}>
-          Broadcast
-        </button>
-        <button type="button" className={`cluster-tab ${tab === "templates" ? "is-active" : ""}`} onClick={() => setTab("templates")}>
-          Template
-        </button>
-      </div>
-
-      {tab === "broadcast" ? (
-        <div className="grid max-w-xl gap-3">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => {
+          if (v === "broadcast" || v === "templates") setTab(v);
+        }}
+        className="space-y-0"
+      >
+        <TabsList aria-label="Notifikasi">
+          <TabsTrigger value="broadcast">Broadcast</TabsTrigger>
+          <TabsTrigger value="templates">Template</TabsTrigger>
+        </TabsList>
+        <TabsContent value="broadcast">
+          <div className="grid max-w-xl gap-3">
           <p className="text-sm text-[var(--muted)]">
             Kirim pesan massal (dunning / promo). Delay antar penerima dipakai sebagai rate limit antrian.
           </p>
@@ -155,9 +158,10 @@ export function NotificationsPage() {
           <Button type="button" onClick={() => sendBcast.mutate()} disabled={sendBcast.isPending}>
             {sendBcast.isPending ? "Mengantre…" : "Kirim broadcast"}
           </Button>
-        </div>
-      ) : (
-        <div className="grid gap-4">
+          </div>
+        </TabsContent>
+        <TabsContent value="templates">
+          <div className="grid gap-4">
           <div className="grid max-w-xl gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] p-4">
             <label className="grid gap-1 text-sm">
               <span>Channel</span>
@@ -212,8 +216,9 @@ export function NotificationsPage() {
               </IconButton>,
             ])}
           />
-        </div>
-      )}
+          </div>
+        </TabsContent>
+      </Tabs>
     </Section>
   );
 }
