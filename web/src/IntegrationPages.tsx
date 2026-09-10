@@ -65,6 +65,7 @@ const TTL_PRESETS = [
 
 function paymentWebhookDisplayURL(path?: string, fallback = "/api/webhooks/payment/drp") {
   const raw = path || fallback;
+  if (/^https?:\/\//i.test(raw)) return raw;
   const normalized = raw.startsWith("/") ? raw : `/${raw}`;
   if (typeof window === "undefined") return normalized;
   return `${window.location.origin}${normalized}`;
@@ -310,13 +311,16 @@ export function PaymentGWPage() {
         expires_in_minutes: data.expires_in_minutes || duitkuForm.expires_in_minutes,
       });
       void qc.invalidateQueries({ queryKey: ["integration-duitku"] });
-      void toastSuccess("Duitku POP disimpan");
+      void toastSuccess("Duitku disimpan");
     },
     onError: (e: Error) => void toastError(e.message),
   });
 
-  const webhookURL = paymentWebhookDisplayURL(q.data?.webhook_path);
-  const duitkuWebhookURL = paymentWebhookDisplayURL(duitkuQ.data?.webhook_path, "/api/webhooks/payment/duitku");
+  const webhookURL = paymentWebhookDisplayURL(q.data?.webhook_url || q.data?.webhook_path);
+  const duitkuWebhookURL = paymentWebhookDisplayURL(
+    duitkuQ.data?.webhook_url || duitkuQ.data?.webhook_path,
+    "/api/webhooks/payment/duitku",
+  );
 
   async function copyWebhook(url: string) {
     try {
@@ -333,7 +337,7 @@ export function PaymentGWPage() {
     <Section title="Payment Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
         Aktifkan gateway per tenant. <strong>DRP Payment</strong> untuk QRIS di aplikasi,{" "}
-        <strong>Duitku POP</strong> untuk redirect ke halaman bayar Duitku. Kredensial disimpan terenkripsi.
+        <strong>Duitku</strong> untuk redirect ke halaman bayar Duitku. Kredensial disimpan terenkripsi.
       </p>
       {loading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
@@ -420,7 +424,7 @@ export function PaymentGWPage() {
               </span>
             </label>
             <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Webhook URL DRP · /api/webhooks/payment/drp</span>
+              <span className="text-[var(--muted)]">Webhook URL DRP · /api/webhooks/payment/drp?tenant=…</span>
               <div className="flex gap-2">
                 <input className="input min-w-0 flex-1 font-mono text-xs" readOnly value={webhookURL} />
                 <IconButton label="Salin webhook URL" onClick={() => void copyWebhook(webhookURL)}>
@@ -438,7 +442,7 @@ export function PaymentGWPage() {
 
           <ProviderAccordionItem
             value="duitku"
-            title="Duitku POP"
+            title="Duitku"
             enabled={duitkuForm.enabled}
             configured={Boolean(duitkuQ.data?.configured)}
             onToggle={(v) => setDuitkuForm({ ...duitkuForm, enabled: v })}
@@ -469,7 +473,7 @@ export function PaymentGWPage() {
               <span className="text-[var(--muted)]">API key</span>
               <SecretInput
                 name="duitku-api-key"
-                placeholder="API key Duitku POP"
+                placeholder="API key Duitku"
                 value={duitkuForm.api_key}
                 onChange={(e) => setDuitkuForm({ ...duitkuForm, api_key: e.target.value })}
                 autoComplete="new-password"
@@ -508,7 +512,7 @@ export function PaymentGWPage() {
               </span>
             </label>
             <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Callback URL Duitku · /api/webhooks/payment/duitku</span>
+              <span className="text-[var(--muted)]">Callback URL Duitku · /api/webhooks/payment/duitku?tenant=…</span>
               <div className="flex gap-2">
                 <input className="input min-w-0 flex-1 font-mono text-xs" readOnly value={duitkuWebhookURL} />
                 <IconButton label="Salin callback URL" onClick={() => void copyWebhook(duitkuWebhookURL)}>
@@ -516,7 +520,7 @@ export function PaymentGWPage() {
                 </IconButton>
               </div>
               <span className="text-[11px] text-[var(--muted)]">
-                Khusus Duitku, terpisah dari QRIS. Tempel di dashboard Duitku POP. Domain harus publik; callback berupa form POST.
+                Khusus Duitku, terpisah dari QRIS. Tempel di dashboard Duitku. Domain harus publik; callback berupa form POST.
               </span>
             </label>
             <button type="button" className="btn w-fit" disabled={saveDuitku.isPending} onClick={() => saveDuitku.mutate()}>
