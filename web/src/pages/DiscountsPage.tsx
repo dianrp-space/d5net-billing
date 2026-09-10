@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { ListToolbar, matchesQuery } from "../ListToolbar";
+import { ListToolbar, matchesQuery, usePagination } from "../ListToolbar";
 import { IconPencil, IconTrash } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
@@ -139,6 +139,8 @@ export function DiscountsPage() {
       return matchesQuery(search, r.name, r.plan_name, r.audience, valueLabel(r));
     });
   }, [rows, search, statusFilter]);
+  const { page: discPage, setPage: setDiscPage, pageCount: discPageCount, pageItems: discPageItems } =
+    usePagination(filtered, 25);
 
   const customerHits = useMemo(() => {
     return customers.filter((c) =>
@@ -255,11 +257,14 @@ export function DiscountsPage() {
           },
         ]}
         total={filtered.length}
+        page={discPage}
+        pageCount={discPageCount}
+        onPageChange={setDiscPage}
       />
 
       <Table
         columns={["Nama", "Paket", "Diskon", "Periode", "Sasaran", "Status", "Aksi"]}
-        rows={filtered.map((r) => [
+        rows={discPageItems.map((r) => [
           r.name,
           r.plan_name || "Semua paket",
           valueLabel(r),

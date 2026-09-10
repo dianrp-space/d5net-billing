@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload, getToken } from "../api";
-import { ListToolbar, matchesQuery } from "../ListToolbar";
+import { ListToolbar, matchesQuery, usePagination } from "../ListToolbar";
 import { IconDownload, IconEye, IconPencil, IconTrash, IconUpload } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
@@ -133,6 +133,8 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
     }
     return matchesQuery(odpSearch, o.name, o.code);
   });
+  const { page: odpPage, setPage: setOdpPage, pageCount: odpPageCount, pageItems: odpPageItems } =
+    usePagination(filtered, 25);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["odps"] });
@@ -312,6 +314,9 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
         onSearchChange={setOdpSearch}
         searchPlaceholder="Nama atau kode ODP…"
         total={filtered.length}
+        page={odpPage}
+        pageCount={odpPageCount}
+        onPageChange={setOdpPage}
       >
         <span className="ml-auto flex flex-wrap items-center gap-1.5">
           <IconButton label="Export CSV" onClick={() => void exportCsv()}>
@@ -324,7 +329,7 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
       </ListToolbar>
       <Table
         columns={["Nama", "Kode", "Port", "Terpakai", "Sisa", "Koordinat", "Coverage", "Aksi"]}
-        rows={filtered.map((o) => [
+        rows={odpPageItems.map((o) => [
           o.name,
           o.code,
           o.port_count,

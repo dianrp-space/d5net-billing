@@ -10,6 +10,18 @@ export function useDebouncedValue<T>(value: T, delayMs = 300): T {
   return debounced;
 }
 
+/** Client-side pagination for already-loaded lists (slices into pages). */
+export function usePagination<T>(items: T[], pageSize = 25) {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  useEffect(() => {
+    if (page > pageCount - 1) setPage(pageCount - 1);
+  }, [page, pageCount]);
+  const pageItems = items.slice(safePage * pageSize, safePage * pageSize + pageSize);
+  return { page: safePage, setPage, pageCount, pageItems };
+}
+
 export type ListFilterOption = { value: string; label: string };
 
 export type ListFilterSpec = {

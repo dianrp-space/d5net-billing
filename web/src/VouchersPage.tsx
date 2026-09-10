@@ -4,7 +4,7 @@ import { api, apiDownload } from "./api";
 import { useAppDialog } from "./confirm";
 import { Badge } from "./components/ui/badge";
 import { IconDownload, IconEye, IconRefresh, IconTrash } from "./icons";
-import { ListToolbar, matchesQuery } from "./ListToolbar";
+import { ListToolbar, matchesQuery, usePagination } from "./ListToolbar";
 import { toastError, toastSuccess } from "./swal";
 import {
   Button,
@@ -123,11 +123,15 @@ export function VouchersPage() {
     () => batches.filter((b) => matchesQuery(batchSearch, b.name, b.plan_name, b.router_name)),
     [batches, batchSearch],
   );
+  const { page: batchPage, setPage: setBatchPage, pageCount: batchPageCount, pageItems: batchPageItems } =
+    usePagination(filteredBatches, 25);
   const plans = (Array.isArray(plansQ.data) ? plansQ.data : []).filter(
     (p) => !p.service_type || p.service_type === "hotspot",
   );
   const routers = (Array.isArray(routersQ.data) ? routersQ.data : []).filter((r) => r.is_active);
   const codes = Array.isArray(codesQ.data) ? codesQ.data : [];
+  const { page: codePage, setPage: setCodePage, pageCount: codePageCount, pageItems: codePageItems } =
+    usePagination(codes, 50);
 
   useEffect(() => {
     if (!detail) setCodeStatus("");
@@ -232,10 +236,13 @@ export function VouchersPage() {
         onSearchChange={setBatchSearch}
         searchPlaceholder="Nama batch, router, paket…"
         total={filteredBatches.length}
+        page={batchPage}
+        pageCount={batchPageCount}
+        onPageChange={setBatchPage}
       />
       <Table
         columns={["Batch", "Router", "Paket", "Harga", "Qty", "Sync", "Tersedia", "Terpakai", "Aksi"]}
-        rows={filteredBatches.map((b) => [
+        rows={batchPageItems.map((b) => [
           <div key={`${b.id}-n`}>
             <p className="font-medium">{b.name}</p>
             <p className="text-[10px] text-[var(--muted)]">{formatWhen(b.created_at)}</p>
@@ -486,7 +493,7 @@ export function VouchersPage() {
 
             <Table
               columns={["Kode", "Status", "Dipakai oleh", "Dipakai pada", "Kadaluarsa"]}
-              rows={codes.map((c) => [
+              rows={codePageItems.map((c) => [
                 <code key={`${c.id}-c`} className="text-xs font-semibold">
                   {c.code}
                 </code>,
@@ -498,6 +505,14 @@ export function VouchersPage() {
                 formatWhen(c.expires_at),
               ])}
             />
+            {codePageCount > 1 ? (
+              <ListToolbar
+                total={codes.length}
+                page={codePage}
+                pageCount={codePageCount}
+                onPageChange={setCodePage}
+              />
+            ) : null}
             {codesQ.isLoading ? <p className="text-sm text-[var(--muted)]">Memuat kode…</p> : null}
             {!codesQ.isLoading && codes.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">Tidak ada kode{codeStatus ? " dengan filter ini" : ""}.</p>

@@ -546,6 +546,8 @@ export function ResellersPage() {
   };
 
   const [commStatus, setCommStatus] = useState("");
+  const [commPage, setCommPage] = useState(0);
+  const commLimit = 25;
   const [newAmountInput, setNewAmountInput] = useState("");
   const [acqAmountInput, setAcqAmountInput] = useState("");
   const [form, setForm] = useState({ name: "", phone: "", commission_percent: 0, is_active: true });
@@ -561,10 +563,10 @@ export function ResellersPage() {
     queryFn: () => api<{ new_customer_amount: number; acquisition_amount: number }>("/api/settings/commission"),
   });
   const commissionsQ = useQuery({
-    queryKey: ["commissions", commStatus],
+    queryKey: ["commissions", commStatus, commPage],
     queryFn: () =>
       api<{ data: CommissionRow[]; total: number }>(
-        `/api/commissions?limit=50${commStatus ? `&status=${encodeURIComponent(commStatus)}` : ""}`,
+        `/api/commissions?limit=${commLimit}&offset=${commPage * commLimit}${commStatus ? `&status=${encodeURIComponent(commStatus)}` : ""}`,
       ),
   });
 
@@ -656,6 +658,8 @@ export function ResellersPage() {
       ),
     [commissions, commSearch],
   );
+  const commTotal = commissionsQ.data?.total ?? 0;
+  const commPageCount = Math.max(1, Math.ceil(commTotal / commLimit));
   const statusLabel: Record<string, string> = { pending: "Pending", paid: "Dibayar", void: "Void" };
 
   const now = new Date();
@@ -849,7 +853,10 @@ export function ResellersPage() {
               key: "status",
               label: "Status",
               value: commStatus,
-              onChange: setCommStatus,
+              onChange: (v) => {
+                setCommStatus(v);
+                setCommPage(0);
+              },
               options: [
                 { value: "pending", label: "Pending" },
                 { value: "paid", label: "Dibayar" },
@@ -857,7 +864,10 @@ export function ResellersPage() {
               ],
             },
           ]}
-          total={filteredCommissions.length}
+          total={commTotal}
+          page={commPage}
+          pageCount={commPageCount}
+          onPageChange={setCommPage}
         />
       </div>
       <Table

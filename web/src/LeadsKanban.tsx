@@ -27,7 +27,7 @@ import {
 import { IconPencil, IconTrash, IconUserCheck, IconWrench } from "./icons";
 import { canDispatchOps, type MePermissions } from "./permissions";
 import { toastError, toastSuccess } from "./swal";
-import { ListToolbar, matchesQuery } from "./ListToolbar";
+import { ListToolbar, matchesQuery, usePagination } from "./ListToolbar";
 import {
   Button,
   FormDialog,
@@ -359,6 +359,8 @@ export function LeadsPage() {
       }),
     [list, listStatus, leadSearch],
   );
+  const { page: leadPage, setPage: setLeadPage, pageCount: leadPageCount, pageItems: leadPageItems } =
+    usePagination(filteredList, 25);
 
   const commentsQ = useQuery({
     queryKey: ["lead-comments", detail?.id],
@@ -723,11 +725,14 @@ export function LeadsPage() {
               },
             ]}
             total={filteredList.length}
+            page={leadPage}
+            pageCount={leadPageCount}
+            onPageChange={setLeadPage}
           />
           <Table
             columns={["Nama", "Telepon", "Status", "Teknisi", "Atribusi", "Dibuat", "Aksi"]}
-            onRowClick={(i) => openDetail(filteredList[i])}
-            rows={filteredList.map((l) => [
+            onRowClick={(i) => openDetail(leadPageItems[i])}
+            rows={leadPageItems.map((l) => [
               <div key={`${l.id}-n`}>
                 <p className="font-medium">{l.full_name}</p>
                 {l.address ? <p className="line-clamp-1 text-xs text-[var(--muted)]">{l.address}</p> : null}

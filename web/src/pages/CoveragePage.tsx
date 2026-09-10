@@ -12,6 +12,7 @@ import {
   type Basemap,
 } from "../FtthMap";
 import { IconButton, Button, Input, Label, Section, Table } from "../ui";
+import { ListToolbar, usePagination } from "../ListToolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 
 type ClusterRow = {
@@ -215,6 +216,10 @@ export function CoveragePage({ canEdit }: { canEdit: boolean }) {
     () => odps.filter((o) => o.latitude != null && o.longitude != null),
     [odps],
   );
+  const { page: popPage, setPage: setPopPage, pageCount: popPageCount, pageItems: popPageItems } =
+    usePagination(popsWithCoords, 25);
+  const { page: covOdpPage, setPage: setCovOdpPage, pageCount: covOdpPageCount, pageItems: covOdpPageItems } =
+    usePagination(odpsWithCoords, 25);
   const coveredIds = useMemo(() => {
     const hits = checkQ.data?.hits ?? [];
     return new Set(hits.filter((h) => h.covered).map((h) => `${h.kind}:${h.id}`));
@@ -544,7 +549,7 @@ export function CoveragePage({ canEdit }: { canEdit: boolean }) {
       <h2 className="mb-2 mt-8 text-sm font-semibold">POP</h2>
       <Table
         columns={canEdit ? ["Nama", "Kode", "Koordinat", "Radius", "Aksi"] : ["Nama", "Kode", "Koordinat", "Radius"]}
-        rows={popsWithCoords.map((c) => {
+        rows={popPageItems.map((c) => {
           const cells: (string | number | ReactNode)[] = [
             c.name,
             c.code,
@@ -564,11 +569,14 @@ export function CoveragePage({ canEdit }: { canEdit: boolean }) {
           return cells;
         })}
       />
+      {popPageCount > 1 ? (
+        <ListToolbar total={popsWithCoords.length} page={popPage} pageCount={popPageCount} onPageChange={setPopPage} />
+      ) : null}
 
       <h2 className="mb-2 mt-8 text-sm font-semibold">ODP</h2>
       <Table
         columns={canEdit ? ["Nama", "Kode", "Sisa port", "Koordinat", "Radius", "Aksi"] : ["Nama", "Kode", "Sisa port", "Koordinat", "Radius"]}
-        rows={odpsWithCoords.map((o) => {
+        rows={covOdpPageItems.map((o) => {
           const cells: (string | number | ReactNode)[] = [
             o.name,
             o.code,
@@ -589,6 +597,14 @@ export function CoveragePage({ canEdit }: { canEdit: boolean }) {
           return cells;
         })}
       />
+      {covOdpPageCount > 1 ? (
+        <ListToolbar
+          total={odpsWithCoords.length}
+          page={covOdpPage}
+          pageCount={covOdpPageCount}
+          onPageChange={setCovOdpPage}
+        />
+      ) : null}
       {popsWithCoords.length === 0 && odpsWithCoords.length === 0 ? (
         <p className="mt-3 text-sm text-[var(--muted)]">
           Belum ada POP/ODP berkoordinat. Isi lat/long di Cluster / POP atau MAP FTTH.
