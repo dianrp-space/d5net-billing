@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { ListToolbar, matchesQuery } from "../ListToolbar";
@@ -22,6 +22,7 @@ import {
 } from "../ui";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function PlansPage() {
   const qc = useQueryClient();
@@ -181,7 +182,7 @@ export function PlansPage() {
     setPlanOpen(false);
     setOfferEditId(null);
     setOfferErr("");
-    setOfferForm({ plan_id: "", cluster_id: "", price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "" });
+    setOfferForm({ plan_id: "", cluster_id: offerClusterTab, price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "" });
     setOfferOpen(true);
   }
 
@@ -351,6 +352,7 @@ export function PlansPage() {
   const [planStatus, setPlanStatus] = useState("");
   const [planType, setPlanType] = useState("");
   const [offerSearch, setOfferSearch] = useState("");
+  const [offerClusterTab, setOfferClusterTab] = useState("");
   const filteredPlans = useMemo(
     () =>
       plans.filter((p) => {
@@ -363,11 +365,28 @@ export function PlansPage() {
   );
   const filteredOffers = useMemo(
     () =>
-      offers.filter((o) =>
-        matchesQuery(offerSearch, o.cluster_name, o.cluster_code, o.plan_name, o.plan_code, o.ip_pool_name),
-      ),
-    [offers, offerSearch],
+      offers.filter((o) => {
+        if (offerClusterTab && o.cluster_id !== offerClusterTab) return false;
+        return matchesQuery(offerSearch, o.plan_name, o.plan_code, o.ip_pool_name);
+      }),
+    [offers, offerSearch, offerClusterTab],
   );
+
+  useEffect(() => {
+    if (clusters.length === 0) {
+      if (offerClusterTab) setOfferClusterTab("");
+      return;
+    }
+    if (offerClusterTab && clusters.some((c) => c.id === offerClusterTab)) return;
+    setOfferClusterTab(clusters[0].id);
+  }, [clusters, offerClusterTab]);
+
+  function selectOfferClusterTab(id: string) {
+    setOfferClusterTab(id);
+    setOfferSearch("");
+  }
+
+  const activeOfferCluster = clusters.find((c) => c.id === offerClusterTab) || null;
   const pools = Array.isArray(poolsQ.data) ? poolsQ.data : [];
   const routers = Array.isArray(routersQ.data) ? routersQ.data : [];
   const clusterRouterIds = new Set(
@@ -520,50 +539,81 @@ export function PlansPage() {
           {syncMsg}
         </p>
       )}
-      <ListToolbar
-        search={offerSearch}
-        onSearchChange={setOfferSearch}
-        searchPlaceholder="Cluster, paket, pool…"
-        total={filteredOffers.length}
-      />
-      <Table
-        columns={["Cluster", "Paket", "Harga", "IP Pool", "DL (Mbps)", "Status", "Aksi"]}
-        rows={filteredOffers.map((o) => [
-          `${o.cluster_name} (${o.cluster_code})`,
-          `${o.plan_name} (${o.plan_code})`,
-          formatRp(o.price),
-          o.ip_pool_name || "— auto",
-          o.download_mbps,
-          o.is_active ? "aktif" : "nonaktif",
-          <span key="act" className="flex flex-wrap items-center gap-1.5">
-            <IconButton label="Edit harga offer" onClick={() => openEditOffer(o)}>
-              <IconPencil />
-            </IconButton>
-            <IconButton
-              label="Sync profile & harga ke router"
-              onClick={() => syncOffer.mutate(o)}
-              disabled={syncOffer.isPending}
-            >
-              <IconRefresh />
-            </IconButton>
-            <IconButton
-              label="Hapus offer"
-              danger
-              onClick={async () => {
-                const ok = await confirm({
-                  title: "Hapus offer",
-                  description: `Hapus offer ${o.plan_name} di ${o.cluster_name}?`,
-                  confirmLabel: "Hapus",
-                });
-                if (!ok) return;
-                removeOffer.mutate(o.id);
-              }}
-            >
-              <IconTrash />
-            </IconButton>
-          </span>,
-        ])}
-      />
+      {clusters.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">
+          Belum ada cluster. Buat Cluster/POP dulu agar harga per cluster bisa ditampilkan per tab.
+        </p>
+      ) : (
+        <>
+          <Tabs value={offerClusterTab} onValueChange={selectOfferClusterTab}>
+            <TabsList aria-label="Cluster / POP">
+              {clusters.map((c) => {
+                const count = offers.filter((o) => o.cluster_id === c.id).length;
+                return (
+                  <TabsTrigger key={c.id} value={c.id} title={`${c.name} (${c.code})`}>
+                    {c.name}
+                    <span className="rounded-full border border-[var(--border)] px-1.5 text-xs text-[var(--muted)]">
+                      {count}
+                    </span>
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+          </Tabs>
+          <p className="mb-4 mt-3 text-sm text-[var(--muted)]">
+            {activeOfferCluster ? (
+              <>
+                Harga jual paket di cluster <strong>{activeOfferCluster.name}</strong> ({activeOfferCluster.code}).
+              </>
+            ) : (
+              "Harga jual paket per cluster."
+            )}
+          </p>
+          <ListToolbar
+            search={offerSearch}
+            onSearchChange={setOfferSearch}
+            searchPlaceholder="Paket, pool…"
+            total={filteredOffers.length}
+          />
+          <Table
+            columns={["Paket", "Harga", "IP Pool", "DL (Mbps)", "Status", "Aksi"]}
+            rows={filteredOffers.map((o) => [
+              `${o.plan_name} (${o.plan_code})`,
+              formatRp(o.price),
+              o.ip_pool_name || "— auto",
+              o.download_mbps,
+              o.is_active ? "aktif" : "nonaktif",
+              <span key="act" className="flex flex-wrap items-center gap-1.5">
+                <IconButton label="Edit harga offer" onClick={() => openEditOffer(o)}>
+                  <IconPencil />
+                </IconButton>
+                <IconButton
+                  label="Sync profile & harga ke router"
+                  onClick={() => syncOffer.mutate(o)}
+                  disabled={syncOffer.isPending}
+                >
+                  <IconRefresh />
+                </IconButton>
+                <IconButton
+                  label="Hapus offer"
+                  danger
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: "Hapus offer",
+                      description: `Hapus offer ${o.plan_name} di ${o.cluster_name}?`,
+                      confirmLabel: "Hapus",
+                    });
+                    if (!ok) return;
+                    removeOffer.mutate(o.id);
+                  }}
+                >
+                  <IconTrash />
+                </IconButton>
+              </span>,
+            ])}
+          />
+        </>
+      )}
 
       <FormDialog open={planOpen} wide title={editId ? "Edit paket" : "Tambah paket"} onClose={closePlanForm}>
         <form
