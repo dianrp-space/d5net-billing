@@ -59,6 +59,7 @@ export function PlansPage() {
     download_mbps: number;
     ip_pool_id?: string | null;
     ip_pool_name?: string;
+    grace_days?: number | null;
   };
   type PlanForm = {
     name: string;
@@ -128,6 +129,7 @@ export function PlansPage() {
     is_active: true,
     sync_profiles: true,
     ip_pool_id: "",
+    grace_days: "",
   });
   const [offerEditId, setOfferEditId] = useState<string | null>(null);
   const [offerOpen, setOfferOpen] = useState(false);
@@ -182,7 +184,7 @@ export function PlansPage() {
     setPlanOpen(false);
     setOfferEditId(null);
     setOfferErr("");
-    setOfferForm({ plan_id: "", cluster_id: offerClusterTab, price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "" });
+    setOfferForm({ plan_id: "", cluster_id: offerClusterTab, price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "", grace_days: "" });
     setOfferOpen(true);
   }
 
@@ -197,6 +199,7 @@ export function PlansPage() {
       is_active: o.is_active,
       sync_profiles: false,
       ip_pool_id: o.ip_pool_id || "",
+      grace_days: o.grace_days != null ? String(o.grace_days) : "",
     });
     setOfferOpen(true);
   }
@@ -205,7 +208,7 @@ export function PlansPage() {
     setOfferOpen(false);
     setOfferEditId(null);
     setOfferErr("");
-    setOfferForm({ plan_id: "", cluster_id: "", price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "" });
+    setOfferForm({ plan_id: "", cluster_id: "", price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "", grace_days: "" });
   }
 
   const savePlan = useMutation({
@@ -271,6 +274,8 @@ export function PlansPage() {
   const upsertOffer = useMutation({
     mutationFn: async () => {
       const wantSync = offerForm.sync_profiles;
+      const graceDays =
+        offerForm.grace_days.trim() === "" ? null : Math.max(0, Math.floor(Number(offerForm.grace_days)));
       type OfferSaved = OfferRow & { id: string };
       let saved: OfferSaved;
       if (offerEditId) {
@@ -280,6 +285,7 @@ export function PlansPage() {
             price: offerForm.price,
             is_active: offerForm.is_active,
             ip_pool_id: offerForm.ip_pool_id || null,
+            grace_days: graceDays,
             sync_profiles: false,
           }),
         });
@@ -292,6 +298,7 @@ export function PlansPage() {
             price: offerForm.price,
             is_active: offerForm.is_active,
             ip_pool_id: offerForm.ip_pool_id || null,
+            grace_days: graceDays,
             sync_profiles: false,
           }),
         });
@@ -576,10 +583,11 @@ export function PlansPage() {
             total={filteredOffers.length}
           />
           <Table
-            columns={["Paket", "Harga", "IP Pool", "DL (Mbps)", "Status", "Aksi"]}
+            columns={["Paket", "Harga", "Jatuh tempo", "IP Pool", "DL (Mbps)", "Status", "Aksi"]}
             rows={filteredOffers.map((o) => [
               `${o.plan_name} (${o.plan_code})`,
               formatRp(o.price),
+              o.grace_days != null ? `${o.grace_days} hari` : "— paket",
               o.ip_pool_name || "— auto",
               o.download_mbps,
               o.is_active ? "aktif" : "nonaktif",
@@ -836,6 +844,21 @@ export function PlansPage() {
               onChange={(e) => setOfferForm({ ...offerForm, price: Number(e.target.value) })}
               required
             />
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <Label htmlFor="offer-grace">Jatuh tempo di cluster (hari)</Label>
+            <Input
+              id="offer-grace"
+              type="number"
+              min={0}
+              placeholder="Kosong = ikut paket"
+              value={offerForm.grace_days}
+              onChange={(e) => setOfferForm({ ...offerForm, grace_days: e.target.value })}
+            />
+            <p className="text-xs text-[var(--muted)]">
+              Hari setelah invoice terbit. Kosongkan untuk memakai jatuh tempo paket.
+            </p>
           </div>
 
           <div className="flex min-w-0 flex-col gap-1.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel-muted)]/40 p-3">

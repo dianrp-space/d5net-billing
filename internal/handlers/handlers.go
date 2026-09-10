@@ -1860,6 +1860,7 @@ func registerPlanOffers(api huma.API, d *Deps) {
 			Price     int64   `json:"price"`
 			IPPoolID  *xid.ID `json:"ip_pool_id,omitempty"`
 			IsActive  *bool   `json:"is_active,omitempty"`
+			GraceDays *int    `json:"grace_days,omitempty"`
 			Sync      bool    `json:"sync_profiles,omitempty"`
 		}
 	}) (*struct{ Body store.PlanClusterOffer }, error) {
@@ -1913,6 +1914,7 @@ func registerPlanOffers(api huma.API, d *Deps) {
 		o := &store.PlanClusterOffer{
 			TenantID: tid, PlanID: input.Body.PlanID, ClusterID: input.Body.ClusterID,
 			Price: input.Body.Price, IsActive: active, IPPoolID: input.Body.IPPoolID,
+			GraceDays: input.Body.GraceDays,
 		}
 		if err := d.Store.UpsertPlanOffer(ctx, o); err != nil {
 			return nil, httpx.Internal(err)
@@ -1933,10 +1935,11 @@ func registerPlanOffers(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			Price    int64   `json:"price"`
-			IsActive bool    `json:"is_active"`
-			IPPoolID *xid.ID `json:"ip_pool_id"`
-			Sync     bool    `json:"sync_profiles,omitempty"`
+			Price     int64   `json:"price"`
+			IsActive  bool    `json:"is_active"`
+			IPPoolID  *xid.ID `json:"ip_pool_id,omitempty"`
+			GraceDays *int    `json:"grace_days,omitempty"`
+			Sync      bool    `json:"sync_profiles,omitempty"`
 		}
 	}) (*struct{ Body store.PlanClusterOffer }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -1982,6 +1985,7 @@ func registerPlanOffers(api huma.API, d *Deps) {
 		o.Price = input.Body.Price
 		o.IsActive = input.Body.IsActive
 		o.IPPoolID = input.Body.IPPoolID
+		o.GraceDays = input.Body.GraceDays
 		if err := d.Store.UpdatePlanOffer(ctx, o); err != nil {
 			return nil, httpx.Internal(err)
 		}

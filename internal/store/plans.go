@@ -145,30 +145,20 @@ func (s *Store) ListPortalPlans(ctx context.Context, tenantID xid.ID, clusterID 
 		return nil, err
 	}
 	svc := strings.TrimSpace(strings.ToLower(serviceType))
-	var (
-		rows pgx.Rows
-		err  error
-	)
-	if clusterID != nil && !xid.IsNil(*clusterID) {
-		rows, err = s.Pool.Query(ctx, `
-			SELECT p.id, p.name, p.code, o.price, p.download_mbps, p.upload_mbps, p.service_type, p.billing_cycle
-			FROM plans p
-			JOIN plan_cluster_offers o ON o.plan_id = p.id AND o.cluster_id = $2 AND o.tenant_id = p.tenant_id AND o.is_active
-			WHERE p.tenant_id = $1 AND p.is_active AND p.portal_visible
-			  AND ($3 = '' OR p.service_type = $3)
-			  AND p.id <> $4
-			ORDER BY o.price, p.name
-		`, tenantID, *clusterID, svc, excludePlanID)
-	} else {
-		rows, err = s.Pool.Query(ctx, `
-			SELECT p.id, p.name, p.code, p.price, p.download_mbps, p.upload_mbps, p.service_type, p.billing_cycle
-			FROM plans p
-			WHERE p.tenant_id = $1 AND p.is_active AND p.portal_visible
-			  AND ($2 = '' OR p.service_type = $2)
-			  AND p.id <> $3
-			ORDER BY p.price, p.name
-		`, tenantID, svc, excludePlanID)
+	if clusterID == nil || xid.IsNil(*clusterID) {
+		// Portal shows only plans offered in the customer's cluster; a customer
+		// without a cluster has no offers to show.
+		return []PortalPlanOption{}, nil
 	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT p.id, p.name, p.code, o.price, p.download_mbps, p.upload_mbps, p.service_type, p.billing_cycle
+		FROM plans p
+		JOIN plan_cluster_offers o ON o.plan_id = p.id AND o.cluster_id = $2 AND o.tenant_id = p.tenant_id AND o.is_active
+		WHERE p.tenant_id = $1 AND p.is_active AND p.portal_visible
+		  AND ($3 = '' OR p.service_type = $3)
+		  AND p.id <> $4
+		ORDER BY o.price, p.name
+	`, tenantID, *clusterID, svc, excludePlanID)
 	if err != nil {
 		return nil, err
 	}

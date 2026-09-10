@@ -119,7 +119,8 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 		lateFee = ApplyLateFee(overdue, defaultLateFeePercent)
 	}
 
-	dueDate := time.Now().AddDate(0, 0, plan.GraceDays)
+	graceDays := e.store.ResolvePlanGraceDays(ctx, tenantID, plan.ID, cust.ClusterID, plan.GraceDays)
+	dueDate := time.Now().AddDate(0, 0, graceDays)
 	inv := &store.Invoice{
 		TenantID:       tenantID,
 		CustomerID:     sub.CustomerID,
@@ -411,6 +412,9 @@ func (e *Engine) ApplyPlanChange(ctx context.Context, tenantID, subscriptionID, 
 			return nil, nil, err
 		}
 		due := now.AddDate(0, 0, newPlan.GraceDays)
+		if cust, cerr := e.store.GetCustomer(ctx, tenantID, sub.CustomerID); cerr == nil && cust != nil {
+			due = now.AddDate(0, 0, e.store.ResolvePlanGraceDays(ctx, tenantID, newPlan.ID, cust.ClusterID, newPlan.GraceDays))
+		}
 		sid := subscriptionID
 		inv = &store.Invoice{
 			TenantID:       tenantID,
