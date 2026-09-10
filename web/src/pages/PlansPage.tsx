@@ -38,7 +38,7 @@ export function PlansPage() {
     billing_cycle?: string;
     profile_name?: string | null;
     isolir_profile?: string | null;
-    grace_days?: number;
+    due_day?: number | null;
     quota_gb?: number | null;
     limit_uptime?: string | null;
     shared_users?: number | null;
@@ -59,7 +59,7 @@ export function PlansPage() {
     download_mbps: number;
     ip_pool_id?: string | null;
     ip_pool_name?: string;
-    grace_days?: number | null;
+    due_day?: number | null;
   };
   type PlanForm = {
     name: string;
@@ -71,7 +71,7 @@ export function PlansPage() {
     billing_cycle: string;
     profile_name: string;
     isolir_profile: string;
-    grace_days: number;
+    due_day: string;
     quota_gb: string;
     limit_uptime: string;
     shared_users: string;
@@ -88,7 +88,7 @@ export function PlansPage() {
     billing_cycle: "monthly",
     profile_name: "",
     isolir_profile: "isolir",
-    grace_days: 3,
+    due_day: "",
     quota_gb: "",
     limit_uptime: "",
     shared_users: "",
@@ -129,7 +129,7 @@ export function PlansPage() {
     is_active: true,
     sync_profiles: true,
     ip_pool_id: "",
-    grace_days: "",
+    due_day: "",
   });
   const [offerEditId, setOfferEditId] = useState<string | null>(null);
   const [offerOpen, setOfferOpen] = useState(false);
@@ -163,7 +163,7 @@ export function PlansPage() {
       billing_cycle: p.billing_cycle || "monthly",
       profile_name: p.profile_name || "",
       isolir_profile: p.isolir_profile || "isolir",
-      grace_days: p.grace_days ?? 3,
+      due_day: p.due_day != null ? String(p.due_day) : "",
       quota_gb: p.quota_gb != null && p.quota_gb > 0 ? String(p.quota_gb) : "",
       limit_uptime: p.limit_uptime || "",
       shared_users: p.shared_users != null && p.shared_users > 0 ? String(p.shared_users) : "",
@@ -184,7 +184,7 @@ export function PlansPage() {
     setPlanOpen(false);
     setOfferEditId(null);
     setOfferErr("");
-    setOfferForm({ plan_id: "", cluster_id: offerClusterTab, price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "", grace_days: "" });
+    setOfferForm({ plan_id: "", cluster_id: offerClusterTab, price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "", due_day: "" });
     setOfferOpen(true);
   }
 
@@ -199,7 +199,7 @@ export function PlansPage() {
       is_active: o.is_active,
       sync_profiles: false,
       ip_pool_id: o.ip_pool_id || "",
-      grace_days: o.grace_days != null ? String(o.grace_days) : "",
+      due_day: o.due_day != null ? String(o.due_day) : "",
     });
     setOfferOpen(true);
   }
@@ -208,7 +208,7 @@ export function PlansPage() {
     setOfferOpen(false);
     setOfferEditId(null);
     setOfferErr("");
-    setOfferForm({ plan_id: "", cluster_id: "", price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "", grace_days: "" });
+    setOfferForm({ plan_id: "", cluster_id: "", price: 150000, is_active: true, sync_profiles: true, ip_pool_id: "", due_day: "" });
   }
 
   const savePlan = useMutation({
@@ -222,7 +222,8 @@ export function PlansPage() {
         upload_mbps: form.upload_mbps,
         profile_name: form.profile_name.trim() || form.code,
         isolir_profile: form.isolir_profile.trim() || "isolir",
-        grace_days: Math.max(0, Math.floor(Number(form.grace_days) || 0)),
+        due_day:
+          form.due_day.trim() === "" ? null : Math.max(1, Math.min(28, Math.floor(Number(form.due_day)))),
         tax_percent: 0,
         is_active: form.is_active,
         portal_visible: form.portal_visible,
@@ -274,8 +275,8 @@ export function PlansPage() {
   const upsertOffer = useMutation({
     mutationFn: async () => {
       const wantSync = offerForm.sync_profiles;
-      const graceDays =
-        offerForm.grace_days.trim() === "" ? null : Math.max(0, Math.floor(Number(offerForm.grace_days)));
+      const dueDay =
+        offerForm.due_day.trim() === "" ? null : Math.max(1, Math.min(28, Math.floor(Number(offerForm.due_day))));
       type OfferSaved = OfferRow & { id: string };
       let saved: OfferSaved;
       if (offerEditId) {
@@ -285,7 +286,7 @@ export function PlansPage() {
             price: offerForm.price,
             is_active: offerForm.is_active,
             ip_pool_id: offerForm.ip_pool_id || null,
-            grace_days: graceDays,
+            due_day: dueDay,
             sync_profiles: false,
           }),
         });
@@ -298,7 +299,7 @@ export function PlansPage() {
             price: offerForm.price,
             is_active: offerForm.is_active,
             ip_pool_id: offerForm.ip_pool_id || null,
-            grace_days: graceDays,
+            due_day: dueDay,
             sync_profiles: false,
           }),
         });
@@ -512,7 +513,7 @@ export function PlansPage() {
                 .join(" · ") || "—"
             : "—",
           p.profile_name || p.code,
-          `${p.grace_days ?? 3} hari`,
+          p.due_day != null ? `tgl ${p.due_day}` : "— default",
           p.service_type,
           p.portal_visible ? "tampil" : "—",
           p.is_active === false ? "nonaktif" : "aktif",
@@ -587,7 +588,7 @@ export function PlansPage() {
             rows={filteredOffers.map((o) => [
               `${o.plan_name} (${o.plan_code})`,
               formatRp(o.price),
-              o.grace_days != null ? `${o.grace_days} hari` : "— paket",
+              o.due_day != null ? `tgl ${o.due_day}` : "— paket",
               o.ip_pool_name || "— auto",
               o.download_mbps,
               o.is_active ? "aktif" : "nonaktif",
@@ -653,17 +654,19 @@ export function PlansPage() {
             onChange={(e) => setForm({ ...form, isolir_profile: e.target.value })}
           />
           <div className="grid gap-1.5">
-            <Label htmlFor="plan-grace">Jatuh tempo invoice (hari setelah terbit)</Label>
+            <Label htmlFor="plan-due">Tanggal jatuh tempo invoice (1–28)</Label>
             <Input
-              id="plan-grace"
+              id="plan-due"
               type="number"
-              min={0}
-              value={form.grace_days}
-              onChange={(e) => setForm({ ...form, grace_days: Number(e.target.value) })}
+              min={1}
+              max={28}
+              placeholder="Kosong = ikut pengaturan umum"
+              value={form.due_day}
+              onChange={(e) => setForm({ ...form, due_day: e.target.value })}
             />
             <p className="text-xs text-[var(--muted)]">
-              Invoice baru jatuh tempo N hari setelah terbit. Masa tenggang isolir setelah jatuh tempo diatur di
-              Pengaturan → Umum atau Cronjob.
+              Tanggal kalender jatuh tempo invoice paket ini. Kosongkan untuk memakai tanggal dari Pengaturan → Umum.
+              Masa tenggang isolir diatur terpisah.
             </p>
           </div>
           <div className="grid gap-1.5">
@@ -847,17 +850,18 @@ export function PlansPage() {
           </div>
 
           <div className="flex min-w-0 flex-col gap-1.5">
-            <Label htmlFor="offer-grace">Jatuh tempo di cluster (hari)</Label>
+            <Label htmlFor="offer-due">Tanggal jatuh tempo di cluster (1–28)</Label>
             <Input
-              id="offer-grace"
+              id="offer-due"
               type="number"
-              min={0}
+              min={1}
+              max={28}
               placeholder="Kosong = ikut paket"
-              value={offerForm.grace_days}
-              onChange={(e) => setOfferForm({ ...offerForm, grace_days: e.target.value })}
+              value={offerForm.due_day}
+              onChange={(e) => setOfferForm({ ...offerForm, due_day: e.target.value })}
             />
             <p className="text-xs text-[var(--muted)]">
-              Hari setelah invoice terbit. Kosongkan untuk memakai jatuh tempo paket.
+              Tanggal kalender jatuh tempo di cluster ini. Kosongkan untuk memakai jatuh tempo paket.
             </p>
           </div>
 

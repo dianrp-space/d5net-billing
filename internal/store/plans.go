@@ -27,7 +27,8 @@ type Plan struct {
 	SharedUsers   *int    `json:"shared_users,omitempty"`
 	ProfileName   *string `json:"profile_name,omitempty"`
 	IsolirProfile *string `json:"isolir_profile,omitempty"`
-	GraceDays     int     `json:"grace_days"`
+	// DueDay overrides the tenant invoice due day for this plan (nil = tenant default).
+	DueDay        *int    `json:"due_day,omitempty"`
 	TaxPercent    float64 `json:"tax_percent"`
 	IsActive      bool    `json:"is_active"`
 	PortalVisible bool    `json:"portal_visible"`
@@ -39,7 +40,7 @@ func (s *Store) ListPlans(ctx context.Context, tenantID xid.ID) ([]Plan, error) 
 	}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id, tenant_id, name, code, service_type, price, billing_cycle, download_mbps, upload_mbps,
-		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active, portal_visible
+		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, due_day, tax_percent, is_active, portal_visible
 		FROM plans WHERE tenant_id = $1 ORDER BY name
 	`, tenantID)
 	if err != nil {
@@ -51,7 +52,7 @@ func (s *Store) ListPlans(ctx context.Context, tenantID xid.ID) ([]Plan, error) 
 		var p Plan
 		if err := rows.Scan(&p.ID, &p.TenantID, &p.Name, &p.Code, &p.ServiceType, &p.Price, &p.BillingCycle,
 			&p.DownloadMbps, &p.UploadMbps, &p.QuotaGB, &p.LimitUptime, &p.SharedUsers,
-			&p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive, &p.PortalVisible); err != nil {
+			&p.ProfileName, &p.IsolirProfile, &p.DueDay, &p.TaxPercent, &p.IsActive, &p.PortalVisible); err != nil {
 			return nil, err
 		}
 		list = append(list, p)
@@ -65,13 +66,13 @@ func (s *Store) GetPlan(ctx context.Context, tenantID xid.ID, id xid.ID) (*Plan,
 	}
 	row := s.Pool.QueryRow(ctx, `
 		SELECT id, tenant_id, name, code, service_type, price, billing_cycle, download_mbps, upload_mbps,
-		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active, portal_visible
+		       quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, due_day, tax_percent, is_active, portal_visible
 		FROM plans WHERE tenant_id = $1 AND id = $2
 	`, tenantID, id)
 	var p Plan
 	err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Code, &p.ServiceType, &p.Price, &p.BillingCycle,
 		&p.DownloadMbps, &p.UploadMbps, &p.QuotaGB, &p.LimitUptime, &p.SharedUsers,
-		&p.ProfileName, &p.IsolirProfile, &p.GraceDays, &p.TaxPercent, &p.IsActive, &p.PortalVisible)
+		&p.ProfileName, &p.IsolirProfile, &p.DueDay, &p.TaxPercent, &p.IsActive, &p.PortalVisible)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -84,10 +85,10 @@ func (s *Store) CreatePlan(ctx context.Context, p *Plan) error {
 	}
 	return s.Pool.QueryRow(ctx, `
 		INSERT INTO plans (tenant_id, name, code, service_type, price, billing_cycle, download_mbps, upload_mbps,
-		                   quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, grace_days, tax_percent, is_active, portal_visible)
+		                   quota_gb, limit_uptime, shared_users, profile_name, isolir_profile, due_day, tax_percent, is_active, portal_visible)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id
 	`, p.TenantID, p.Name, p.Code, p.ServiceType, p.Price, p.BillingCycle, p.DownloadMbps, p.UploadMbps,
-		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive, p.PortalVisible).Scan(&p.ID)
+		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.DueDay, p.TaxPercent, p.IsActive, p.PortalVisible).Scan(&p.ID)
 }
 
 func (s *Store) UpdatePlan(ctx context.Context, p *Plan) error {
@@ -97,10 +98,10 @@ func (s *Store) UpdatePlan(ctx context.Context, p *Plan) error {
 	tag, err := s.Pool.Exec(ctx, `
 		UPDATE plans SET name=$3, service_type=$4, price=$5, billing_cycle=$6, download_mbps=$7, upload_mbps=$8,
 		                 quota_gb=$9, limit_uptime=$10, shared_users=$11, profile_name=$12, isolir_profile=$13,
-		                 grace_days=$14, tax_percent=$15, is_active=$16, portal_visible=$17, updated_at=NOW()
+		                 due_day=$14, tax_percent=$15, is_active=$16, portal_visible=$17, updated_at=NOW()
 		WHERE tenant_id=$1 AND id=$2
 	`, p.TenantID, p.ID, p.Name, p.ServiceType, p.Price, p.BillingCycle, p.DownloadMbps, p.UploadMbps,
-		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.GraceDays, p.TaxPercent, p.IsActive, p.PortalVisible)
+		p.QuotaGB, p.LimitUptime, p.SharedUsers, p.ProfileName, p.IsolirProfile, p.DueDay, p.TaxPercent, p.IsActive, p.PortalVisible)
 	if err != nil {
 		return err
 	}

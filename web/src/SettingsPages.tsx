@@ -85,6 +85,12 @@ function clampCycleStartDay(n: number | undefined) {
   return Math.min(28, v);
 }
 
+function clampDueDay(n: number | undefined) {
+  const v = Math.floor(Number(n) || 10);
+  if (!Number.isFinite(v) || v < 1) return 10;
+  return Math.min(28, v);
+}
+
 const PERM_PRESETS: { key: string; label: string; hint: string }[] = [
   { key: "*", label: "Semua akses (*)", hint: "Akses penuh ke semua menu" },
   { key: "dashboard", label: "Dashboard", hint: "Halaman dashboard" },
@@ -110,6 +116,7 @@ export function GeneralSettingsPage() {
           default_tax_percent: number;
           isolir_grace_days?: number;
           billing_cycle_start_day?: number;
+          invoice_due_day?: number;
           primary_color?: string;
         }
       >("/api/settings/branding"),
@@ -119,6 +126,7 @@ export function GeneralSettingsPage() {
   const [taxPercent, setTaxPercent] = useState(0);
   const [isolirGraceDays, setIsolirGraceDays] = useState(0);
   const [cycleStartDay, setCycleStartDay] = useState(1);
+  const [dueDay, setDueDay] = useState(10);
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY);
   const [err, setErr] = useState("");
 
@@ -129,6 +137,7 @@ export function GeneralSettingsPage() {
     setTaxPercent(Number(q.data.default_tax_percent) || 0);
     setIsolirGraceDays(clampIsolirGrace(q.data.isolir_grace_days));
     setCycleStartDay(clampCycleStartDay(q.data.billing_cycle_start_day));
+    setDueDay(clampDueDay(q.data.invoice_due_day));
     setPrimaryColor(parseHexColor(q.data.primary_color) || DEFAULT_PRIMARY);
   }, [q.data]);
 
@@ -139,6 +148,7 @@ export function GeneralSettingsPage() {
       default_tax_percent: Math.max(0, Number(taxPercent) || 0),
       isolir_grace_days: clampIsolirGrace(isolirGraceDays),
       billing_cycle_start_day: clampCycleStartDay(cycleStartDay),
+      invoice_due_day: clampDueDay(dueDay),
       primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
       ...extra,
     };
@@ -294,6 +304,23 @@ export function GeneralSettingsPage() {
               <span className="text-xs text-[var(--muted)]">
                 Hari kalender (1–28) yang jadi jangkar prorata. Aktivasi baru default ke tanggal ini (bisa diubah
                 manual per secret). Contoh: 1 = awal bulan.
+              </span>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Tanggal jatuh tempo invoice (tanggal)</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={28}
+                step={1}
+                value={dueDay}
+                onChange={(e) => setDueDay(clampDueDay(Number(e.target.value)))}
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Tanggal kalender (1–28) jatuh tempo semua invoice. Paket / harga per cluster bisa override. Contoh: 10 =
+                jatuh tempo tiap tanggal 10.
               </span>
             </label>
 

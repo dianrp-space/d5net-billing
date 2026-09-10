@@ -22,6 +22,9 @@ type GeneralSettings struct {
 	IsolirGraceDays int `json:"isolir_grace_days"`
 	// BillingCycleStartDay is the calendar day (1–28) prorata activations lock to.
 	BillingCycleStartDay int `json:"billing_cycle_start_day"`
+	// InvoiceDueDay is the tenant default calendar day (1–28) invoices fall due.
+	// Plans and cluster offers may override it.
+	InvoiceDueDay int `json:"invoice_due_day"`
 }
 
 func DefaultGeneralSettings() GeneralSettings {
@@ -30,7 +33,23 @@ func DefaultGeneralSettings() GeneralSettings {
 		DefaultTaxPercent:    0,
 		PrimaryColor:         "",
 		BillingCycleStartDay: 1,
+		InvoiceDueDay:        10,
 	}
+}
+
+// ClampDueDay bounds a calendar due day to 1–28. Unset/zero falls back to def
+// (or 1 when def is itself out of range); values above 28 cap at 28.
+func ClampDueDay(day, def int) int {
+	if day < 1 {
+		if def < 1 || def > 28 {
+			return 1
+		}
+		return def
+	}
+	if day > 28 {
+		return 28
+	}
+	return day
 }
 
 func NormalizeHexColor(s string) string {
@@ -76,6 +95,7 @@ func NormalizeGeneralSettings(g GeneralSettings) GeneralSettings {
 	if g.BillingCycleStartDay > 28 {
 		g.BillingCycleStartDay = 28
 	}
+	g.InvoiceDueDay = ClampDueDay(g.InvoiceDueDay, def.InvoiceDueDay)
 	return g
 }
 
@@ -138,4 +158,13 @@ func (s *Store) BillingCycleStartDay(ctx context.Context, tenantID xid.ID) int {
 		return 1
 	}
 	return g.BillingCycleStartDay
+}
+
+// InvoiceDueDay is the tenant default calendar day (1–28) invoices fall due.
+func (s *Store) InvoiceDueDay(ctx context.Context, tenantID xid.ID) int {
+	g, err := s.GetGeneralSettings(ctx, tenantID)
+	if err != nil {
+		return DefaultGeneralSettings().InvoiceDueDay
+	}
+	return ClampDueDay(g.InvoiceDueDay, DefaultGeneralSettings().InvoiceDueDay)
 }

@@ -1641,7 +1641,7 @@ func registerPlans(api huma.API, d *Deps) {
 			SharedUsers   *int     `json:"shared_users,omitempty"`
 			ProfileName   *string  `json:"profile_name,omitempty"`
 			IsolirProfile *string  `json:"isolir_profile,omitempty"`
-			GraceDays     *int     `json:"grace_days,omitempty"`
+			DueDay        *int     `json:"due_day,omitempty"`
 			TaxPercent    *float64 `json:"tax_percent,omitempty"`
 			IsActive      *bool    `json:"is_active,omitempty"`
 			PortalVisible *bool    `json:"portal_visible,omitempty"`
@@ -1685,8 +1685,9 @@ func registerPlans(api huma.API, d *Deps) {
 		if p.QuotaGB != nil && *p.QuotaGB <= 0 {
 			p.QuotaGB = nil
 		}
-		if input.Body.GraceDays != nil {
-			p.GraceDays = *input.Body.GraceDays
+		if input.Body.DueDay != nil {
+			dd := store.ClampDueDay(*input.Body.DueDay, 1)
+			p.DueDay = &dd
 		}
 		if input.Body.TaxPercent != nil {
 			p.TaxPercent = *input.Body.TaxPercent
@@ -1724,7 +1725,7 @@ func registerPlans(api huma.API, d *Deps) {
 			SharedUsers   *int     `json:"shared_users,omitempty"`
 			ProfileName   *string  `json:"profile_name,omitempty"`
 			IsolirProfile *string  `json:"isolir_profile,omitempty"`
-			GraceDays     *int     `json:"grace_days,omitempty"`
+			DueDay        *int     `json:"due_day,omitempty"`
 			TaxPercent    *float64 `json:"tax_percent,omitempty"`
 			IsActive      *bool    `json:"is_active,omitempty"`
 			PortalVisible *bool    `json:"portal_visible,omitempty"`
@@ -1782,8 +1783,11 @@ func registerPlans(api huma.API, d *Deps) {
 		if input.Body.IsolirProfile != nil {
 			existing.IsolirProfile = input.Body.IsolirProfile
 		}
-		if input.Body.GraceDays != nil {
-			existing.GraceDays = *input.Body.GraceDays
+		if input.Body.DueDay != nil {
+			dd := store.ClampDueDay(*input.Body.DueDay, 1)
+			existing.DueDay = &dd
+		} else {
+			existing.DueDay = nil
 		}
 		if input.Body.TaxPercent != nil {
 			existing.TaxPercent = *input.Body.TaxPercent
@@ -1860,7 +1864,7 @@ func registerPlanOffers(api huma.API, d *Deps) {
 			Price     int64   `json:"price"`
 			IPPoolID  *xid.ID `json:"ip_pool_id,omitempty"`
 			IsActive  *bool   `json:"is_active,omitempty"`
-			GraceDays *int    `json:"grace_days,omitempty"`
+			DueDay    *int    `json:"due_day,omitempty"`
 			Sync      bool    `json:"sync_profiles,omitempty"`
 		}
 	}) (*struct{ Body store.PlanClusterOffer }, error) {
@@ -1914,7 +1918,7 @@ func registerPlanOffers(api huma.API, d *Deps) {
 		o := &store.PlanClusterOffer{
 			TenantID: tid, PlanID: input.Body.PlanID, ClusterID: input.Body.ClusterID,
 			Price: input.Body.Price, IsActive: active, IPPoolID: input.Body.IPPoolID,
-			GraceDays: input.Body.GraceDays,
+			DueDay: input.Body.DueDay,
 		}
 		if err := d.Store.UpsertPlanOffer(ctx, o); err != nil {
 			return nil, httpx.Internal(err)
@@ -1935,11 +1939,11 @@ func registerPlanOffers(api huma.API, d *Deps) {
 	}, func(ctx context.Context, input *struct {
 		ID   xid.ID `path:"id"`
 		Body struct {
-			Price     int64   `json:"price"`
-			IsActive  bool    `json:"is_active"`
-			IPPoolID  *xid.ID `json:"ip_pool_id,omitempty"`
-			GraceDays *int    `json:"grace_days,omitempty"`
-			Sync      bool    `json:"sync_profiles,omitempty"`
+			Price    int64   `json:"price"`
+			IsActive bool    `json:"is_active"`
+			IPPoolID *xid.ID `json:"ip_pool_id,omitempty"`
+			DueDay   *int    `json:"due_day,omitempty"`
+			Sync     bool    `json:"sync_profiles,omitempty"`
 		}
 	}) (*struct{ Body store.PlanClusterOffer }, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -1985,7 +1989,7 @@ func registerPlanOffers(api huma.API, d *Deps) {
 		o.Price = input.Body.Price
 		o.IsActive = input.Body.IsActive
 		o.IPPoolID = input.Body.IPPoolID
-		o.GraceDays = input.Body.GraceDays
+		o.DueDay = input.Body.DueDay
 		if err := d.Store.UpdatePlanOffer(ctx, o); err != nil {
 			return nil, httpx.Internal(err)
 		}

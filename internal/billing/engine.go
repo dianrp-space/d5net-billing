@@ -119,8 +119,8 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 		lateFee = ApplyLateFee(overdue, defaultLateFeePercent)
 	}
 
-	graceDays := e.store.ResolvePlanGraceDays(ctx, tenantID, plan.ID, cust.ClusterID, plan.GraceDays)
-	dueDate := time.Now().AddDate(0, 0, graceDays)
+	dueDay := e.store.ResolvePlanDueDay(ctx, tenantID, plan.ID, cust.ClusterID, plan.DueDay)
+	dueDate := NextDueDate(time.Now(), dueDay)
 	inv := &store.Invoice{
 		TenantID:       tenantID,
 		CustomerID:     sub.CustomerID,
@@ -203,6 +203,26 @@ func NextCycleAnchor(from time.Time, day int) time.Time {
 	candidate := time.Date(from.Year(), from.Month(), day, 12, 0, 0, 0, loc)
 	if candidate.After(from) {
 		return candidate
+	}
+	return time.Date(from.Year(), from.Month()+1, day, 12, 0, 0, 0, loc)
+}
+
+// NextDueDate is the next occurrence of calendar day (1–28) on or after from.
+// Issuing an invoice on the due day itself returns that same day.
+func NextDueDate(from time.Time, day int) time.Time {
+	if day < 1 {
+		day = 1
+	}
+	if day > 28 {
+		day = 28
+	}
+	loc := from.Location()
+	if loc == nil {
+		loc = time.Local
+	}
+	from = time.Date(from.Year(), from.Month(), from.Day(), 12, 0, 0, 0, loc)
+	if from.Day() <= day {
+		return time.Date(from.Year(), from.Month(), day, 12, 0, 0, 0, loc)
 	}
 	return time.Date(from.Year(), from.Month()+1, day, 12, 0, 0, 0, loc)
 }
@@ -411,10 +431,11 @@ func (e *Engine) ApplyPlanChange(ctx context.Context, tenantID, subscriptionID, 
 		if err != nil {
 			return nil, nil, err
 		}
-		due := now.AddDate(0, 0, newPlan.GraceDays)
+		dueDay := e.store.InvoiceDueDay(ctx, tenantID)
 		if cust, cerr := e.store.GetCustomer(ctx, tenantID, sub.CustomerID); cerr == nil && cust != nil {
-			due = now.AddDate(0, 0, e.store.ResolvePlanGraceDays(ctx, tenantID, newPlan.ID, cust.ClusterID, newPlan.GraceDays))
+			dueDay = e.store.ResolvePlanDueDay(ctx, tenantID, newPlan.ID, cust.ClusterID, newPlan.DueDay)
 		}
+		due := NextDueDate(now, dueDay)
 		sid := subscriptionID
 		inv = &store.Invoice{
 			TenantID:       tenantID,

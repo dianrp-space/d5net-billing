@@ -26,6 +26,25 @@ func TestNextCycleAnchor(t *testing.T) {
 	}
 }
 
+func TestNextDueDate(t *testing.T) {
+	loc := time.FixedZone("WIB", 7*3600)
+	// Issued before the due day → same month.
+	jan5 := time.Date(2026, 1, 5, 9, 0, 0, 0, loc)
+	if got := NextDueDate(jan5, 10); !got.Equal(time.Date(2026, 1, 10, 12, 0, 0, 0, loc)) {
+		t.Fatalf("before = %s", got)
+	}
+	// Issued on the due day → that same day.
+	jan10 := time.Date(2026, 1, 10, 0, 0, 0, 0, loc)
+	if got := NextDueDate(jan10, 10); !got.Equal(time.Date(2026, 1, 10, 12, 0, 0, 0, loc)) {
+		t.Fatalf("on-day = %s", got)
+	}
+	// Issued after the due day → next month.
+	jan20 := time.Date(2026, 1, 20, 9, 0, 0, 0, loc)
+	if got := NextDueDate(jan20, 10); !got.Equal(time.Date(2026, 2, 10, 12, 0, 0, 0, loc)) {
+		t.Fatalf("after = %s", got)
+	}
+}
+
 func TestProrateAmount(t *testing.T) {
 	if ProrateAmount(300_000, 15, 30) != 150_000 {
 		t.Fatal("half month")

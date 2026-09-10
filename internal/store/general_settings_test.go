@@ -47,3 +47,30 @@ func TestNormalizeGeneralSettingsPrimaryColor(t *testing.T) {
 		t.Fatalf("primary = %q", g.PrimaryColor)
 	}
 }
+
+func TestNormalizeGeneralSettingsInvoiceDueDay(t *testing.T) {
+	if got := NormalizeGeneralSettings(GeneralSettings{}).InvoiceDueDay; got != 10 {
+		t.Fatalf("default = %d", got)
+	}
+	if got := NormalizeGeneralSettings(GeneralSettings{InvoiceDueDay: 25}).InvoiceDueDay; got != 25 {
+		t.Fatalf("ok = %d", got)
+	}
+	if got := NormalizeGeneralSettings(GeneralSettings{InvoiceDueDay: 31}).InvoiceDueDay; got != 28 {
+		t.Fatalf("cap = %d", got)
+	}
+}
+
+func TestClampDueDay(t *testing.T) {
+	if got := ClampDueDay(0, 10); got != 10 {
+		t.Fatalf("zero -> def = %d", got)
+	}
+	if got := ClampDueDay(15, 10); got != 15 {
+		t.Fatalf("ok = %d", got)
+	}
+	if got := ClampDueDay(31, 10); got != 28 {
+		t.Fatalf("cap = %d", got)
+	}
+	if got := ClampDueDay(0, 0); got != 1 {
+		t.Fatalf("no def = %d", got)
+	}
+}
