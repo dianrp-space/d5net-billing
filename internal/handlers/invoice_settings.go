@@ -22,6 +22,7 @@ func registerInvoiceSettings(api huma.API, d *Deps) {
 			Settings       store.InvoiceSettings `json:"settings"`
 			DefaultCompany string                `json:"default_company"`
 			LogoURL        string                `json:"logo_url,omitempty"`
+			TenantSlug     string                `json:"tenant_slug,omitempty"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -37,11 +38,15 @@ func registerInvoiceSettings(api huma.API, d *Deps) {
 				Settings       store.InvoiceSettings `json:"settings"`
 				DefaultCompany string                `json:"default_company"`
 				LogoURL        string                `json:"logo_url,omitempty"`
+				TenantSlug     string                `json:"tenant_slug,omitempty"`
 			}
 		}{}
 		out.Body.Settings = cfg
 		out.Body.DefaultCompany = fallbackCompanyName(ctx, d, tid)
 		out.Body.LogoURL = tenantLogoURL(ctx, d, tid)
+		if ten, terr := d.Store.GetTenant(ctx, tid); terr == nil && ten != nil {
+			out.Body.TenantSlug = ten.Slug
+		}
 		return out, nil
 	})
 

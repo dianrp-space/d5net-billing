@@ -429,7 +429,7 @@ export function InvoiceSettingsPage() {
   const q = useQuery({
     queryKey: ["settings-invoice"],
     queryFn: () =>
-      api<{ settings: InvoiceSettingsData; default_company: string; logo_url?: string | null }>(
+      api<{ settings: InvoiceSettingsData; default_company: string; logo_url?: string | null; tenant_slug?: string }>(
         "/api/settings/invoice",
       ),
   });
@@ -549,7 +549,12 @@ export function InvoiceSettingsPage() {
 
           <div className="grid gap-2 xl:sticky xl:top-4">
             <p className="text-sm font-medium">Pratinjau invoice</p>
-            <InvoiceFormPreview form={form} defaultCompany={defaultCompany} logoUrl={logoUrl} />
+            <InvoiceFormPreview
+              form={form}
+              defaultCompany={defaultCompany}
+              logoUrl={logoUrl}
+              tenantSlug={q.data?.tenant_slug}
+            />
             <p className="text-xs text-[var(--muted)]">
               Contoh dengan data dummy. Watermark LUNAS hanya muncul otomatis pada invoice yang sudah dibayar.
             </p>
@@ -580,10 +585,12 @@ function InvoiceFormPreview({
   form,
   defaultCompany,
   logoUrl,
+  tenantSlug,
 }: {
   form: InvoiceSettingsData;
   defaultCompany: string;
   logoUrl?: string;
+  tenantSlug?: string;
 }) {
   const [paidPreview, setPaidPreview] = useState(false);
   const company = form.company_name.trim() || defaultCompany || "Nama Perusahaan";
@@ -591,6 +598,20 @@ function InvoiceFormPreview({
   const contact = [form.phone.trim() && `Telp: ${form.phone.trim()}`, form.email.trim()].filter(Boolean);
   const payLines = previewLines(form.payment_instructions);
   const footLines = previewLines(form.footer_note);
+
+  // Mirror store.FormatInvoiceNumber: INV-<slug>-<kode pelanggan>-<mmyyyy>-<5 char>.
+  const slug =
+    (tenantSlug || "tenant")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 20) || "tenant";
+  const now = new Date();
+  const period = `${String(now.getMonth() + 1).padStart(2, "0")}${now.getFullYear()}`;
+  const invoiceNo = `INV-${slug}-CUST-001-${period}-A3F9K`;
+  const fmtDate = (d: Date) => d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+  const issuedAt = fmtDate(new Date(now.getFullYear(), now.getMonth(), 1));
+  const dueAt = fmtDate(new Date(now.getFullYear(), now.getMonth(), 8));
 
   return (
     <div className="grid gap-2">
@@ -638,9 +659,9 @@ function InvoiceFormPreview({
           </div>
           <div className="shrink-0 text-right">
             <p className="text-xl font-bold tracking-wide text-slate-900">INVOICE</p>
-            <p className="text-[11px] text-slate-500">No: INV-2026-0001</p>
-            <p className="text-[11px] text-slate-500">Terbit: 01 Sep 2026</p>
-            <p className="text-[11px] text-slate-500">Jatuh tempo: 08 Sep 2026</p>
+            <p className="text-[11px] text-slate-500">No: {invoiceNo}</p>
+            <p className="text-[11px] text-slate-500">Terbit: {issuedAt}</p>
+            <p className="text-[11px] text-slate-500">Jatuh tempo: {dueAt}</p>
             <p className="text-[11px] font-semibold text-slate-700">
               Status: {paidPreview ? "LUNAS" : "BELUM DIBAYAR"}
             </p>
