@@ -180,9 +180,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 		y -= 15
 	}
 	drawTotal("Subtotal", rupiah(inv.Subtotal), false)
-	if inv.TaxAmount > 0 {
-		drawTotal("Pajak", rupiah(inv.TaxAmount), false)
-	}
+	drawTotal("Pajak", rupiah(inv.TaxAmount), false)
 	if inv.DiscountAmount > 0 {
 		drawTotal("Diskon", "-"+rupiah(inv.DiscountAmount), false)
 	}

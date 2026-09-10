@@ -129,6 +129,24 @@ func TestRenderPDFCropsEmptyA4(t *testing.T) {
 	}
 }
 
+func TestRenderPDFAlwaysShowsTax(t *testing.T) {
+	inv := &store.Invoice{
+		InvoiceNumber: "INV-TAX0",
+		CustomerName:  "Budi",
+		Subtotal:      150000,
+		TaxAmount:     0,
+		TotalAmount:   150000,
+		Status:        "issued",
+		DueDate:       time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC),
+	}
+	out := RenderPDF(inv, []store.InvoiceItem{
+		{Description: "Paket 30Mbps", Quantity: 1, UnitPrice: 150000, Amount: 150000},
+	}, RenderOptions{FallbackCompany: "ISP"})
+	if !bytes.Contains(out, []byte("(Pajak)")) {
+		t.Fatal("tax line must render even when TaxAmount is 0")
+	}
+}
+
 func TestRupiahGrouping(t *testing.T) {
 	cases := map[int64]string{
 		0:       "Rp 0",
