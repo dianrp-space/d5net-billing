@@ -13,7 +13,9 @@ import (
 
 	"github.com/dianrp/drp-billing/internal/xid"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -21,6 +23,15 @@ import (
 	"google.golang.org/protobuf/proto"
 	_ "modernc.org/sqlite"
 )
+
+// WhatsApp validates the companion platform/OS when linking. Without these
+// device props the QR/code pairing is rejected with "try again later", so we
+// advertise a plain Chrome-on-Windows companion (same as the reference bot).
+func init() {
+	version := store.GetWAVersion()
+	store.SetOSInfo("Windows", version)
+	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_CHROME.Enum()
+}
 
 // Status is the public session state for a tenant.
 type Status struct {
@@ -45,6 +56,19 @@ type session struct {
 	qrWatch   bool
 	pairCode  string
 	pairPhone string
+	loginMode string
+}
+
+// markConnected clears pairing state once the device is authenticated.
+func (s *session) markConnected() {
+	s.mu.Lock()
+	s.qrCode = ""
+	s.qrEvent = "success"
+	s.qrErr = ""
+	s.qrWatch = false
+	s.pairCode = ""
+	s.pairPhone = ""
+	s.mu.Unlock()
 }
 
 // Manager holds per-tenant whatsmeow clients (sqlite session files, no CGO).
@@ -95,6 +119,10 @@ func (m *Manager) getOrCreate(ctx context.Context, tenantID xid.ID) (*session, e
 	s := &session{client: client, container: container}
 	client.AddEventHandler(func(evt any) {
 		switch evt.(type) {
+		case *events.Connected:
+			if s.client.Store.ID != nil {
+				s.markConnected()
+			}
 		case *events.LoggedOut:
 			s.mu.Lock()
 			s.qrCode = ""
@@ -103,6 +131,7 @@ func (m *Manager) getOrCreate(ctx context.Context, tenantID xid.ID) (*session, e
 			s.qrWatch = false
 			s.pairCode = ""
 			s.pairPhone = ""
+			s.loginMode = ""
 			s.mu.Unlock()
 		}
 	})
@@ -124,30 +153,45 @@ func (m *Manager) Connect(ctx context.Context, tenantID xid.ID) (*Status, error)
 	if err != nil {
 		return nil, err
 	}
-	if s.client.IsConnected() && s.client.IsLoggedIn() {
+	// Already paired: just make sure the socket is up.
+	if s.client.Store.ID != nil {
+		if !s.client.IsConnected() {
+			if err := s.client.Connect(); err != nil {
+				return nil, err
+			}
+			s.client.WaitForConnection(5 * time.Second)
+		}
 		return m.Status(ctx, tenantID)
 	}
 
-	needQR := s.client.Store.ID == nil
-	if needQR {
-		s.mu.Lock()
-		watching := s.qrWatch
-		s.mu.Unlock()
-		if !watching {
-			ch, qerr := s.client.GetQRChannel(ctx)
-			if qerr != nil {
-				// Already connected/paired: fall through to normal connect.
-				if !errors.Is(qerr, whatsmeow.ErrQRAlreadyConnected) && !errors.Is(qerr, whatsmeow.ErrQRStoreContainsID) {
-					return nil, qerr
-				}
-			} else {
-				s.mu.Lock()
-				s.qrWatch = true
-				s.qrCode = ""
-				s.qrErr = ""
-				s.mu.Unlock()
-				go s.watchQR(ctx, ch)
+	// Switching back from pair-code mode needs a fresh socket.
+	s.mu.Lock()
+	switching := s.loginMode == "pair"
+	s.mu.Unlock()
+	if switching {
+		if s, err = m.reset(ctx, tenantID); err != nil {
+			return nil, err
+		}
+	}
+
+	s.mu.Lock()
+	already := s.qrWatch
+	s.loginMode = "qr"
+	s.mu.Unlock()
+	if !already {
+		ch, qerr := s.client.GetQRChannel(ctx)
+		if qerr != nil {
+			// Already connected/paired: fall through to normal connect.
+			if !errors.Is(qerr, whatsmeow.ErrQRAlreadyConnected) && !errors.Is(qerr, whatsmeow.ErrQRStoreContainsID) {
+				return nil, qerr
 			}
+		} else {
+			s.mu.Lock()
+			s.qrWatch = true
+			s.qrCode = ""
+			s.qrErr = ""
+			s.mu.Unlock()
+			go s.watchQR(ctx, ch)
 		}
 	}
 
@@ -159,6 +203,21 @@ func (m *Manager) Connect(ctx context.Context, tenantID xid.ID) (*Status, error)
 	// Wait briefly so the socket is ready and the first QR may arrive.
 	s.client.WaitForConnection(5 * time.Second)
 	return m.Status(ctx, tenantID)
+}
+
+// reset disconnects a session and drops it from memory (the on-disk device
+// store is kept) so the next connect starts with a fresh socket.
+func (m *Manager) reset(ctx context.Context, tenantID xid.ID) (*session, error) {
+	m.mu.Lock()
+	s, ok := m.m[tenantID.String()]
+	if ok {
+		delete(m.m, tenantID.String())
+	}
+	m.mu.Unlock()
+	if ok && s != nil && s.client != nil {
+		s.client.Disconnect()
+	}
+	return m.getOrCreate(ctx, tenantID)
 }
 
 // watchQR keeps the latest QR code/state in the session. whatsmeow emits a new
@@ -193,10 +252,9 @@ func (s *session) watchQR(ctx context.Context, ch <-chan whatsmeow.QRChannelItem
 			if evt.Error != nil {
 				s.qrErr = evt.Error.Error()
 			}
-			if evt.Event != "success" {
-				s.qrCode = ""
-			}
+			s.qrCode = ""
 			if evt.Event == "success" {
+				s.qrErr = ""
 				s.pairCode = ""
 				s.pairPhone = ""
 			}
@@ -218,20 +276,47 @@ func (m *Manager) PairCode(ctx context.Context, tenantID xid.ID, phone string) (
 	if err != nil {
 		return nil, err
 	}
-	if s.client.IsLoggedIn() {
-		return nil, fmt.Errorf("WhatsApp sudah login")
-	}
 	if s.client.Store.ID != nil {
 		return nil, fmt.Errorf("perangkat sudah tertaut")
 	}
+
+	// Switching from QR mode needs a fresh socket.
+	s.mu.Lock()
+	switching := s.loginMode == "qr"
+	s.mu.Unlock()
+	if switching {
+		if s, err = m.reset(ctx, tenantID); err != nil {
+			return nil, err
+		}
+	}
+
 	if !s.client.IsConnected() {
 		if err := s.client.Connect(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("gagal connect: %w", err)
 		}
 	}
 	if !s.client.WaitForConnection(10 * time.Second) {
 		return nil, fmt.Errorf("gagal terhubung ke WhatsApp, coba lagi")
 	}
+	p := normalizePairPhone(phone)
+	if p == "" {
+		return nil, fmt.Errorf("nomor WhatsApp wajib diisi")
+	}
+	code, err := s.client.PairPhone(ctx, p, true, whatsmeow.PairClientChrome, "Chrome (Windows)")
+	if err != nil {
+		return nil, fmt.Errorf("gagal buat kode: %w", err)
+	}
+	s.mu.Lock()
+	s.loginMode = "pair"
+	s.pairCode = code
+	s.pairPhone = p
+	s.qrErr = ""
+	s.qrCode = ""
+	s.mu.Unlock()
+	return m.Status(ctx, tenantID)
+}
+
+func normalizePairPhone(phone string) string {
 	p := strings.TrimSpace(phone)
 	p = strings.ReplaceAll(p, " ", "")
 	p = strings.ReplaceAll(p, "-", "")
@@ -239,16 +324,7 @@ func (m *Manager) PairCode(ctx context.Context, tenantID xid.ID, phone string) (
 	if strings.HasPrefix(p, "0") {
 		p = "62" + strings.TrimPrefix(p, "0")
 	}
-	code, err := s.client.PairPhone(ctx, p, false, whatsmeow.PairClientChrome, "Chrome (Linux)")
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	s.pairCode = code
-	s.pairPhone = p
-	s.qrErr = ""
-	s.mu.Unlock()
-	return m.Status(ctx, tenantID)
+	return p
 }
 
 // Status returns current connection/login/QR state.
@@ -256,6 +332,16 @@ func (m *Manager) Status(ctx context.Context, tenantID xid.ID) (*Status, error) 
 	s, err := m.getOrCreate(ctx, tenantID)
 	if err != nil {
 		return nil, err
+	}
+	// Reconcile: device paired + connected but pairing state not cleared yet
+	// (e.g. the QR "success" event was missed).
+	if s.client.Store.ID != nil && s.client.IsConnected() {
+		s.mu.Lock()
+		stale := s.qrCode != "" || s.pairCode != "" || s.qrWatch
+		s.mu.Unlock()
+		if stale {
+			s.markConnected()
+		}
 	}
 	st := &Status{
 		Connected: s.client.IsConnected(),

@@ -1,11 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "./api";
 import { useAppDialog } from "./confirm";
 import { IconCopy, IconMail, IconSend, IconTrash, IconWhatsApp } from "./icons";
-import { toastError, toastSuccess } from "./swal";
+import { swalAlert, toastError, toastSuccess } from "./swal";
 import { usePersistedTab } from "./navPersist";
 import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
 
@@ -690,6 +690,20 @@ function WhatsAppTab() {
   });
 
   const st = status.data;
+
+  const prevLoggedIn = useRef(false);
+  useEffect(() => {
+    const now = Boolean(st?.logged_in);
+    if (now && !prevLoggedIn.current) {
+      void swalAlert({
+        title: "WhatsApp terhubung",
+        description: st?.phone ? `Perangkat berhasil ditautkan · ${st.phone}` : "Perangkat berhasil ditautkan.",
+        icon: "success",
+      });
+      void qc.invalidateQueries({ queryKey: ["integration-whatsapp"] });
+    }
+    prevLoggedIn.current = now;
+  }, [st?.logged_in, st?.phone, qc]);
 
   return (
     <Section title="WhatsApp (whatsmeow)">
