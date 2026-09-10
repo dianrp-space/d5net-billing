@@ -32,6 +32,9 @@ type Worker struct {
 
 	cycleMu     sync.Mutex
 	lastCycleAt map[xid.ID]time.Time
+
+	repairMu     sync.Mutex
+	lastRepairAt map[xid.ID]time.Time
 }
 
 func NewWorker(st *store.Store, billing *billing.Engine, notify *notify.Service, poller *monitor.Poller, prov *provisioner.Registry) *Worker {
@@ -39,6 +42,7 @@ func NewWorker(st *store.Store, billing *billing.Engine, notify *notify.Service,
 		store: st, billing: billing, notify: notify, poller: poller, provisioner: prov,
 		isolirInfraOK: map[string]time.Time{},
 		lastCycleAt:   map[xid.ID]time.Time{},
+		lastRepairAt:  map[xid.ID]time.Time{},
 	}
 }
 
@@ -401,6 +405,19 @@ func (w *Worker) resumePaidSubscriptions(ctx context.Context, tenantID xid.ID) m
 }
 
 func (w *Worker) repairIsolirSecrets(ctx context.Context, tenantID xid.ID, overdue, tried map[xid.ID]struct{}) {
+	// Safety net only: scanning every router logs into MikroTik on each worker
+	// cycle, which floods router logs. resumePaidSubscriptions() already handles
+	// the common case, so run this repair at most once per hour per tenant.
+	const repairInterval = time.Hour
+	now := time.Now()
+	w.repairMu.Lock()
+	if last, ok := w.lastRepairAt[tenantID]; ok && now.Before(last.Add(repairInterval)) {
+		w.repairMu.Unlock()
+		return
+	}
+	w.lastRepairAt[tenantID] = now
+	w.repairMu.Unlock()
+
 	isolirCfg, _ := w.store.GetIsolirNetworkSettings(ctx, tenantID)
 	_ = w.store.ResolveIsolirPool(ctx, tenantID, &isolirCfg)
 	routers, err := w.store.ListRouters(ctx, tenantID)
