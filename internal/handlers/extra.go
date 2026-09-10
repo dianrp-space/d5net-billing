@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1313,6 +1314,81 @@ func registerOpsExtra(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "export-commissions-csv", Method: http.MethodGet, Path: "/api/commissions/export.csv",
+		Tags: []string{"Commissions"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		From   string `query:"from"`
+		To     string `query:"to"`
+		Status string `query:"status"`
+		Group  string `query:"group"`
+	}) (*struct {
+		ContentType        string `header:"Content-Type"`
+		ContentDisposition string `header:"Content-Disposition"`
+		Body               []byte
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		from, err := parseDateParam(input.From, false)
+		if err != nil {
+			return nil, httpx.BadRequest("tanggal 'from' tidak valid (YYYY-MM-DD)")
+		}
+		to, err := parseDateParam(input.To, true)
+		if err != nil {
+			return nil, httpx.BadRequest("tanggal 'to' tidak valid (YYYY-MM-DD)")
+		}
+		list, err := d.Store.ListCommissionEntriesForExport(ctx, tid, from, to, strings.TrimSpace(input.Status))
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		group := strings.ToLower(strings.TrimSpace(input.Group))
+		var buf bytes.Buffer
+		w := csv.NewWriter(&buf)
+		name := "komisi-rekap.csv"
+		if group == "detail" {
+			name = "komisi-detail.csv"
+			_ = w.Write([]string{"tanggal", "kode_pelanggan", "nama_pelanggan", "jenis", "penerima", "tipe_penerima", "nominal", "status", "dibayar_pada", "catatan"})
+			for _, e := range list {
+				_ = w.Write([]string{
+					e.CreatedAt.Format("2006-01-02 15:04"),
+					e.CustomerCode,
+					e.CustomerName,
+					commissionBasisCSV(e.Basis),
+					commissionRecipientName(e),
+					commissionRecipientType(e),
+					strconv.FormatInt(e.Amount, 10),
+					e.Status,
+					formatTimePtr(e.PaidAt),
+					derefString(e.Note),
+				})
+			}
+		} else {
+			_ = w.Write([]string{"penerima", "tipe", "jumlah_entry", "total_pending", "total_dibayar", "total"})
+			for _, row := range summarizeCommissions(list) {
+				_ = w.Write([]string{
+					row.Name,
+					row.Type,
+					strconv.Itoa(row.Count),
+					strconv.FormatInt(row.Pending, 10),
+					strconv.FormatInt(row.Paid, 10),
+					strconv.FormatInt(row.Total, 10),
+				})
+			}
+		}
+		w.Flush()
+		return &struct {
+			ContentType        string `header:"Content-Type"`
+			ContentDisposition string `header:"Content-Disposition"`
+			Body               []byte
+		}{
+			ContentType:        "text/csv; charset=utf-8",
+			ContentDisposition: `attachment; filename="` + name + `"`,
+			Body:               buf.Bytes(),
+		}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "get-commission-settings", Method: http.MethodGet, Path: "/api/settings/commission",
 		Tags: []string{"Settings"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, _ *struct{}) (*struct{ Body store.CommissionSettings }, error) {
@@ -1727,4 +1803,100 @@ func toInt64(v any) int64 {
 	default:
 		return 0
 	}
+}
+
+// parseDateParam parses YYYY-MM-DD; endOfDay makes it the exclusive next-day
+// bound so a date range can be inclusive of the end date.
+func parseDateParam(s string, endOfDay bool) (*time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return nil, err
+	}
+	if endOfDay {
+		t = t.AddDate(0, 0, 1)
+	}
+	return &t, nil
+}
+
+func commissionBasisCSV(basis string) string {
+	if store.NormalizeCommissionBasis(basis) == store.CommissionBasisAcquisition {
+		return "akuisisi"
+	}
+	return "pelanggan_baru"
+}
+
+func commissionRecipientType(e store.CommissionEntry) string {
+	if e.ResellerID != nil && !xid.IsNil(*e.ResellerID) {
+		return "reseller"
+	}
+	if e.SalesUserID != nil && !xid.IsNil(*e.SalesUserID) {
+		return "sales"
+	}
+	return "-"
+}
+
+func commissionRecipientName(e store.CommissionEntry) string {
+	if e.ResellerName != "" {
+		return e.ResellerName
+	}
+	if e.SalesUserName != "" {
+		return e.SalesUserName
+	}
+	return "-"
+}
+
+func formatTimePtr(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04")
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+type commissionRecapRow struct {
+	Name    string
+	Type    string
+	Count   int
+	Pending int64
+	Paid    int64
+	Total   int64
+}
+
+// summarizeCommissions aggregates pending/paid totals per payee (void excluded).
+func summarizeCommissions(list []store.CommissionEntry) []commissionRecapRow {
+	idx := map[string]int{}
+	var out []commissionRecapRow
+	for _, e := range list {
+		if e.Status == "void" {
+			continue
+		}
+		name := commissionRecipientName(e)
+		typ := commissionRecipientType(e)
+		key := typ + ":" + name
+		i, ok := idx[key]
+		if !ok {
+			i = len(out)
+			idx[key] = i
+			out = append(out, commissionRecapRow{Name: name, Type: typ})
+		}
+		out[i].Count++
+		out[i].Total += e.Amount
+		if e.Status == "paid" {
+			out[i].Paid += e.Amount
+		} else {
+			out[i].Pending += e.Amount
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Total > out[j].Total })
+	return out
 }

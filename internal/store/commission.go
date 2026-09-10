@@ -197,6 +197,56 @@ func (s *Store) ListCommissionEntries(ctx context.Context, tenantID xid.ID, stat
 	return list, total, rows.Err()
 }
 
+// ListCommissionEntriesForExport returns all matching entries (no pagination),
+// oldest first, for CSV export and per-recipient recap.
+func (s *Store) ListCommissionEntriesForExport(ctx context.Context, tenantID xid.ID, from, to *time.Time, status string) ([]CommissionEntry, error) {
+	where := `WHERE e.tenant_id=$1`
+	args := []any{tenantID}
+	n := 2
+	if status == "pending" || status == "paid" || status == "void" {
+		where += fmt.Sprintf(" AND e.status=$%d", n)
+		args = append(args, status)
+		n++
+	}
+	if from != nil {
+		where += fmt.Sprintf(" AND e.created_at >= $%d", n)
+		args = append(args, *from)
+		n++
+	}
+	if to != nil {
+		where += fmt.Sprintf(" AND e.created_at < $%d", n)
+		args = append(args, *to)
+		n++
+	}
+	q := `
+		SELECT e.id, e.tenant_id, e.customer_id, COALESCE(c.full_name,''), COALESCE(c.customer_code,''),
+		       e.lead_id, e.reseller_id, COALESCE(r.name,''), e.sales_user_id, COALESCE(u.full_name,''),
+		       e.amount, e.basis, e.status, e.note, e.created_at, e.paid_at
+		FROM commission_entries e
+		LEFT JOIN customers c ON c.id = e.customer_id
+		LEFT JOIN resellers r ON r.id = e.reseller_id
+		LEFT JOIN users u ON u.id = e.sales_user_id
+		` + where + ` ORDER BY e.created_at ASC`
+	rows, err := s.Pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []CommissionEntry
+	for rows.Next() {
+		var e CommissionEntry
+		if err := rows.Scan(
+			&e.ID, &e.TenantID, &e.CustomerID, &e.CustomerName, &e.CustomerCode,
+			&e.LeadID, &e.ResellerID, &e.ResellerName, &e.SalesUserID, &e.SalesUserName,
+			&e.Amount, &e.Basis, &e.Status, &e.Note, &e.CreatedAt, &e.PaidAt,
+		); err != nil {
+			return nil, err
+		}
+		list = append(list, e)
+	}
+	return list, rows.Err()
+}
+
 func (s *Store) GetCommissionEntry(ctx context.Context, tenantID, id xid.ID) (*CommissionEntry, error) {
 	var e CommissionEntry
 	err := s.Pool.QueryRow(ctx, `

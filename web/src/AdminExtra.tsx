@@ -658,6 +658,40 @@ export function ResellersPage() {
   );
   const statusLabel: Record<string, string> = { pending: "Pending", paid: "Dibayar", void: "Void" };
 
+  const now = new Date();
+  const [commMonth, setCommMonth] = useState(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
+  );
+  const [exporting, setExporting] = useState("");
+
+  function monthRange(m: string): { from: string; to: string } {
+    if (!m) return { from: "", to: "" };
+    const [y, mo] = m.split("-").map(Number);
+    if (!y || !mo) return { from: "", to: "" };
+    const last = new Date(y, mo, 0).getDate();
+    return { from: `${m}-01`, to: `${m}-${String(last).padStart(2, "0")}` };
+  }
+
+  async function exportCommissions(group: "recipient" | "detail") {
+    const { from, to } = monthRange(commMonth);
+    const params = new URLSearchParams({ group });
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (commStatus) params.set("status", commStatus);
+    setExporting(group);
+    try {
+      await apiDownload(
+        `/api/commissions/export.csv?${params.toString()}`,
+        group === "detail" ? "komisi-detail.csv" : "komisi-rekap.csv",
+      );
+      void toastSuccess("Export komisi diunduh");
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Export gagal");
+    } finally {
+      setExporting("");
+    }
+  }
+
   return (
     <Section
       title="Reseller & Komisi"
@@ -770,7 +804,42 @@ export function ResellersPage() {
       />
 
       <div className="mt-8 mb-3">
-        <h3 className="mb-3 text-sm font-semibold">Riwayat komisi</h3>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Riwayat komisi</h3>
+            <p className="text-xs text-[var(--muted)]">
+              Export <strong>Rekap per penerima</strong> = total komisi tiap sales/reseller (pending, dibayar, total)
+              untuk bulan dipilih — cocok untuk rekap pembayaran komisi.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="grid gap-1 text-xs">
+              <span className="text-[var(--muted)]">Bulan rekap</span>
+              <input
+                type="month"
+                className="input"
+                value={commMonth}
+                onChange={(e) => setCommMonth(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn-ghost inline-flex items-center gap-1.5"
+              disabled={exporting !== ""}
+              onClick={() => void exportCommissions("recipient")}
+            >
+              <IconDownload /> {exporting === "recipient" ? "Mengunduh…" : "Export rekap"}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost inline-flex items-center gap-1.5"
+              disabled={exporting !== ""}
+              onClick={() => void exportCommissions("detail")}
+            >
+              <IconDownload /> {exporting === "detail" ? "Mengunduh…" : "Export detail"}
+            </button>
+          </div>
+        </div>
         <ListToolbar
           search={commSearch}
           onSearchChange={setCommSearch}
