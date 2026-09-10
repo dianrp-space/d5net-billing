@@ -984,10 +984,30 @@ func registerCustomers(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		if err := d.Store.DeleteCustomer(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
+		c, err := d.Store.GetCustomer(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("customer not found")
+		}
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		// Guard: cabut dulu supaya secret router, port ODP, IP assignment, dan
+		// langganan tidak tertinggal sebelum baris pelanggan dihapus permanen.
+		if err := dismantleCustomerServices(ctx, d, tid, c.ID); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if !c.IsDismantled() {
+			_ = d.Store.DismantleCustomer(ctx, tid, c.ID)
+		}
+		if err := d.Store.DeleteCustomer(ctx, tid, c.ID); errors.Is(err, store.ErrNotFound) {
 			return nil, httpx.NotFound("customer not found")
 		} else if err != nil {
 			return nil, httpx.Internal(err)
+		}
+		if d.Notify != nil {
+			_ = d.Notify.QueueTenantTelegram(ctx, tid, notify.OpsMsg("hapus", "Pelanggan dihapus (auto-cabut)",
+				c.CustomerCode+" — "+c.FullName,
+			))
 		}
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "deleted"}}, nil
 	})

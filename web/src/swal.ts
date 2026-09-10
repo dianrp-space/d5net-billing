@@ -20,12 +20,24 @@ function mixin() {
   });
 }
 
+function escapeHtml(s: string) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/** Escape user text then allow explicit line breaks via \n. */
+function toHtml(s: string) {
+  return escapeHtml(s).replace(/\n/g, "<br/>");
+}
+
 export async function swalConfirm(opts: ConfirmOptions | string): Promise<boolean> {
   const n = typeof opts === "string" ? { description: opts } : opts;
   const isDanger = n.danger ?? true;
   const result = await mixin().fire({
     title: n.title ?? "Konfirmasi",
-    text: n.description,
+    html: toHtml(n.description),
     icon: isDanger ? "warning" : "question",
     showCancelButton: true,
     focusCancel: true,
@@ -41,7 +53,7 @@ export async function swalAlert(opts: { title?: string; description: string; ico
   const n = typeof opts === "string" ? { description: opts } : opts;
   await mixin().fire({
     title: n.title ?? "Pemberitahuan",
-    html: String(n.description).replace(/\n/g, "<br/>"),
+    html: toHtml(n.description),
     icon: (typeof opts === "object" && opts.icon) || "info",
     confirmButtonText: "Tutup",
   });

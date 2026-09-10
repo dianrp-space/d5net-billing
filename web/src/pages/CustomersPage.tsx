@@ -458,9 +458,17 @@ export function CustomersPage({
               disabled={remove.isPending}
               onClick={async () => {
                 const ok = await confirm({
-                  title: "Hapus pelanggan",
-                  description: `Hapus pelanggan "${c.full_name}"?`,
-                  confirmLabel: "Hapus",
+                  title: `Hapus permanen "${c.full_name}"?`,
+                  description:
+                    `${c.customer_code} — data pelanggan, langganan, tagihan, dan pembayaran akan DIHAPUS PERMANEN.\n\n` +
+                    `Sistem otomatis mencabut layanan dulu:\n` +
+                    `• Secret PPPoE/hotspot dilepas dari router\n` +
+                    `• Port ODP dikosongkan & IP assignment dibersihkan\n` +
+                    `• Semua langganan dibatalkan\n\n` +
+                    `Tindakan ini tidak bisa dikembalikan.`,
+                  confirmLabel: "Hapus permanen",
+                  cancelLabel: "Batal",
+                  danger: true,
                 });
                 if (!ok) return;
                 remove.mutate(c.id);
