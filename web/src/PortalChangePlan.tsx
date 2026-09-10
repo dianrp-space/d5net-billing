@@ -22,6 +22,8 @@ export type PortalPlan = {
   name: string;
   code: string;
   price: number;
+  original_price?: number;
+  discount_label?: string;
   download_mbps: number;
   upload_mbps: number;
   service_type: string;
@@ -95,7 +97,13 @@ export function PortalPlanCatalog({
               </p>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1">
+              {p.original_price && p.original_price > p.price ? (
+                <p className="text-xs text-[var(--muted)] line-through">{formatRp(p.original_price)}</p>
+              ) : null}
               <p className="text-sm font-bold">{formatRp(p.price)}</p>
+              {p.discount_label ? (
+                <span className="text-[10px] font-semibold text-[var(--accent)]">{p.discount_label}</span>
+              ) : null}
               {current ? (
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">Paket Anda</span>
               ) : clickable ? (

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Home, PanelLeft, PanelLeftClose } from "lucide-react";
-import { api, apiDownload, clearClientSession } from "./api";
+import { api, apiDownload, clearClientSession, getClientSession, setClientSession } from "./api";
 import { applyBrandingMeta } from "./branding";
 import type { ClientPortalData } from "./TenantLogin";
 import { toastError, toastSuccess } from "./swal";
@@ -310,8 +310,42 @@ export function ClientHome({
     queryFn: () => api<{ data: PortalSub[] }>("/api/portal/subscriptions", { headers: portalHeaders }),
     enabled: Boolean(data.portal_token),
     retry: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: 15000,
   });
   const subscriptions = subsQ.isSuccess ? (subsQ.data?.data ?? []) : (data.subscriptions ?? []);
+
+  const invoicesQ = useQuery({
+    queryKey: ["portal-invoices", data.tenant_slug],
+    queryFn: () =>
+      api<{ data: NonNullable<ClientPortalData["invoices"]> }>("/api/portal/invoices", { headers: portalHeaders }),
+    enabled: Boolean(data.portal_token),
+    retry: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: 15000,
+  });
+  const invoices = invoicesQ.isSuccess ? (invoicesQ.data?.data ?? []) : (data.invoices ?? []);
+
+  const paymentsQ = useQuery({
+    queryKey: ["portal-payments", data.tenant_slug],
+    queryFn: () =>
+      api<{ data: NonNullable<ClientPortalData["payments"]> }>("/api/portal/payments", { headers: portalHeaders }),
+    enabled: Boolean(data.portal_token),
+    retry: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: 15000,
+  });
+  const payments = paymentsQ.isSuccess ? (paymentsQ.data?.data ?? []) : (data.payments ?? []);
+
+  useEffect(() => {
+    const session = getClientSession<ClientPortalData>() || data;
+    setClientSession({
+      ...session,
+      ...(subsQ.data?.data ? { subscriptions: subsQ.data.data } : {}),
+      ...(invoicesQ.data?.data ? { invoices: invoicesQ.data.data } : {}),
+      ...(paymentsQ.data?.data ? { payments: paymentsQ.data.data } : {}),
+    });
+  }, [data, invoicesQ.data, paymentsQ.data, subsQ.data]);
 
   const plansQ = useQuery({
     queryKey: ["portal-plans", data.tenant_slug],
@@ -456,11 +490,11 @@ export function ClientHome({
 
   const greeting = data.customer?.full_name || "Pelanggan";
   const isolirSubs = subscriptions.filter((s) => isIsolirStatus(s.status));
-  const unpaidInvoices = (data.invoices ?? []).filter(isInvoiceUnpaid);
+  const unpaidInvoices = invoices.filter(isInvoiceUnpaid);
   const unpaidTotal = unpaidInvoices.reduce((sum, i) => sum + invoiceRemaining(i), 0);
   const firstUnpaid = unpaidInvoices[0] ?? null;
 
-  const invoiceRows = (data.invoices ?? []).map((i) => {
+  const invoiceRows = invoices.map((i) => {
     const unpaid = isInvoiceUnpaid(i);
     const paidSomething = i.status === "paid" || (i.paid_amount ?? 0) > 0;
     const action = (
@@ -503,7 +537,7 @@ export function ClientHome({
         ];
   });
 
-  const paymentRows = (data.payments ?? []).map((p) =>
+  const paymentRows = payments.map((p) =>
     multi
       ? [
           accountLabel(p.customer_code, p.customer_name),
@@ -802,10 +836,10 @@ export function ClientHome({
                 />
               </div>
               <div className="portal-cards-mobile">
-                {(data.invoices ?? []).length === 0 ? (
+                {invoices.length === 0 ? (
                   <p className="text-sm text-[var(--muted)]">Belum ada tagihan.</p>
                 ) : (
-                  (data.invoices ?? []).map((i) => {
+                  invoices.map((i) => {
                     const unpaid = isInvoiceUnpaid(i);
                     return (
                       <article key={i.id || i.invoice_number} className="portal-item-card">
@@ -840,10 +874,10 @@ export function ClientHome({
                 />
               </div>
               <div className="portal-cards-mobile">
-                {(data.payments ?? []).length === 0 ? (
+                {payments.length === 0 ? (
                   <p className="text-sm text-[var(--muted)]">Belum ada pembayaran.</p>
                 ) : (
-                  (data.payments ?? []).map((p, idx) => (
+                  payments.map((p, idx) => (
                     <article key={`${p.invoice_number || ""}-${p.created_at || p.paid_at || idx}`} className="portal-item-card">
                       <div className="flex items-start justify-between gap-2">
                         <p className="text-sm font-semibold">{p.invoice_number || "Pembayaran"}</p>
@@ -1045,6 +1079,7 @@ export function ClientHome({
           setChangePlanInitialId("");
           void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
           void qc.invalidateQueries({ queryKey: ["portal-plans", data.tenant_slug] });
+          void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
           if (invoice?.id) {
             setPayInv(invoice);
           }
@@ -1059,6 +1094,9 @@ export function ClientHome({
         onPaid={() => {
           setPayInv(null);
           void toastSuccess("Pembayaran diterima");
+          void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
+          void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
+          void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
         }}
       />
     </div>

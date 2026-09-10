@@ -27,6 +27,7 @@ import {
   IconHome,
   IconMap,
   IconMapPin,
+  IconPercent,
   IconPlug,
   IconRadar,
   IconReceipt,
@@ -64,11 +65,17 @@ const ClustersPage = lazy(() =>
   import("./pages/ClustersPage").then((m) => ({ default: m.ClustersPage })),
 );
 const PlansPage = lazy(() => import("./pages/PlansPage").then((m) => ({ default: m.PlansPage })));
+const DiscountsPage = lazy(() =>
+  import("./pages/DiscountsPage").then((m) => ({ default: m.DiscountsPage })),
+);
 const SubscriptionsPage = lazy(() =>
   import("./pages/SubscriptionsPage").then((m) => ({ default: m.SubscriptionsPage })),
 );
 const InvoicesPage = lazy(() =>
   import("./pages/InvoicesPage").then((m) => ({ default: m.InvoicesPage })),
+);
+const PaymentsPage = lazy(() =>
+  import("./pages/PaymentsPage").then((m) => ({ default: m.PaymentsPage })),
 );
 const RoutersPage = lazy(() =>
   import("./pages/RoutersPage").then((m) => ({ default: m.RoutersPage })),
@@ -139,6 +146,7 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "plans", label: "Paket", icon: <IconBox /> },
       { id: "invoices", label: "Tagihan", icon: <IconChart /> },
+      { id: "payments", label: "Pembayaran", icon: <IconBanknote /> },
       { id: "accounting", label: "Akunting", icon: <IconBanknote /> },
     ],
   },
@@ -146,6 +154,7 @@ const navGroups: NavGroup[] = [
     label: "Customers",
     items: [
       { id: "customers", label: "Pelanggan", icon: <IconUsers /> },
+      { id: "discounts", label: "Diskon", icon: <IconPercent /> },
       { id: "leads", label: "Lead", icon: <IconUserPlus /> },
       { id: "coverage", label: "Coverage", icon: <IconRadar /> },
       { id: "resellers", label: "Reseller & Komisi", icon: <IconBriefcase /> },
@@ -476,7 +485,9 @@ export function AdminApp({
               ) : null}
               {page === "clusters" && <ClustersPage />}
               {page === "plans" && <PlansPage />}
+              {page === "discounts" && <DiscountsPage />}
               {page === "invoices" && <InvoicesPage />}
+              {page === "payments" && <PaymentsPage />}
               {page === "routers" && <RoutersPage />}
               {page === "ip-pool" && <IPPoolPage tenantSlug={tenantSlug} />}
               {page === "tickets" && <TicketsPage />}

@@ -3,9 +3,9 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/dianrp/drp-billing/internal/httpx"
 	"github.com/dianrp/drp-billing/internal/payment"
@@ -58,8 +58,7 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	req := payment.IntentRequest{
 		TenantID: tid, CustomerID: inv.CustomerID, InvoiceID: inv.ID,
 		Amount: amount, ReturnURL: returnURL,
-		ProductDetails:  "Tagihan " + strings.TrimSpace(inv.InvoiceNumber),
-		MerchantOrderID: fmt.Sprintf("inv-%s", inv.ID),
+		ProductDetails: "Tagihan " + strings.TrimSpace(inv.InvoiceNumber),
 	}
 	if origin != "" {
 		req.CallbackURL = strings.TrimRight(origin, "/") + paymentWebhookPathFor(providerName)
@@ -67,20 +66,26 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 			req.ReturnURL = origin
 		}
 	}
+	var ten *store.Tenant
+	if t, terr := d.Store.GetTenant(ctx, tid); terr == nil {
+		ten = t
+	}
+	if ten != nil && ten.Email != nil {
+		req.Email = strings.TrimSpace(*ten.Email)
+	}
 	if cust, cerr := d.Store.GetCustomer(ctx, tid, inv.CustomerID); cerr == nil && cust != nil {
 		req.CustomerName = strings.TrimSpace(cust.FullName)
 		req.Phone = strings.TrimSpace(cust.Phone)
-		if cust.Email != nil {
+		if cust.Email != nil && strings.TrimSpace(*cust.Email) != "" {
 			req.Email = strings.TrimSpace(*cust.Email)
 		}
 	}
+	req.MerchantOrderID = strings.TrimSpace(inv.InvoiceNumber)
+	if req.MerchantOrderID == "" {
+		req.MerchantOrderID = store.FormatInvoiceNumber("", "", time.Now())
+	}
 	if req.CustomerName == "" {
 		req.CustomerName = strings.TrimSpace(inv.CustomerName)
-	}
-	if req.Email == "" {
-		if ten, terr := d.Store.GetTenant(ctx, tid); terr == nil && ten != nil && ten.Email != nil {
-			req.Email = strings.TrimSpace(*ten.Email)
-		}
 	}
 	if req.Email == "" {
 		if smtp, serr := loadSMTPIntegration(ctx, d, tid); serr == nil {

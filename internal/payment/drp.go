@@ -100,10 +100,13 @@ func (p *DRPProvider) CreateIntent(ctx context.Context, req IntentRequest) (*Int
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("nominal pembayaran harus > 0")
 	}
-	ref := fmt.Sprintf("drp-%s", req.InvoiceID)
+	ref := strings.TrimSpace(req.MerchantOrderID)
+	if ref == "" {
+		ref = fmt.Sprintf("drp-%s", req.InvoiceID)
+	}
 	res, err := p.createQRIS(ctx, ref, req.Amount)
 	if err != nil && isConflict(err) {
-		ref = fmt.Sprintf("drp-%s-%d", req.InvoiceID, time.Now().Unix())
+		ref = RefreshMerchantOrderID(ref)
 		res, err = p.createQRIS(ctx, ref, req.Amount)
 	}
 	return res, err

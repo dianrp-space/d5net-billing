@@ -2,9 +2,10 @@
 export const PERMISSION_PAGE_MAP: Record<string, string[]> = {
   "*": ["*"],
   dashboard: ["dashboard"],
-  customers: ["customers", "leads", "resellers", "sla-report", "coverage"],
+  customers: ["customers", "discounts", "leads", "resellers", "sla-report", "coverage"],
   leads: ["leads", "coverage"],
-  billing: ["plans", "invoices", "accounting", "sla-report"],
+  billing: ["plans", "discounts", "invoices", "payments", "accounting", "sla-report"],
+  discounts: ["discounts"],
   network: ["clusters", "routers", "subscriptions", "ip-pool", "odp", "vouchers", "customers", "coverage"],
   ops: ["dashboard", "tickets", "leads"],
   tickets: ["dashboard", "tickets", "leads"],
@@ -13,7 +14,8 @@ export const PERMISSION_PAGE_MAP: Record<string, string[]> = {
   settings: ["general", "invoice-format", "isolir-template", "jobs", "notifications", "roles", "users", "backup", "webhooks", "payment-gw", "messaging-gw", "sla-report"],
   // page-level aliases (if checked directly in custom roles)
   plans: ["plans"],
-  invoices: ["invoices"],
+  invoices: ["invoices", "payments"],
+  payments: ["payments"],
   accounting: ["accounting"],
   "sla-report": ["sla-report"],
   resellers: ["resellers"],

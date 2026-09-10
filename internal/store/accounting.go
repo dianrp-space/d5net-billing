@@ -18,11 +18,11 @@ type Account struct {
 }
 
 type Expense struct {
-	ID          xid.ID  `json:"id"`
-	Amount      int64   `json:"amount"`
-	Category    string  `json:"category"`
-	Description *string `json:"description,omitempty"`
-	ExpenseDate string  `json:"expense_date"`
+	ID          xid.ID    `json:"id"`
+	Amount      int64     `json:"amount"`
+	Category    string    `json:"category"`
+	Description *string   `json:"description,omitempty"`
+	ExpenseDate string    `json:"expense_date"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -93,7 +93,7 @@ func (s *Store) CreateExpense(ctx context.Context, tenantID xid.ID, amount int64
 func (s *Store) ProfitAndLoss(ctx context.Context, tenantID xid.ID) (map[string]any, error) {
 	var revenue, expense int64
 	_ = s.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='paid'
+		SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='paid' AND deleted_at IS NULL
 		AND paid_at >= date_trunc('month', NOW())
 	`, tenantID).Scan(&revenue)
 	_ = s.Pool.QueryRow(ctx, `
@@ -120,7 +120,7 @@ func (s *Store) AgingReceivable(ctx context.Context, tenantID xid.ID) (map[strin
 			END AS bucket,
 			COALESCE(SUM(total_amount - paid_amount),0)
 		FROM invoices
-		WHERE tenant_id=$1 AND status IN ('issued','partial','overdue')
+		WHERE tenant_id=$1 AND deleted_at IS NULL AND status IN ('issued','partial','overdue')
 		GROUP BY 1
 	`, tenantID)
 	if err != nil {
@@ -146,7 +146,7 @@ func (s *Store) CashFlow(ctx context.Context, tenantID xid.ID, months int) ([]ma
 	byMonth := map[string]*agg{}
 	inRows, err := s.Pool.Query(ctx, `
 		SELECT to_char(date_trunc('month', paid_at), 'YYYY-MM'), COALESCE(SUM(amount),0)
-		FROM payments WHERE tenant_id=$1 AND status='paid' AND paid_at IS NOT NULL
+		FROM payments WHERE tenant_id=$1 AND status='paid' AND paid_at IS NOT NULL AND deleted_at IS NULL
 		  AND paid_at >= NOW() - ($2 * INTERVAL '1 month')
 		GROUP BY 1
 	`, tenantID, months)

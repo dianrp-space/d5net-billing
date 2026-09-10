@@ -45,6 +45,14 @@ func (s *Store) CancelPendingPaymentIntentsExcept(ctx context.Context, tenantID,
 	return err
 }
 
+func (s *Store) CancelPendingPaymentIntentsForInvoice(ctx context.Context, tenantID, invoiceID xid.ID) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE payment_intents SET status='cancelled', updated_at=NOW()
+		WHERE tenant_id=$1 AND invoice_id=$2 AND LOWER(status) IN ('pending','created','unpaid')
+	`, tenantID, invoiceID)
+	return err
+}
+
 // DispatchOutboundEvent queues deliveries for active webhooks subscribed to event.
 func (s *Store) DispatchOutboundEvent(ctx context.Context, tenantID xid.ID, event string, payload map[string]any) error {
 	hooks, err := s.ListOutboundWebhooks(ctx, tenantID)

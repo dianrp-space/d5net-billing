@@ -65,7 +65,7 @@ func registerReports(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, _, err := d.Store.ListInvoices(ctx, tid, strings.TrimSpace(input.Status), strings.TrimSpace(input.Search), 100000, 0)
+		list, _, err := d.Store.ListInvoices(ctx, tid, strings.TrimSpace(input.Status), strings.TrimSpace(input.Search), false, 100000, 0)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -248,7 +248,7 @@ func registerAdvanced(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		inv, items, err := d.Store.GetInvoice(ctx, tid, input.ID)
+		inv, items, err := d.Store.GetInvoiceIncludingDeleted(ctx, tid, input.ID)
 		if err != nil {
 			return nil, httpx.NotFound("invoice not found")
 		}
@@ -1535,7 +1535,7 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, _, err := d.Store.ListInvoices(ctx, tid, "", "", 100000, 0)
+		list, _, err := d.Store.ListInvoices(ctx, tid, "", "", false, 100000, 0)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}

@@ -95,6 +95,7 @@ func (s *Store) ListBroadcastPhones(ctx context.Context, tenantID xid.ID, audien
 			SELECT DISTINCT c.phone FROM customers c
 			JOIN invoices i ON i.customer_id = c.id AND i.tenant_id = c.tenant_id
 			WHERE c.tenant_id=$1 AND c.phone <> ''
+			  AND i.deleted_at IS NULL
 			  AND i.status IN ('issued','partial','overdue')
 			  AND i.total_amount > i.paid_amount
 			  AND i.due_date < CURRENT_DATE`

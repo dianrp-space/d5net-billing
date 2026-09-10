@@ -64,6 +64,36 @@ func TestDRPCreateIntent(t *testing.T) {
 	}
 }
 
+func TestDRPCreateIntentMerchantOrderID(t *testing.T) {
+	var gotRef string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req drpCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		gotRef = req.ReferenceID
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"transactionId": "tx-1",
+			"referenceId":   req.ReferenceID,
+			"status":        "PENDING",
+			"amount":        req.Amount,
+			"qrisString":    "00020101",
+			"totalAmount":   req.Amount,
+		})
+	}))
+	t.Cleanup(srv.Close)
+	p := NewDRPProvider(srv.URL, "k", "s")
+	orderID := "INV-demo-C001-092026-AB3K7"
+	res, err := p.CreateIntent(t.Context(), IntentRequest{Amount: 1000, MerchantOrderID: orderID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRef != orderID || res.ExternalID != orderID {
+		t.Fatalf("ref %q external %q", gotRef, res.ExternalID)
+	}
+}
+
 func TestClampQRISExpiresMinutes(t *testing.T) {
 	if got := ClampQRISExpiresMinutes(0); got != 15 {
 		t.Fatalf("zero = %d", got)

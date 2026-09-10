@@ -42,6 +42,29 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
   const [payInv, setPayInv] = useState<PayableInvoice | null>(null);
 
   useEffect(() => {
+    if (!session?.portal_token) return;
+    let cancelled = false;
+    async function refresh() {
+      try {
+        const res = await api<{ data: Invoice[] }>("/api/portal/invoices", {
+          headers: { Authorization: `Bearer ${session!.portal_token}` },
+        });
+        if (cancelled) return;
+        const next = (res.data || []).filter(isInvoiceUnpaid);
+        setSession((prev) => (prev ? { ...prev, invoices: next } : prev));
+      } catch {
+        /* keep snapshot */
+      }
+    }
+    void refresh();
+    const t = window.setInterval(() => void refresh(), 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [session?.portal_token]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {

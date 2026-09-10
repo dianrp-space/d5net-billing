@@ -57,14 +57,16 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 	if err != nil {
 		return nil, err
 	}
-	if price, err := e.store.ResolvePlanPrice(ctx, tenantID, plan.ID, cust.ClusterID); err == nil {
+	var disc *store.PlanDiscount
+	if price, applied, err := e.store.ResolveBilledPlanPrice(ctx, tenantID, plan.ID, cust.ID, cust.ClusterID, time.Now()); err == nil {
 		plan.Price = price
+		disc = applied
 	}
 	if pct, err := e.store.EffectiveTaxPercent(ctx, tenantID); err == nil {
 		plan.TaxPercent = pct
 	}
 
-	invNum, err := e.store.NextInvoiceNumber(ctx, tenantID)
+	invNum, err := e.store.NextInvoiceNumber(ctx, tenantID, cust.CustomerCode)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +76,7 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 
 	var priorCount int64
 	_ = e.store.Pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM invoices WHERE tenant_id=$1 AND subscription_id=$2
+		SELECT COUNT(*) FROM invoices WHERE tenant_id=$1 AND subscription_id=$2 AND deleted_at IS NULL
 	`, tenantID, subscriptionID).Scan(&priorCount)
 
 	// First invoice after activation: charge only remaining days until next_bill_at.
@@ -122,6 +124,9 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 	}}
 	if priorCount == 0 && prorateDays > 0 && periodDays > 0 && prorateDays < periodDays {
 		items[0].Description += " (prorata " + strconv.Itoa(prorateDays) + "/" + strconv.Itoa(periodDays) + " hari)"
+	}
+	if disc != nil {
+		items[0].Description += " (" + disc.Label() + ")"
 	}
 	if lateFee > 0 {
 		items = append(items, store.InvoiceItem{
@@ -278,11 +283,11 @@ func (e *Engine) QuotePlanChange(ctx context.Context, tenantID, subscriptionID, 
 		return nil, nil, nil, nil, err
 	}
 	oldPrice := oldPlan.Price
-	if p, err := e.store.ResolvePlanPrice(ctx, tenantID, oldPlan.ID, cust.ClusterID); err == nil {
+	if p, _, err := e.store.ResolveBilledPlanPrice(ctx, tenantID, oldPlan.ID, cust.ID, cust.ClusterID, at); err == nil {
 		oldPrice = p
 	}
 	newPrice := newPlan.Price
-	if p, err := e.store.ResolvePlanPrice(ctx, tenantID, newPlan.ID, cust.ClusterID); err == nil {
+	if p, _, err := e.store.ResolveBilledPlanPrice(ctx, tenantID, newPlan.ID, cust.ID, cust.ClusterID, at); err == nil {
 		newPrice = p
 	}
 
@@ -378,7 +383,11 @@ func (e *Engine) ApplyPlanChange(ctx context.Context, tenantID, subscriptionID, 
 
 	var inv *store.Invoice
 	if q.RequiresCharge && q.DeltaSubtotal > 0 {
-		invNum, err := e.store.NextInvoiceNumber(ctx, tenantID)
+		custCode := ""
+		if cust, cerr := e.store.GetCustomer(ctx, tenantID, sub.CustomerID); cerr == nil && cust != nil {
+			custCode = cust.CustomerCode
+		}
+		invNum, err := e.store.NextInvoiceNumber(ctx, tenantID, custCode)
 		if err != nil {
 			return nil, nil, err
 		}

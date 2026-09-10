@@ -287,6 +287,16 @@ export function IconRefresh(props: IconProps) {
   );
 }
 
+/** Pulihkan / undo. */
+export function IconUndo(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 7v6h6" />
+      <path d="M3 13a9 9 0 1 0 3-7.7L3 7" />
+    </svg>
+  );
+}
+
 export function IconSun(props: IconProps) {
   return (
     <svg {...base(props)}>
@@ -509,6 +519,16 @@ export function IconExternalLink(props: IconProps) {
       <path d="M14 4h6v6" />
       <path d="M10 14 20 4" />
       <path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5" />
+    </svg>
+  );
+}
+
+export function IconPercent(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M19 5 5 19" />
+      <circle cx="6.5" cy="6.5" r="2.5" />
+      <circle cx="17.5" cy="17.5" r="2.5" />
     </svg>
   );
 }

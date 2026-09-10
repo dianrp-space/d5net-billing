@@ -71,6 +71,7 @@ func RegisterAll(api huma.API, d *Deps) {
 	registerClusters(api, d)
 	registerPlans(api, d)
 	registerPlanOffers(api, d)
+	registerPlanDiscounts(api, d)
 	registerSubscriptions(api, d)
 	registerRouters(api, d)
 	registerIPAM(api, d)
@@ -3048,10 +3049,11 @@ func registerInvoices(api huma.API, d *Deps) {
 		OperationID: "list-invoices", Method: http.MethodGet, Path: "/api/invoices",
 		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		Status string `query:"status"`
-		Search string `query:"search"`
-		Limit  int    `query:"limit"`
-		Offset int    `query:"offset"`
+		Status  string `query:"status"`
+		Search  string `query:"search"`
+		Trashed bool   `query:"trashed"`
+		Limit   int    `query:"limit"`
+		Offset  int    `query:"offset"`
 	}) (*struct {
 		Body struct {
 			Data  []store.Invoice `json:"data"`
@@ -3062,7 +3064,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		list, total, err := d.Store.ListInvoices(ctx, tid, input.Status, input.Search, input.Limit, input.Offset)
+		list, total, err := d.Store.ListInvoices(ctx, tid, input.Status, input.Search, input.Trashed, input.Limit, input.Offset)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -3112,6 +3114,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		if err := d.Store.RecordPayment(ctx, p); err != nil {
 			return nil, httpx.Internal(err)
 		}
+		_ = d.Store.CancelPendingPaymentIntentsForInvoice(ctx, tid, inv.ID)
 		if cashID, revID, err := d.Store.FindCashAndRevenueAccounts(ctx, tid); err == nil && !xid.IsNil(cashID) && !xid.IsNil(revID) {
 			_ = d.Store.RecordPaymentJournal(ctx, tid, amount, cashID, revID, inv.InvoiceNumber)
 		}
@@ -3119,14 +3122,116 @@ func registerInvoices(api huma.API, d *Deps) {
 		if cust != nil {
 			_ = d.Notify.SendPaymentConfirmation(ctx, tid, cust.Phone, inv.InvoiceNumber, amount)
 		}
-		if inv.SubscriptionID != nil {
-			stillDue, err := d.Store.SubscriptionHasPastDueUnpaid(ctx, tid, *inv.SubscriptionID)
-			if err == nil && !stillDue {
-				_ = d.Store.UpdateSubscriptionStatus(ctx, tid, *inv.SubscriptionID, "active")
-				resumeSubscription(ctx, d, tid, *inv.SubscriptionID)
-			}
-		}
+		resumeAfterInvoicePaid(ctx, d, tid, inv)
 		return &struct{ Body store.Payment }{Body: *p}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-invoice", Method: http.MethodDelete, Path: "/api/invoices/{id}",
+		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body map[string]string }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.DeleteInvoice(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("tagihan tidak ditemukan")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "deleted"}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "restore-invoice", Method: http.MethodPost, Path: "/api/invoices/{id}/restore",
+		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body map[string]string }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.RestoreInvoice(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("tagihan tidak ditemukan")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "restored"}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-payments", Method: http.MethodGet, Path: "/api/payments",
+		Tags: []string{"Payments"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Search  string `query:"search"`
+		Trashed bool   `query:"trashed"`
+		Limit   int    `query:"limit"`
+		Offset  int    `query:"offset"`
+	}) (*struct {
+		Body struct {
+			Data  []store.Payment `json:"data"`
+			Total int64           `json:"total"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		list, total, err := d.Store.ListPayments(ctx, tid, input.Search, input.Trashed, input.Limit, input.Offset)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		for i := range list {
+			list[i].Method = payment.NormalizeMethod(list[i].Method)
+		}
+		out := &struct {
+			Body struct {
+				Data  []store.Payment `json:"data"`
+				Total int64           `json:"total"`
+			}
+		}{}
+		out.Body.Data = list
+		out.Body.Total = total
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-payment", Method: http.MethodDelete, Path: "/api/payments/{id}",
+		Tags: []string{"Payments"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body map[string]string }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.DeletePayment(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("pembayaran tidak ditemukan")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "deleted"}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "restore-payment", Method: http.MethodPost, Path: "/api/payments/{id}/restore",
+		Tags: []string{"Payments"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body map[string]string }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.RestorePayment(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("pembayaran tidak ditemukan")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "restored"}}, nil
 	})
 }
 
@@ -4480,6 +4585,75 @@ func applyPlanChangeToRouter(ctx context.Context, d *Deps, tid xid.ID, sub *stor
 	return q, inv, outSub, nil
 }
 
+func collectPortalInvoices(ctx context.Context, d *Deps, tenantID xid.ID, byID map[xid.ID]*store.Customer) []store.Invoice {
+	var list []store.Invoice
+	for _, c := range byID {
+		rows, err := d.Store.ListCustomerInvoices(ctx, tenantID, c.ID, 100)
+		if err != nil {
+			continue
+		}
+		for _, inv := range rows {
+			inv.CustomerCode = c.CustomerCode
+			list = append(list, inv)
+		}
+	}
+	if list == nil {
+		list = []store.Invoice{}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].DueDate.After(list[j].DueDate)
+	})
+	return list
+}
+
+func collectPortalPayments(ctx context.Context, d *Deps, tenantID xid.ID, custs []*store.Customer) []store.Payment {
+	var payments []store.Payment
+	for _, c := range custs {
+		plist, _ := d.Store.ListCustomerPayments(ctx, tenantID, c.ID, 20)
+		for i := range plist {
+			plist[i].CustomerName = c.FullName
+			plist[i].CustomerCode = c.CustomerCode
+			plist[i].Method = payment.NormalizeMethod(plist[i].Method)
+			payments = append(payments, plist[i])
+		}
+		intents, _ := d.Store.ListCustomerOpenPaymentIntents(ctx, tenantID, c.ID, 20)
+		for i := range intents {
+			pi := intents[i]
+			row := store.Payment{
+				ID:           pi.ID,
+				TenantID:     pi.TenantID,
+				CustomerID:   pi.CustomerID,
+				InvoiceID:    pi.InvoiceID,
+				Amount:       pi.Amount,
+				Method:       payment.MethodFromProvider(pi.Provider),
+				Status:       pi.Status,
+				CreatedAt:    pi.CreatedAt,
+				CustomerName: c.FullName,
+				CustomerCode: c.CustomerCode,
+			}
+			if pi.InvoiceID != nil {
+				row.InvoiceNumber = d.Store.InvoiceNumberByID(ctx, tenantID, *pi.InvoiceID)
+			}
+			payments = append(payments, row)
+		}
+	}
+	if payments == nil {
+		payments = []store.Payment{}
+	}
+	sort.Slice(payments, func(i, j int) bool {
+		ti := payments[i].PaidAt
+		if ti == nil {
+			ti = &payments[i].CreatedAt
+		}
+		tj := payments[j].PaidAt
+		if tj == nil {
+			tj = &payments[j].CreatedAt
+		}
+		return ti.After(*tj)
+	})
+	return payments
+}
+
 func registerPortal(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "portal-login", Method: http.MethodPost, Path: "/api/portal/login",
@@ -4525,71 +4699,14 @@ func registerPortal(api huma.API, d *Deps) {
 		if subs == nil {
 			subs = []store.Subscription{}
 		}
-		// Tenant-wide recent invoices, then keep only rows of the logged-in accounts.
-		allInv, _, _ := d.Store.ListInvoices(ctx, ten.ID, "", "", 500, 0)
-		var custInvoices []store.Invoice
-		for _, inv := range allInv {
-			c, ok := byID[inv.CustomerID]
-			if !ok {
-				continue
-			}
-			inv.CustomerCode = c.CustomerCode
-			custInvoices = append(custInvoices, inv)
-		}
-		if custInvoices == nil {
-			custInvoices = []store.Invoice{}
-		}
-		sort.Slice(custInvoices, func(i, j int) bool {
-			return custInvoices[i].DueDate.After(custInvoices[j].DueDate)
-		})
-		var payments []store.Payment
+		custInvoices := collectPortalInvoices(ctx, d, ten.ID, byID)
+		payments := collectPortalPayments(ctx, d, ten.ID, custs)
 		var balance int64
 		for _, c := range custs {
-			plist, _ := d.Store.ListCustomerPayments(ctx, ten.ID, c.ID, 20)
-			for i := range plist {
-				plist[i].CustomerName = c.FullName
-				plist[i].CustomerCode = c.CustomerCode
-				plist[i].Method = payment.NormalizeMethod(plist[i].Method)
-				payments = append(payments, plist[i])
-			}
-			intents, _ := d.Store.ListCustomerOpenPaymentIntents(ctx, ten.ID, c.ID, 20)
-			for i := range intents {
-				pi := intents[i]
-				row := store.Payment{
-					ID:           pi.ID,
-					TenantID:     pi.TenantID,
-					CustomerID:   pi.CustomerID,
-					InvoiceID:    pi.InvoiceID,
-					Amount:       pi.Amount,
-					Method:       payment.MethodFromProvider(pi.Provider),
-					Status:       pi.Status,
-					CreatedAt:    pi.CreatedAt,
-					CustomerName: c.FullName,
-					CustomerCode: c.CustomerCode,
-				}
-				if pi.InvoiceID != nil {
-					row.InvoiceNumber = d.Store.InvoiceNumberByID(ctx, ten.ID, *pi.InvoiceID)
-				}
-				payments = append(payments, row)
-			}
 			if b, berr := d.Store.GetWallet(ctx, ten.ID, c.ID); berr == nil {
 				balance += b
 			}
 		}
-		if payments == nil {
-			payments = []store.Payment{}
-		}
-		sort.Slice(payments, func(i, j int) bool {
-			ti := payments[i].PaidAt
-			if ti == nil {
-				ti = &payments[i].CreatedAt
-			}
-			tj := payments[j].PaidAt
-			if tj == nil {
-				tj = &payments[j].CreatedAt
-			}
-			return ti.After(*tj)
-		})
 		out := &struct {
 			Body struct {
 				Customer      store.Customer       `json:"customer"`
@@ -5051,6 +5168,58 @@ func registerPortal(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "portal-list-invoices", Method: http.MethodGet, Path: "/api/portal/invoices",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		Authorization string `header:"Authorization"`
+	}) (*struct {
+		Body struct {
+			Data []store.Invoice `json:"data"`
+		}
+	}, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		byID := map[xid.ID]*store.Customer{}
+		for _, c := range custs {
+			byID[c.ID] = c
+		}
+		list := collectPortalInvoices(ctx, d, ten.ID, byID)
+		return &struct {
+			Body struct {
+				Data []store.Invoice `json:"data"`
+			}
+		}{Body: struct {
+			Data []store.Invoice `json:"data"`
+		}{Data: list}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-list-payments", Method: http.MethodGet, Path: "/api/portal/payments",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		Authorization string `header:"Authorization"`
+	}) (*struct {
+		Body struct {
+			Data []store.Payment `json:"data"`
+		}
+	}, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		list := collectPortalPayments(ctx, d, ten.ID, custs)
+		return &struct {
+			Body struct {
+				Data []store.Payment `json:"data"`
+			}
+		}{Body: struct {
+			Data []store.Payment `json:"data"`
+		}{Data: list}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "portal-list-plans", Method: http.MethodGet, Path: "/api/portal/plans",
 		Tags:    []string{"Portal"},
 		Summary: "Catalog of portal-visible plans for the logged-in customer",
@@ -5065,24 +5234,31 @@ func registerPortal(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		seen := map[xid.ID]struct{}{}
-		var list []store.PortalPlanOption
+		byID := map[xid.ID]store.PortalPlanOption{}
 		for _, c := range custs {
 			opts, err := d.Store.ListPortalPlans(ctx, ten.ID, c.ClusterID, "", xid.Nil())
 			if err != nil {
 				return nil, httpx.Internal(err)
 			}
-			for _, p := range opts {
-				if _, ok := seen[p.ID]; ok {
+			for i := range opts {
+				p := opts[i]
+				d.Store.DecoratePortalPlanPrice(ctx, ten.ID, c.ID, &p)
+				if prev, ok := byID[p.ID]; ok && p.Price >= prev.Price {
 					continue
 				}
-				seen[p.ID] = struct{}{}
-				list = append(list, p)
+				byID[p.ID] = p
 			}
 		}
-		if list == nil {
-			list = []store.PortalPlanOption{}
+		list := make([]store.PortalPlanOption, 0, len(byID))
+		for _, p := range byID {
+			list = append(list, p)
 		}
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].Price != list[j].Price {
+				return list[i].Price < list[j].Price
+			}
+			return list[i].Name < list[j].Name
+		})
 		return &struct {
 			Body struct {
 				Data []store.PortalPlanOption `json:"data"`
@@ -5110,6 +5286,9 @@ func registerPortal(api huma.API, d *Deps) {
 		list, err := d.Store.ListPortalPlans(ctx, ten.ID, cust.ClusterID, sub.ServiceType, sub.PlanID)
 		if err != nil {
 			return nil, httpx.Internal(err)
+		}
+		for i := range list {
+			d.Store.DecoratePortalPlanPrice(ctx, ten.ID, cust.ID, &list[i])
 		}
 		return &struct {
 			Body struct {

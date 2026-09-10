@@ -1,10 +1,12 @@
 export type AdminPage =
   | "dashboard"
   | "customers"
+  | "discounts"
   | "clusters"
   | "plans"
   | "subscriptions"
   | "invoices"
+  | "payments"
   | "routers"
   | "ip-pool"
   | "tickets"
@@ -31,10 +33,12 @@ export type AdminPage =
 export const ADMIN_PAGES: AdminPage[] = [
   "dashboard",
   "customers",
+  "discounts",
   "clusters",
   "plans",
   "subscriptions",
   "invoices",
+  "payments",
   "routers",
   "ip-pool",
   "tickets",
@@ -72,10 +76,12 @@ export function isAdminPage(value: string): value is AdminPage {
 export const pageTitles: Record<AdminPage, string> = {
   dashboard: "Overview",
   customers: "Pelanggan",
+  discounts: "Diskon",
   clusters: "Cluster / POP",
   plans: "Paket",
   subscriptions: "Secrets",
   invoices: "Tagihan",
+  payments: "Pembayaran",
   routers: "Router",
   "ip-pool": "IP Pool",
   tickets: "Tiket",

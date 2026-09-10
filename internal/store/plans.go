@@ -126,14 +126,16 @@ func (s *Store) DeletePlan(ctx context.Context, tenantID xid.ID, id xid.ID) erro
 
 // PortalPlanOption is a customer-facing plan card (price already resolved for cluster).
 type PortalPlanOption struct {
-	ID           xid.ID `json:"id"`
-	Name         string `json:"name"`
-	Code         string `json:"code"`
-	Price        int64  `json:"price"`
-	DownloadMbps int    `json:"download_mbps"`
-	UploadMbps   int    `json:"upload_mbps"`
-	ServiceType  string `json:"service_type"`
-	BillingCycle string `json:"billing_cycle"`
+	ID            xid.ID `json:"id"`
+	Name          string `json:"name"`
+	Code          string `json:"code"`
+	Price         int64  `json:"price"`
+	OriginalPrice int64  `json:"original_price,omitempty"`
+	DiscountLabel string `json:"discount_label,omitempty"`
+	DownloadMbps  int    `json:"download_mbps"`
+	UploadMbps    int    `json:"upload_mbps"`
+	ServiceType   string `json:"service_type"`
+	BillingCycle  string `json:"billing_cycle"`
 }
 
 // ListPortalPlans returns active, portal-visible plans the customer may pick.
@@ -430,6 +432,7 @@ func (s *Store) ListSubscriptionsNeedingResume(ctx context.Context, tenantID xid
 		    SELECT 1 FROM invoices i
 		    WHERE i.tenant_id = s.tenant_id
 		      AND i.subscription_id = s.id
+		      AND i.deleted_at IS NULL
 		      AND i.status IN ('issued','partial','overdue')
 		      AND i.total_amount > i.paid_amount
 		      AND (i.due_date::timestamptz + make_interval(days => $2)) < NOW()
@@ -537,6 +540,7 @@ func (s *Store) ListOverdueSubscriptions(ctx context.Context, tenantID xid.ID, g
 		    SELECT 1 FROM invoices i
 		    WHERE i.tenant_id = s.tenant_id
 		      AND i.subscription_id = s.id
+		      AND i.deleted_at IS NULL
 		      AND i.status IN ('issued','partial','overdue')
 		      AND i.total_amount > i.paid_amount
 		      AND (i.due_date::timestamptz + make_interval(days => $2)) < NOW()

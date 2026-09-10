@@ -1341,9 +1341,9 @@ func (s *Store) DashboardStats(ctx context.Context, tenantID xid.ID) (map[string
 	var activeCustomers, activeSubs, unpaidInvoices, monthlyRevenue int64
 	_ = s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM customers WHERE tenant_id=$1 AND is_active=true AND dismantled_at IS NULL`, tenantID).Scan(&activeCustomers)
 	_ = s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM subscriptions WHERE tenant_id=$1 AND status='active'`, tenantID).Scan(&activeSubs)
-	_ = s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM invoices WHERE tenant_id=$1 AND status IN ('issued','partial','overdue')`, tenantID).Scan(&unpaidInvoices)
+	_ = s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM invoices WHERE tenant_id=$1 AND deleted_at IS NULL AND status IN ('issued','partial','overdue')`, tenantID).Scan(&unpaidInvoices)
 	_ = s.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='paid'
+		SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='paid' AND deleted_at IS NULL
 		AND paid_at >= date_trunc('month', NOW())
 	`, tenantID).Scan(&monthlyRevenue)
 	stats["mode"] = "admin"
@@ -1655,7 +1655,7 @@ func (s *Store) RevenueChart(ctx context.Context, tenantID xid.ID, months int) (
 	rows, err := s.Pool.Query(ctx, `
 		SELECT to_char(date_trunc('month', paid_at), 'YYYY-MM') as month, COALESCE(SUM(amount),0)
 		FROM payments
-		WHERE tenant_id=$1 AND status='paid'
+		WHERE tenant_id=$1 AND status='paid' AND deleted_at IS NULL
 		  AND paid_at >= NOW() - ($2 * INTERVAL '1 month')
 		GROUP BY 1 ORDER BY 1
 	`, tenantID, months)

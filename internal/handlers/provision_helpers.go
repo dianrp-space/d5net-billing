@@ -414,6 +414,31 @@ func clearCustomerStaticIPOnRouter(ctx context.Context, d *Deps, pool *store.IPP
 	}
 }
 
+func resumeAfterInvoicePaid(ctx context.Context, d *Deps, tenantID xid.ID, inv *store.Invoice) {
+	if inv == nil {
+		return
+	}
+	ids := map[xid.ID]struct{}{}
+	if inv.SubscriptionID != nil && !xid.IsNil(*inv.SubscriptionID) {
+		ids[*inv.SubscriptionID] = struct{}{}
+	}
+	cid := inv.CustomerID
+	subs, _, err := d.Store.ListSubscriptions(ctx, tenantID, "", &cid, 200, 0)
+	if err == nil {
+		for _, sub := range subs {
+			ids[sub.ID] = struct{}{}
+		}
+	}
+	for sid := range ids {
+		stillDue, err := d.Store.SubscriptionHasPastDueUnpaid(ctx, tenantID, sid)
+		if err != nil || stillDue {
+			continue
+		}
+		_ = d.Store.UpdateSubscriptionStatus(ctx, tenantID, sid, "active")
+		resumeSubscription(ctx, d, tenantID, sid)
+	}
+}
+
 func resumeSubscription(ctx context.Context, d *Deps, tenantID xid.ID, subID xid.ID) {
 	sub, err := d.Store.GetSubscription(ctx, tenantID, subID)
 	if err != nil {
@@ -588,13 +613,12 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 		return err
 	}
 	_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, "paid")
+	if pi.InvoiceID != nil {
+		_ = d.Store.CancelPendingPaymentIntentsForInvoice(ctx, pi.TenantID, *pi.InvoiceID)
+	}
 
-	if inv != nil && inv.SubscriptionID != nil {
-		stillDue, err := d.Store.SubscriptionHasPastDueUnpaid(ctx, pi.TenantID, *inv.SubscriptionID)
-		if err == nil && !stillDue {
-			_ = d.Store.UpdateSubscriptionStatus(ctx, pi.TenantID, *inv.SubscriptionID, "active")
-			resumeSubscription(ctx, d, pi.TenantID, *inv.SubscriptionID)
-		}
+	if inv != nil {
+		resumeAfterInvoicePaid(ctx, d, pi.TenantID, inv)
 	}
 
 	// Optional tip credit (0 = skip).

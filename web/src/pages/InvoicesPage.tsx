@@ -22,7 +22,11 @@ export function InvoicesPage() {
         limit: String(limit),
         offset: String(page * limit),
       });
-      if (status) params.set("status", status);
+      if (status === "trashed") {
+        params.set("trashed", "true");
+      } else if (status) {
+        params.set("status", status);
+      }
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       return api<{
         data: {
@@ -33,6 +37,7 @@ export function InvoicesPage() {
           paid_amount: number;
           status: string;
           due_date: string;
+          deleted_at?: string | null;
         }[];
         total: number;
       }>(`/api/invoices?${params}`);
@@ -51,7 +56,7 @@ export function InvoicesPage() {
     if (!ok) return;
     try {
       const params = new URLSearchParams();
-      if (status) params.set("status", status);
+      if (status && status !== "trashed") params.set("status", status);
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       const qs = params.toString();
       await apiDownload(`/api/reports/invoices.csv${qs ? `?${qs}` : ""}`, "invoices.csv");
@@ -62,6 +67,11 @@ export function InvoicesPage() {
 
   return (
     <Section title="Tagihan">
+      <p className="mb-3 text-sm text-[var(--muted)]">
+        {status === "trashed"
+          ? "Tagihan di sampah. Pulihkan jika terhapus karena kesalahan. Portal pelanggan tidak menampilkan item ini."
+          : "Hapus memindahkan tagihan ke sampah (filter Sampah), bukan menghapus permanen."}
+      </p>
       <ListToolbar
         search={search}
         onSearchChange={(v) => {
@@ -83,6 +93,7 @@ export function InvoicesPage() {
               { value: "partial", label: "Bayar sebagian" },
               { value: "overdue", label: "Jatuh tempo" },
               { value: "paid", label: "Sudah bayar" },
+              { value: "trashed", label: "Sampah" },
             ],
           },
         ]}
@@ -109,6 +120,7 @@ export function InvoicesPage() {
             id={i.id}
             invoiceNumber={i.invoice_number}
             status={i.status}
+            trashed={status === "trashed"}
             onDone={() => qc.invalidateQueries({ queryKey: ["invoices"] })}
           />,
         ])}

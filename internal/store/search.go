@@ -103,6 +103,7 @@ func (s *Store) GlobalSearch(ctx context.Context, tenantID xid.ID, q string, per
 			FROM invoices i
 			JOIN customers c ON c.id = i.customer_id
 			WHERE i.tenant_id = $1
+			  AND i.deleted_at IS NULL
 			  AND (i.invoice_number ILIKE $2 OR c.full_name ILIKE $2 OR c.customer_code ILIKE $2)
 			ORDER BY i.created_at DESC
 			LIMIT $3

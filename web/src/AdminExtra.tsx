@@ -4,7 +4,7 @@ import ReactECharts from "echarts-for-react";
 import { api, apiDownload, getToken } from "./api";
 import { useAppDialog } from "./confirm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconTrash } from "./icons";
+import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconTrash, IconUndo } from "./icons";
 import { ListToolbar, matchesQuery } from "./ListToolbar";
 import { toastError, toastSuccess } from "./swal";
 import { PAY_METHOD_TUNAI } from "./payMethod";
@@ -879,22 +879,47 @@ export function InvoiceActions({
   id,
   invoiceNumber,
   status,
+  trashed,
   onDone,
 }: {
   id: string;
   invoiceNumber: string;
   status: string;
+  trashed?: boolean;
   onDone?: () => void;
 }) {
+  const qc = useQueryClient();
   const { confirm } = useAppDialog();
-  const unpaid = status !== "paid" && status !== "void" && status !== "cancelled";
+  const unpaid = !trashed && status !== "paid" && status !== "void" && status !== "cancelled";
+  function refreshBilling() {
+    void qc.invalidateQueries({ queryKey: ["invoices"] });
+    void qc.invalidateQueries({ queryKey: ["invoices-recent"] });
+    void qc.invalidateQueries({ queryKey: ["payments"] });
+    onDone?.();
+  }
   const pay = useMutation({
     mutationFn: () => api(`/api/invoices/${id}/pay`, { method: "POST", body: JSON.stringify({ method: PAY_METHOD_TUNAI }) }),
     onSuccess: () => {
       void toastSuccess("Pembayaran dicatat");
-      onDone?.();
+      refreshBilling();
     },
     onError: (e: Error) => void toastError(e.message || "Gagal bayar"),
+  });
+  const remove = useMutation({
+    mutationFn: () => api(`/api/invoices/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void toastSuccess("Tagihan dipindah ke sampah");
+      refreshBilling();
+    },
+    onError: (e: Error) => void toastError(e.message || "Gagal hapus tagihan"),
+  });
+  const restore = useMutation({
+    mutationFn: () => api(`/api/invoices/${id}/restore`, { method: "POST" }),
+    onSuccess: () => {
+      void toastSuccess("Tagihan dipulihkan");
+      refreshBilling();
+    },
+    onError: (e: Error) => void toastError(e.message || "Gagal pulihkan tagihan"),
   });
   const [pdfBusy, setPdfBusy] = useState(false);
 
@@ -929,6 +954,40 @@ export function InvoiceActions({
       >
         <IconDownload />
       </IconButton>
+      {trashed ? (
+        <IconButton
+          label="Pulihkan tagihan"
+          disabled={restore.isPending}
+          onClick={() => {
+            void confirm({
+              title: "Pulihkan tagihan",
+              description: `Kembalikan tagihan ${invoiceNumber || id} beserta pembayaran yang ikut terhapus?`,
+              confirmLabel: "Pulihkan",
+            }).then((ok) => {
+              if (ok) restore.mutate();
+            });
+          }}
+        >
+          <IconUndo />
+        </IconButton>
+      ) : (
+        <IconButton
+          label="Hapus tagihan"
+          danger
+          disabled={remove.isPending}
+          onClick={() => {
+            void confirm({
+              title: "Hapus tagihan",
+              description: `Pindahkan tagihan ${invoiceNumber || id} ke sampah? Pembayaran terkait ikut disembunyikan. Bisa dipulihkan dari filter Sampah.`,
+              confirmLabel: "Hapus",
+            }).then((ok) => {
+              if (ok) remove.mutate();
+            });
+          }}
+        >
+          <IconTrash />
+        </IconButton>
+      )}
     </span>
   );
 }

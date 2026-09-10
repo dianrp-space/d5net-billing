@@ -27,9 +27,11 @@ const kindLabel: Record<string, string> = {
 const menuHits: { page: AdminPage; title: string; keywords: string }[] = [
   { page: "dashboard", title: "Dashboard", keywords: "dashboard overview" },
   { page: "customers", title: "Pelanggan", keywords: "pelanggan customer secret langganan subscription pppoe" },
+  { page: "discounts", title: "Diskon", keywords: "diskon discount promo harga paket potongan" },
   { page: "clusters", title: "Cluster / POP", keywords: "cluster pop site" },
   { page: "plans", title: "Paket", keywords: "paket plan harga grace jatuh tempo tenggang" },
   { page: "invoices", title: "Tagihan", keywords: "tagihan invoice" },
+  { page: "payments", title: "Pembayaran", keywords: "pembayaran payment riwayat log bayar tunai" },
   { page: "routers", title: "Router", keywords: "router mikrotik" },
   { page: "ip-pool", title: "IP Pool", keywords: "ipam ip pool cidr gateway router cluster" },
   { page: "odp", title: "MAP FTTH", keywords: "odp ftth jalur kabel peta map" },
