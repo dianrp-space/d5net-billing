@@ -398,6 +398,9 @@ func (w *Worker) resumePaidSubscriptions(ctx context.Context, tenantID xid.ID) m
 		return tried
 	}
 	for _, subID := range ids {
+		if free, ferr := w.store.IsFreeSubscription(ctx, tenantID, subID); ferr == nil && free {
+			continue
+		}
 		tried[subID] = struct{}{}
 		w.resumeSubscription(ctx, tenantID, subID)
 	}
@@ -474,6 +477,9 @@ func (w *Worker) repairIsolirSecrets(ctx context.Context, tenantID xid.ID, overd
 				continue
 			}
 			if _, skip := tried[sub.ID]; skip {
+				continue
+			}
+			if free, ferr := w.store.IsFreeSubscription(ctx, tenantID, sub.ID); ferr == nil && free {
 				continue
 			}
 			want := strings.TrimSpace(sub.ServiceType)
@@ -595,6 +601,11 @@ func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, offsets []
 		cust, err := w.store.GetCustomer(ctx, tenantID, inv.CustomerID)
 		if err != nil {
 			continue
+		}
+		if inv.SubscriptionID != nil {
+			if free, ferr := w.store.IsFreeSubscription(ctx, tenantID, *inv.SubscriptionID); ferr == nil && free {
+				continue
+			}
 		}
 		due := inv.DueDate
 		now := time.Now()

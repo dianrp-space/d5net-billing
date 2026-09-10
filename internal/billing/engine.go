@@ -57,6 +57,22 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 	if err != nil {
 		return nil, err
 	}
+	// Free plan (base/offer price 0): never bill, but keep the billing clock moving
+	// so it is not re-checked every cycle.
+	if basePrice, berr := e.store.ResolvePlanPrice(ctx, tenantID, plan.ID, cust.ClusterID); berr == nil && basePrice == 0 {
+		// Only advance the clock once it is actually due; on activation the anchor
+		// is still in the future and must stay put.
+		if sub.NextBillAt == nil || !sub.NextBillAt.After(time.Now()) {
+			var nextBill time.Time
+			if sub.NextBillAt != nil {
+				nextBill = e.NextBillDate(*sub.NextBillAt, plan.BillingCycle)
+			} else {
+				nextBill = e.NextBillDate(time.Now(), plan.BillingCycle)
+			}
+			_, _ = e.store.Pool.Exec(ctx, `UPDATE subscriptions SET next_bill_at = $3 WHERE tenant_id=$1 AND id=$2`, tenantID, subscriptionID, nextBill)
+		}
+		return nil, nil
+	}
 	var disc *store.PlanDiscount
 	if price, applied, err := e.store.ResolveBilledPlanPrice(ctx, tenantID, plan.ID, cust.ID, cust.ClusterID, time.Now()); err == nil {
 		plan.Price = price
@@ -197,7 +213,7 @@ func (e *Engine) ProcessDueBilling(ctx context.Context, tenantID xid.ID) (int, e
 	}
 	count := 0
 	for _, sub := range subs {
-		if _, err := e.GenerateInvoiceForSubscription(ctx, tenantID, sub.ID); err == nil {
+		if inv, err := e.GenerateInvoiceForSubscription(ctx, tenantID, sub.ID); err == nil && inv != nil {
 			count++
 		}
 	}
@@ -211,6 +227,9 @@ func (e *Engine) ProcessOverdueSuspensions(ctx context.Context, tenantID xid.ID)
 	}
 	var ids []xid.ID
 	for _, sub := range subs {
+		if free, ferr := e.store.IsFreeSubscription(ctx, tenantID, sub.ID); ferr == nil && free {
+			continue
+		}
 		ids = append(ids, sub.ID)
 	}
 	return ids, nil

@@ -493,7 +493,7 @@ export function PlansPage() {
         rows={filteredPlans.map((p) => [
           p.name,
           p.code,
-          formatRp(p.price),
+          p.price === 0 ? "Gratis" : formatRp(p.price),
           `DL ${p.download_mbps} / UL ${p.upload_mbps || p.download_mbps}`,
           p.service_type === "hotspot"
             ? [
@@ -632,7 +632,12 @@ export function PlansPage() {
             disabled={Boolean(editId)}
             title={editId ? "Kode tidak bisa diubah" : undefined}
           />
-          <Input type="number" placeholder="Harga dasar" value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} />
+          <div className="grid gap-1">
+            <Input type="number" placeholder="Harga dasar" value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} />
+            <p className="text-xs text-[var(--muted)]">
+              Isi 0 untuk paket gratis (mis. fasilitas umum): tidak ditagih & tidak diisolir otomatis.
+            </p>
+          </div>
           <Input placeholder="Profile RouterOS (kosong = kode)" value={form.profile_name} onChange={(e) => setForm({ ...form, profile_name: e.target.value })} />
           <Input
             placeholder="Profil isolir RouterOS"

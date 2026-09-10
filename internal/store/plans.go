@@ -208,6 +208,8 @@ type Subscription struct {
 	ODPCode      string     `json:"odp_code,omitempty"`
 	ODPName      string     `json:"odp_name,omitempty"`
 	PortNumber   *int       `json:"port_number,omitempty"`
+	// IsFree marks a subscription on a 0-price plan/offer (no billing/auto-isolir).
+	IsFree bool `json:"is_free,omitempty"`
 }
 
 func (s *Store) ListSubscriptions(ctx context.Context, tenantID xid.ID, status string, customerID *xid.ID, limit, offset int) ([]Subscription, int64, error) {
@@ -235,7 +237,13 @@ func (s *Store) ListSubscriptions(ctx context.Context, tenantID xid.ID, status s
 	q := `
 		SELECT s.id, s.tenant_id, s.customer_id, s.plan_id, s.router_id, s.username, s.password, s.service_type, s.status,
 		       s.started_at, s.expires_at, s.next_bill_at, s.suspended_at, c.full_name, c.customer_code, p.name,
-		       op.odp_id, COALESCE(o.code, ''), COALESCE(o.name, ''), op.port_number
+		       op.odp_id, COALESCE(o.code, ''), COALESCE(o.name, ''), op.port_number,
+		       COALESCE((
+		           SELECT po.price FROM plan_cluster_offers po
+		           WHERE po.tenant_id = s.tenant_id AND po.plan_id = s.plan_id
+		             AND po.cluster_id = c.cluster_id AND po.is_active = true
+		           LIMIT 1
+		       ), p.price) = 0 AS is_free
 		FROM subscriptions s
 		JOIN customers c ON c.id = s.customer_id
 		JOIN plans p ON p.id = s.plan_id
@@ -254,7 +262,7 @@ func (s *Store) ListSubscriptions(ctx context.Context, tenantID xid.ID, status s
 		var portNum *int
 		if err := rows.Scan(&sub.ID, &sub.TenantID, &sub.CustomerID, &sub.PlanID, &sub.RouterID, &sub.Username, &sub.Password,
 			&sub.ServiceType, &sub.Status, &sub.StartedAt, &sub.ExpiresAt, &sub.NextBillAt, &sub.SuspendedAt,
-			&sub.CustomerName, &sub.CustomerCode, &sub.PlanName, &odpID, &sub.ODPCode, &sub.ODPName, &portNum); err != nil {
+			&sub.CustomerName, &sub.CustomerCode, &sub.PlanName, &odpID, &sub.ODPCode, &sub.ODPName, &portNum, &sub.IsFree); err != nil {
 			return nil, 0, err
 		}
 		sub.ODPID = odpID
@@ -310,6 +318,29 @@ func (s *Store) PlanNameForSubscription(ctx context.Context, tenantID xid.ID, su
 		return ""
 	}
 	return name
+}
+
+// IsFreeSubscription reports whether a subscription is billed at base price 0
+// (free plan, or a 0-price cluster offer). Free subscriptions skip billing,
+// auto-isolir, auto-resume, and dunning; manual admin actions still apply.
+func (s *Store) IsFreeSubscription(ctx context.Context, tenantID, subscriptionID xid.ID) (bool, error) {
+	var free bool
+	err := s.Pool.QueryRow(ctx, `
+		SELECT COALESCE((
+			SELECT o.price FROM plan_cluster_offers o
+			WHERE o.tenant_id = s.tenant_id AND o.plan_id = s.plan_id
+			  AND o.cluster_id = c.cluster_id AND o.is_active = true
+			LIMIT 1
+		), p.price) = 0
+		FROM subscriptions s
+		JOIN customers c ON c.id = s.customer_id
+		JOIN plans p ON p.id = s.plan_id
+		WHERE s.tenant_id = $1 AND s.id = $2
+	`, tenantID, subscriptionID).Scan(&free)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	return free, err
 }
 
 // FindProvisionableSubscriptionByCustomer returns the best subscription to sync for a customer

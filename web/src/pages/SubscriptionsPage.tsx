@@ -22,6 +22,7 @@ import {
   Button,
 } from "../ui";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 
 function clampCycleStartDay(n: number | undefined) {
   const v = Math.floor(Number(n) || 1);
@@ -78,6 +79,7 @@ export function SubscriptionsPage({
     password?: string | null;
     customer_name: string;
     plan_name: string;
+    is_free?: boolean;
     status: string;
     started_at?: string | null;
     next_bill_at?: string | null;
@@ -807,7 +809,10 @@ export function SubscriptionsPage({
             rows={subRows.map((s) => [
           s.username,
           <SecretPasswordCell key="pw" password={s.password} />,
-          s.plan_name,
+          <span key="plan" className="inline-flex flex-wrap items-center gap-1.5">
+            {s.plan_name}
+            {s.is_free ? <Badge variant="success">Gratis</Badge> : null}
+          </span>,
           s.odp_code
             ? `${s.odp_code}${s.port_number != null ? ` · P${s.port_number}` : ""}`
             : "—",
