@@ -93,7 +93,7 @@ function formatDistance(meters: number): string {
 type MapMarkerKind = "pop" | "odp" | "customer";
 
 export const MAP_MARKER = {
-  pop: { color: "#5A5A40", label: "POP" },
+  pop: { color: "#d946ef", label: "POP" },
   odp: { color: "#2563eb", label: "ODP" },
   customer: { color: "#15803d", label: "Pelanggan" },
 } as const;
