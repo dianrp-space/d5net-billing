@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import ReactECharts from "echarts-for-react";
+import ReactEChartsCore from "echarts-for-react/lib/core";
+import echarts from "./echarts";
 import { api, apiDownload, getToken } from "./api";
 import { useAppDialog } from "./confirm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -359,7 +360,8 @@ export function AccountingPage() {
                 <h3 className="eyebrow">Arus kas</h3>
                 <span className="text-xs text-[var(--muted)]">6 bulan terakhir</span>
               </div>
-              <ReactECharts
+              <ReactEChartsCore
+                echarts={echarts}
                 style={{ height: 280 }}
                 option={{
                   backgroundColor: "transparent",

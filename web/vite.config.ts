@@ -30,9 +30,16 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ["react", "react-dom"],
-          charts: ["echarts", "echarts-for-react"],
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("echarts")) return "charts";
+          if (id.includes("react-dom") || id.includes("scheduler") || id.includes("/react/")) return "vendor";
+          if (id.includes("@radix-ui")) return "radix";
+          if (id.includes("@tanstack")) return "tanstack";
+          if (id.includes("lucide-react")) return "icons";
+          if (id.includes("sweetalert2")) return "sweetalert";
+          if (id.includes("leaflet")) return "leaflet";
+          return "vendor";
         },
       },
     },

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import ReactECharts from "echarts-for-react";
+import ReactEChartsCore from "echarts-for-react/lib/core";
+import echarts from "../echarts";
 import { api, apiDownload } from "../api";
 import { IconTicket, IconUsers } from "../icons";
 import type { AdminPage } from "../admin/pages";
@@ -155,7 +156,8 @@ export function DashboardPage({
           <p className="mb-4 text-xs text-[var(--muted)]">
             Total bulan ini: <span className="text-xl font-bold text-[var(--text)]">{formatRp(Number(s.monthly_revenue ?? 0))}</span>
           </p>
-          <ReactECharts
+          <ReactEChartsCore
+            echarts={echarts}
             style={{ height: 280 }}
             option={{
               backgroundColor: "transparent",

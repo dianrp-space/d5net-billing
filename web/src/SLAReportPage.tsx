@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import ReactECharts from "echarts-for-react";
+import ReactEChartsCore from "echarts-for-react/lib/core";
+import echarts from "./echarts";
 import { api } from "./api";
 import { Badge } from "./components/ui/badge";
 import { Card, Label, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table } from "./ui";
@@ -230,7 +231,8 @@ export function SLAReportPage() {
               <p className="mb-4 text-xs text-[var(--muted)]">
                 Gangguan: {r.outage_count} dari {r.total} tiket ({formatPct(r.outage_pct)})
               </p>
-              <ReactECharts
+              <ReactEChartsCore
+                echarts={echarts}
                 style={{ height: 260 }}
                 option={{
                   backgroundColor: "transparent",
@@ -254,7 +256,8 @@ export function SLAReportPage() {
             <div className="panel-card panel-card-pad">
               <h3 className="eyebrow mb-1">Rata-rata waktu resolve</h3>
               <p className="mb-4 text-xs text-[var(--muted)]">Per kategori (jam)</p>
-              <ReactECharts
+              <ReactEChartsCore
+                echarts={echarts}
                 style={{ height: 260 }}
                 option={{
                   backgroundColor: "transparent",
