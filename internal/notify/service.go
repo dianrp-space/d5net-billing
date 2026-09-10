@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -197,6 +198,7 @@ func (s *Service) SendTest(ctx context.Context, tenantID xid.ID, channel, recipi
 type waDeviceCfg struct {
 	DeviceID string `json:"device_id"`
 	Label    string `json:"label"`
+	Priority int    `json:"priority"`
 }
 
 type tenantMessagingCfg struct {
@@ -239,6 +241,7 @@ func (s *Service) tenantWhatsAppClients(ctx context.Context, tenantID xid.ID) []
 			devices = []waDeviceCfg{{}}
 		}
 	}
+	sort.SliceStable(devices, func(i, j int) bool { return devices[i].Priority < devices[j].Priority })
 	clients := make([]*wa.Client, 0, len(devices))
 	for _, dev := range devices {
 		clients = append(clients, wa.NewClient(wa.Config{

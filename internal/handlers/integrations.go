@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -105,6 +106,7 @@ type messagingIntegrationStored struct {
 type waDeviceStored struct {
 	DeviceID string `json:"device_id"`
 	Label    string `json:"label"`
+	Priority int    `json:"priority"`
 }
 
 type messagingIntegrationView struct {
@@ -117,6 +119,7 @@ type messagingIntegrationView struct {
 type waDeviceView struct {
 	DeviceID string `json:"device_id"`
 	Label    string `json:"label"`
+	Priority int    `json:"priority"`
 }
 
 type whatsappIntegrationView struct {
@@ -822,8 +825,8 @@ func messagingView(d *Deps, s messagingIntegrationStored) messagingIntegrationVi
 
 func whatsappView(d *Deps, s messagingIntegrationStored) whatsappIntegrationView {
 	devices := make([]waDeviceView, 0, len(s.WhatsAppDevices))
-	for _, dev := range effectiveWADevices(s) {
-		devices = append(devices, waDeviceView{DeviceID: dev.DeviceID, Label: dev.Label})
+	for i, dev := range effectiveWADevices(s) {
+		devices = append(devices, waDeviceView{DeviceID: dev.DeviceID, Label: dev.Label, Priority: i})
 	}
 	return whatsappIntegrationView{
 		Configured: strings.TrimSpace(s.WhatsAppBaseURL) != "",
@@ -835,11 +838,15 @@ func whatsappView(d *Deps, s messagingIntegrationStored) whatsappIntegrationView
 	}
 }
 
-// normalizeWADevices trims/dedupes device entries from a request.
+// normalizeWADevices trims/dedupes device entries and assigns priority from the
+// order (explicit priority wins, else request order). First item is tried first.
 func normalizeWADevices(in []waDeviceView) []waDeviceStored {
+	sorted := make([]waDeviceView, len(in))
+	copy(sorted, in)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Priority < sorted[j].Priority })
 	seen := map[string]struct{}{}
-	out := make([]waDeviceStored, 0, len(in))
-	for _, dev := range in {
+	out := make([]waDeviceStored, 0, len(sorted))
+	for _, dev := range sorted {
 		id := strings.TrimSpace(dev.DeviceID)
 		if id == "" {
 			continue
@@ -848,21 +855,30 @@ func normalizeWADevices(in []waDeviceView) []waDeviceStored {
 			continue
 		}
 		seen[id] = struct{}{}
-		out = append(out, waDeviceStored{DeviceID: id, Label: strings.TrimSpace(dev.Label)})
+		out = append(out, waDeviceStored{
+			DeviceID: id,
+			Label:    strings.TrimSpace(dev.Label),
+			Priority: len(out),
+		})
 	}
 	return out
 }
 
-// effectiveWADevices returns the configured devices, falling back to the legacy
-// single device id, then to a single default (empty id = gateway default).
+// effectiveWADevices returns the configured devices ordered by priority,
+// falling back to the legacy single device id, then to a single default
+// (empty id = gateway default).
 func effectiveWADevices(s messagingIntegrationStored) []waDeviceStored {
-	if len(s.WhatsAppDevices) > 0 {
-		return s.WhatsAppDevices
+	var out []waDeviceStored
+	switch {
+	case len(s.WhatsAppDevices) > 0:
+		out = append(out, s.WhatsAppDevices...)
+	case strings.TrimSpace(s.WhatsAppDeviceID) != "":
+		out = []waDeviceStored{{DeviceID: strings.TrimSpace(s.WhatsAppDeviceID)}}
+	default:
+		out = []waDeviceStored{{}}
 	}
-	if id := strings.TrimSpace(s.WhatsAppDeviceID); id != "" {
-		return []waDeviceStored{{DeviceID: id}}
-	}
-	return []waDeviceStored{{}}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Priority < out[j].Priority })
+	return out
 }
 
 func qrisExpiresMinutes(s paymentIntegrationStored, d *Deps) int {

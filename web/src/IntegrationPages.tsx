@@ -622,7 +622,7 @@ export function MessagingGWPage() {
   );
 }
 
-type WADevice = { device_id: string; label: string };
+type WADevice = { device_id: string; label: string; priority?: number };
 type WhatsAppIntegration = {
   configured: boolean;
   enabled: boolean;
@@ -657,12 +657,13 @@ function WhatsAppTab() {
 
   useEffect(() => {
     if (!q.data) return;
+    const devices = Array.isArray(q.data.devices) && q.data.devices.length ? q.data.devices : [{ device_id: "", label: "" }];
     setForm({
       enabled: q.data.enabled,
       base_url: q.data.base_url || "",
       username: q.data.username || "",
       password: q.data.password || "",
-      devices: Array.isArray(q.data.devices) && q.data.devices.length ? q.data.devices : [{ device_id: "", label: "" }],
+      devices: [...devices].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0)),
     });
   }, [q.data]);
 
@@ -676,7 +677,7 @@ function WhatsAppTab() {
           username: form.username.trim(),
           password: form.password.trim() || undefined,
           devices: form.devices
-            .map((d) => ({ device_id: d.device_id.trim(), label: d.label.trim() }))
+            .map((d, i) => ({ device_id: d.device_id.trim(), label: d.label.trim(), priority: i }))
             .filter((d) => d.device_id !== ""),
         }),
       }),
@@ -751,6 +752,15 @@ function WhatsAppTab() {
   function removeDevice(i: number) {
     setForm((f) => ({ ...f, devices: f.devices.filter((_, j) => j !== i) }));
   }
+  function moveDevice(i: number, dir: -1 | 1) {
+    setForm((f) => {
+      const j = i + dir;
+      if (j < 0 || j >= f.devices.length) return f;
+      const next = [...f.devices];
+      [next[i], next[j]] = [next[j], next[i]];
+      return { ...f, devices: next };
+    });
+  }
 
   return (
     <Section title="WhatsApp (gateway eksternal)">
@@ -823,6 +833,41 @@ function WhatsAppTab() {
             <div className="grid gap-2">
               {form.devices.map((d, i) => (
                 <div key={i} className="flex flex-wrap items-end gap-2">
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border text-xs font-semibold"
+                      style={
+                        i === 0
+                          ? { borderColor: "var(--accent)", color: "var(--accent)" }
+                          : { borderColor: "var(--border)", color: "var(--muted)" }
+                      }
+                      title={i === 0 ? "Prioritas utama" : `Prioritas ${i + 1}`}
+                    >
+                      {i + 1}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{ padding: "0.2rem 0.45rem", fontSize: "0.75rem", lineHeight: 1 }}
+                      title="Naikkan prioritas"
+                      aria-label="Naikkan prioritas"
+                      disabled={i === 0}
+                      onClick={() => moveDevice(i, -1)}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{ padding: "0.2rem 0.45rem", fontSize: "0.75rem", lineHeight: 1 }}
+                      title="Turunkan prioritas"
+                      aria-label="Turunkan prioritas"
+                      disabled={i === form.devices.length - 1}
+                      onClick={() => moveDevice(i, 1)}
+                    >
+                      ↓
+                    </button>
+                  </div>
                   <label className="grid flex-1 gap-1 text-sm">
                     <span className="text-[10px] text-[var(--muted)]">Device ID</span>
                     <input
@@ -852,6 +897,9 @@ function WhatsAppTab() {
                 </div>
               ))}
             </div>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Urutan = prioritas kirim: nomor 1 dicoba lebih dulu; jika gagal, lanjut ke nomor berikutnya.
+            </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
                 type="button"
