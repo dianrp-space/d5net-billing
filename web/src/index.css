@@ -353,15 +353,6 @@ input, select, textarea, button { font: inherit; }
   border: 0;
 }
 
-/* Mobile: collapse tetap full-hide */
-@media (max-width: 767px) {
-  .app-shell.is-sidebar-collapsed .app-sidebar {
-    width: 0;
-    opacity: 0;
-    border-right-color: transparent;
-    pointer-events: none;
-  }
-}
 .app-sidebar-brand {
   display: flex;
   align-items: center;
@@ -1122,6 +1113,92 @@ input, select, textarea, button { font: inherit; }
 .portal-plan-card.is-current {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+/* Mobile: sidebar becomes an overlay drawer (does not push content) */
+.app-sidebar-backdrop {
+  display: none;
+}
+@media (max-width: 767px) {
+  .app-shell .app-sidebar,
+  .app-shell.is-sidebar-collapsed .app-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: min(17rem, 84vw);
+    opacity: 1;
+    pointer-events: auto;
+    border-right: 1px solid var(--border);
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 0 12px 40px rgb(0 0 0 / 0.18);
+  }
+  .app-shell.is-mobile-open .app-sidebar,
+  .app-shell.is-sidebar-collapsed.is-mobile-open .app-sidebar {
+    transform: translateX(0);
+  }
+  /* Keep full labels inside the mobile drawer even if the desktop sidebar was collapsed. */
+  .app-shell.is-sidebar-collapsed .app-sidebar-brand {
+    justify-content: flex-start;
+    padding: 1rem;
+  }
+  .app-shell.is-sidebar-collapsed .app-sidebar-brand-text,
+  .app-shell.is-sidebar-collapsed .app-nav-label {
+    display: block;
+  }
+  .app-shell.is-sidebar-collapsed .app-nav-group {
+    margin-bottom: 1.25rem;
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+  .app-shell.is-sidebar-collapsed .app-sidebar nav {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+  .app-shell.is-sidebar-collapsed .app-nav-item {
+    justify-content: flex-start;
+    gap: 0.65rem;
+    padding: 0.5rem 0.75rem;
+  }
+  .app-shell.is-sidebar-collapsed .app-nav-item-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+  .app-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    border: 0;
+    padding: 0;
+    background: var(--dialog-backdrop);
+  }
+  .app-header {
+    padding: 0.6rem 0.9rem;
+    gap: 0.5rem;
+  }
+  .app-header-sidebar-toggle {
+    border-radius: 0.5rem !important;
+  }
+  .app-header-breadcrumb {
+    padding-left: 0.15rem;
+  }
+  .app-content {
+    padding: 1rem;
+  }
+  .stat-card {
+    padding: 1rem;
+  }
+  .panel-card-pad {
+    padding: 1rem;
+  }
 }
 
 @media (max-width: 767px) {

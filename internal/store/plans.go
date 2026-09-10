@@ -233,7 +233,7 @@ func (s *Store) ListSubscriptions(ctx context.Context, tenantID xid.ID, status s
 	}
 	args = append(args, limit, offset)
 	q := `
-		SELECT s.id, s.tenant_id, s.customer_id, s.plan_id, s.router_id, s.username, s.service_type, s.status,
+		SELECT s.id, s.tenant_id, s.customer_id, s.plan_id, s.router_id, s.username, s.password, s.service_type, s.status,
 		       s.started_at, s.expires_at, s.next_bill_at, s.suspended_at, c.full_name, c.customer_code, p.name,
 		       op.odp_id, COALESCE(o.code, ''), COALESCE(o.name, ''), op.port_number
 		FROM subscriptions s
@@ -252,7 +252,7 @@ func (s *Store) ListSubscriptions(ctx context.Context, tenantID xid.ID, status s
 		var sub Subscription
 		var odpID *xid.ID
 		var portNum *int
-		if err := rows.Scan(&sub.ID, &sub.TenantID, &sub.CustomerID, &sub.PlanID, &sub.RouterID, &sub.Username,
+		if err := rows.Scan(&sub.ID, &sub.TenantID, &sub.CustomerID, &sub.PlanID, &sub.RouterID, &sub.Username, &sub.Password,
 			&sub.ServiceType, &sub.Status, &sub.StartedAt, &sub.ExpiresAt, &sub.NextBillAt, &sub.SuspendedAt,
 			&sub.CustomerName, &sub.CustomerCode, &sub.PlanName, &odpID, &sub.ODPCode, &sub.ODPName, &portNum); err != nil {
 			return nil, 0, err

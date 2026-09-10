@@ -422,7 +422,7 @@ export function FormDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
         hideClose
-        className={cn(wide ? "max-w-2xl" : "max-w-md", "gap-0 overflow-visible p-6")}
+        className={cn(wide ? "max-w-2xl" : "max-w-md", "gap-0 overflow-y-auto p-6")}
         style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px))` }}
       >
         <div

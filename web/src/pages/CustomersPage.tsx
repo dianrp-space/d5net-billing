@@ -15,6 +15,14 @@ const IDENTITY_TYPES: { id: string; label: string }[] = [
   { id: "other", label: "Lainnya" },
 ];
 
+const CUSTOMER_STATUS_LABEL: Record<string, string> = {
+  active: "aktif",
+  isolir: "isolir",
+  overdue: "tunggakan",
+  inactive: "nonaktif",
+  dismantled: "cabut",
+};
+
 export function CustomersPage({
   onOpenSecrets,
   onOpenGallery,
@@ -59,7 +67,7 @@ export function CustomersPage({
     longitude: string;
     identity_type: string;
     identity_number: string;
-    is_active: boolean;
+    status: "active" | "isolir" | "inactive";
     portal_enabled: boolean;
     reseller_id: string;
     sales_user_id: string;
@@ -76,7 +84,7 @@ export function CustomersPage({
     longitude: "",
     identity_type: "ktp",
     identity_number: "",
-    is_active: true,
+    status: "active",
     portal_enabled: true,
     reseller_id: "",
     sales_user_id: "",
@@ -131,7 +139,8 @@ export function CustomersPage({
     const body: Record<string, unknown> = {
       full_name: form.full_name,
       phone: form.phone,
-      is_active: form.is_active,
+      is_active: form.status !== "inactive",
+      status: form.status,
       portal_enabled: form.portal_enabled,
     };
     if (form.email.trim()) body.email = form.email.trim();
@@ -232,7 +241,7 @@ export function CustomersPage({
 
   function statusLabel(c: CustomerRow) {
     if (isCabut(c)) return "cabut";
-    return c.is_active ? "aktif" : "nonaktif";
+    return CUSTOMER_STATUS_LABEL[c.service_status || ""] || (c.is_active ? "aktif" : "nonaktif");
   }
 
   function startEdit(c: CustomerRow) {
@@ -250,7 +259,12 @@ export function CustomersPage({
       longitude: c.longitude != null ? String(c.longitude) : "",
       identity_type: c.identity_type || "ktp",
       identity_number: c.identity_number || "",
-      is_active: c.is_active,
+      status:
+        c.service_status === "isolir"
+          ? "isolir"
+          : c.service_status === "inactive"
+            ? "inactive"
+            : "active",
       portal_enabled: c.portal_enabled ?? true,
       reseller_id: c.reseller_id || "",
       sales_user_id: c.sales_user_id || "",
@@ -389,6 +403,8 @@ export function CustomersPage({
             },
             options: [
               { value: "active", label: "Aktif" },
+              { value: "isolir", label: "Isolir" },
+              { value: "overdue", label: "Tunggakan" },
               { value: "inactive", label: "Nonaktif" },
               { value: "dismantled", label: "Cabut" },
             ],
@@ -561,25 +577,47 @@ export function CustomersPage({
               Kode otomatis: <span className="font-semibold text-[var(--text)]">{previewQ.data.preview}</span>
             </p>
           )}
-          {editId && (
+          {editId && rows.find((c) => c.id === editId && isCabut(c)) ? (
+            <p className="text-sm text-[var(--muted)] sm:col-span-2">
+              Status: <strong>cabut</strong>. Layanan sudah dihentikan; data tetap tersimpan.
+            </p>
+          ) : (
             <>
-              {rows.find((c) => c.id === editId && isCabut(c)) ? (
-                <p className="text-sm text-[var(--muted)] sm:col-span-2">
-                  Status: <strong>cabut</strong>. Layanan sudah dihentikan; data tetap tersimpan.
+              <div className="grid gap-1.5 sm:col-span-2">
+                <label className="text-sm font-medium" htmlFor="cust-status">
+                  Status pelanggan
+                </label>
+                <select
+                  id="cust-status"
+                  className="input"
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value as CustForm["status"] })}
+                >
+                  <option value="active">Aktif</option>
+                  <option value="isolir">Isolir</option>
+                  <option value="inactive">Nonaktif</option>
+                </select>
+                <p className="text-xs text-[var(--muted)]">
+                  Isolir menaruh semua langganan pelanggan ke profil isolir; Aktif membuka kembali isolir; Nonaktif
+                  menonaktifkan pelanggan. Status ini mengikuti status langganan sebenarnya.
+                  {!editId ? " Saat pelanggan baru dibuat, Isolir berlaku setelah pelanggan punya langganan." : ""}
                 </p>
-              ) : (
-                <>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
-                    Aktif
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={form.portal_enabled} onChange={(e) => setForm({ ...form, portal_enabled: e.target.checked })} />
-                    Portal aktif
-                  </label>
-                </>
-              )}
-              <p className="text-xs text-[var(--muted)] sm:col-span-2">Password portal default = nomor HP (ikut berubah jika HP diubah).</p>
+              </div>
+              {editId ? (
+                <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={form.portal_enabled}
+                    onChange={(e) => setForm({ ...form, portal_enabled: e.target.checked })}
+                  />
+                  Portal aktif
+                </label>
+              ) : null}
+              {editId ? (
+                <p className="text-xs text-[var(--muted)] sm:col-span-2">
+                  Password portal default = nomor HP (ikut berubah jika HP diubah).
+                </p>
+              ) : null}
             </>
           )}
           <div className="flex flex-wrap gap-2 sm:col-span-2">

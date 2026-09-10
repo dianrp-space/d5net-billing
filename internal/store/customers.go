@@ -28,14 +28,17 @@ type Customer struct {
 	PortalEnabled  bool       `json:"portal_enabled"`
 	DismantledAt   *time.Time `json:"dismantled_at,omitempty"`
 	ServiceStatus  string     `json:"service_status"`
-	PasswordHash   string     `json:"-"`
-	CreatedAt      time.Time  `json:"created_at"`
-	ClusterName    string     `json:"cluster_name,omitempty"`
-	ClusterCode    string     `json:"cluster_code,omitempty"`
-	ResellerID     *xid.ID    `json:"reseller_id,omitempty"`
-	ResellerName   string     `json:"reseller_name,omitempty"`
-	SalesUserID    *xid.ID    `json:"sales_user_id,omitempty"`
-	SalesUserName  string     `json:"sales_user_name,omitempty"`
+	// SubStatus is the aggregate live subscription state (active/isolir/overdue)
+	// used to derive ServiceStatus; not serialized on its own.
+	SubStatus     string    `json:"-"`
+	PasswordHash  string    `json:"-"`
+	CreatedAt     time.Time `json:"created_at"`
+	ClusterName   string    `json:"cluster_name,omitempty"`
+	ClusterCode   string    `json:"cluster_code,omitempty"`
+	ResellerID    *xid.ID   `json:"reseller_id,omitempty"`
+	ResellerName  string    `json:"reseller_name,omitempty"`
+	SalesUserID   *xid.ID   `json:"sales_user_id,omitempty"`
+	SalesUserName string    `json:"sales_user_name,omitempty"`
 }
 
 func (c *Customer) IsDismantled() bool {
@@ -50,11 +53,17 @@ func (c *Customer) FillServiceStatus() {
 		c.ServiceStatus = "dismantled"
 		return
 	}
-	if c.IsActive {
-		c.ServiceStatus = "active"
+	if !c.IsActive {
+		c.ServiceStatus = "inactive"
 		return
 	}
-	c.ServiceStatus = "inactive"
+	switch c.SubStatus {
+	case "isolir", "overdue", "active":
+		c.ServiceStatus = c.SubStatus
+	default:
+		// Customer aktif tanpa langganan live.
+		c.ServiceStatus = "active"
+	}
 }
 
 type CustomerFilter struct {
@@ -82,10 +91,18 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 	switch strings.ToLower(strings.TrimSpace(f.ServiceStatus)) {
 	case "dismantled", "cabut":
 		where += " AND c.dismantled_at IS NOT NULL"
+	case "isolir", "suspend", "suspended":
+		where += " AND c.dismantled_at IS NULL AND c.is_active = true AND EXISTS (" +
+			"SELECT 1 FROM subscriptions s WHERE s.tenant_id = c.tenant_id AND s.customer_id = c.id AND s.status = 'suspended')"
+	case "overdue", "tunggakan":
+		where += " AND c.dismantled_at IS NULL AND c.is_active = true AND EXISTS (" +
+			"SELECT 1 FROM subscriptions s WHERE s.tenant_id = c.tenant_id AND s.customer_id = c.id AND s.status = 'overdue')" +
+			" AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.tenant_id = c.tenant_id AND s.customer_id = c.id AND s.status = 'suspended')"
 	case "active", "aktif":
-		where += " AND c.is_active = true AND c.dismantled_at IS NULL"
+		where += " AND c.dismantled_at IS NULL AND c.is_active = true AND NOT EXISTS (" +
+			"SELECT 1 FROM subscriptions s WHERE s.tenant_id = c.tenant_id AND s.customer_id = c.id AND s.status IN ('suspended','overdue'))"
 	case "inactive", "nonaktif":
-		where += " AND c.is_active = false AND c.dismantled_at IS NULL"
+		where += " AND c.dismantled_at IS NULL AND c.is_active = false"
 	default:
 		if f.IsActive != nil {
 			if *f.IsActive {
@@ -131,7 +148,7 @@ func customerScanDest(c *Customer) []any {
 	return []any{
 		&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
 		&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.DismantledAt, &c.CreatedAt,
-		&c.ClusterName, &c.ClusterCode, &c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName,
+		&c.ClusterName, &c.ClusterCode, &c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName, &c.SubStatus,
 	}
 }
 
@@ -152,7 +169,18 @@ const customerSelect = `
 	SELECT c.id, c.tenant_id, c.cluster_id, c.customer_code, c.full_name, c.email, c.phone, c.address,
 	       c.latitude, c.longitude, c.identity_type, c.identity_number, c.is_active, c.portal_enabled, c.dismantled_at, c.created_at,
 	       COALESCE(s.name, ''), COALESCE(s.code, ''),
-	       c.reseller_id, COALESCE(r.name, ''), c.sales_user_id, COALESCE(u.full_name, '')
+	       c.reseller_id, COALESCE(r.name, ''), c.sales_user_id, COALESCE(u.full_name, ''),
+	       COALESCE((
+	           SELECT CASE
+	               WHEN bool_or(sub.status = 'suspended') THEN 'isolir'
+	               WHEN bool_or(sub.status = 'overdue') THEN 'overdue'
+	               WHEN bool_or(sub.status = 'active') THEN 'active'
+	               ELSE ''
+	           END
+	           FROM subscriptions sub
+	           WHERE sub.tenant_id = c.tenant_id AND sub.customer_id = c.id
+	             AND sub.status IN ('active','suspended','overdue')
+	       ), '')
 	FROM customers c
 	LEFT JOIN sites s ON s.id = c.cluster_id
 	LEFT JOIN resellers r ON r.id = c.reseller_id

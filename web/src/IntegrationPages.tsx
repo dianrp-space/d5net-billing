@@ -350,6 +350,10 @@ export function PaymentGWPage() {
               Setiap QRIS mendapat <strong>kode unik 3 digit</strong> yang ditambahkan ke nominal tagihan. Pelanggan harus
               bayar <strong>tepat</strong> jumlah itu supaya konfirmasi otomatis (webhook) bisa mencocokkan pembayaran.
             </p>
+            <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+              Gunakan <strong>kredensial DRP milik tenant ini</strong> (API key &amp; webhook secret sendiri). Kredensial
+              platform/env tidak dipakai untuk tenant.
+            </p>
             {q.data?.env_fallback ? (
               <p className="text-[11px] text-[var(--muted)]">Kunci platform (env) aktif. Isi field di bawah untuk override per tenant.</p>
             ) : null}

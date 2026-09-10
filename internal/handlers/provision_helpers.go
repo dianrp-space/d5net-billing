@@ -545,6 +545,58 @@ func isolirSubscription(ctx context.Context, d *Deps, tenantID xid.ID, subID xid
 	return nil
 }
 
+// normalizeCustomerStatus maps UI/legacy labels to canonical customer statuses.
+func normalizeCustomerStatus(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "active", "aktif":
+		return "active"
+	case "isolir", "suspend", "suspended":
+		return "isolir"
+	case "inactive", "nonaktif":
+		return "inactive"
+	case "overdue", "tunggakan":
+		return "overdue"
+	case "dismantled", "cabut":
+		return "dismantled"
+	default:
+		return ""
+	}
+}
+
+// applyCustomerStatus syncs every live subscription of a customer to the given
+// customer-level status: "active" resumes isolir services, "isolir"/"inactive"
+// suspends them (isolir profile on the router). Best-effort per subscription so
+// one offline router does not block the rest.
+func applyCustomerStatus(ctx context.Context, d *Deps, tenantID, customerID xid.ID, status string) error {
+	cid := customerID
+	subs, _, err := d.Store.ListSubscriptions(ctx, tenantID, "", &cid, 500, 0)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	switch status {
+	case "active":
+		for _, sub := range subs {
+			if sub.Status != "suspended" {
+				continue
+			}
+			if err := d.Store.UpdateSubscriptionStatus(ctx, tenantID, sub.ID, "active"); err != nil {
+				return httpx.Internal(err)
+			}
+			resumeSubscription(ctx, d, tenantID, sub.ID)
+		}
+	case "isolir", "inactive":
+		for _, sub := range subs {
+			if sub.Status != "active" && sub.Status != "overdue" {
+				continue
+			}
+			if err := isolirSubscription(ctx, d, tenantID, sub.ID); err != nil {
+				slog.Warn("customer status: isolir subscription failed", "customer_id", customerID, "sub_id", sub.ID, "err", err)
+			}
+		}
+	}
+	return nil
+}
+
 // applyStaticIPAMToSpec pins a static assignment on resume. Dynamic users leave
 // remote/local empty so the PPP profile (not the isolir pool) assigns addresses.
 func applyStaticIPAMToSpec(ctx context.Context, d *Deps, sub *store.Subscription, spec *provision.ServiceSpec) {

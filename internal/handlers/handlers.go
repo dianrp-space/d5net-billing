@@ -748,6 +748,7 @@ func registerCustomers(api huma.API, d *Deps) {
 			IdentityNumber  *string  `json:"identity_number,omitempty"`
 			IsActive        *bool    `json:"is_active,omitempty"`
 			PortalEnabled   *bool    `json:"portal_enabled,omitempty"`
+			Status          string   `json:"status,omitempty"`
 			ResellerID      *xid.ID  `json:"reseller_id,omitempty"`
 			SalesUserID     *xid.ID  `json:"sales_user_id,omitempty"`
 			CommissionBasis string   `json:"commission_basis,omitempty"`
@@ -788,6 +789,12 @@ func registerCustomers(api huma.API, d *Deps) {
 		active := true
 		if input.Body.IsActive != nil {
 			active = *input.Body.IsActive
+		}
+		switch normalizeCustomerStatus(input.Body.Status) {
+		case "inactive":
+			active = false
+		case "active", "isolir":
+			active = true
 		}
 		portal := true
 		if input.Body.PortalEnabled != nil {
@@ -899,6 +906,7 @@ func registerCustomers(api huma.API, d *Deps) {
 			IdentityNumber *string  `json:"identity_number,omitempty"`
 			IsActive       bool     `json:"is_active"`
 			PortalEnabled  bool     `json:"portal_enabled"`
+			Status         string   `json:"status,omitempty"`
 			ResellerID     *xid.ID  `json:"reseller_id,omitempty"`
 			SalesUserID    *xid.ID  `json:"sales_user_id,omitempty"`
 		}
@@ -955,6 +963,11 @@ func registerCustomers(api huma.API, d *Deps) {
 		}
 		if err := d.Store.UpdateCustomer(ctx, existing); err != nil {
 			return nil, httpx.Internal(err)
+		}
+		if want := normalizeCustomerStatus(input.Body.Status); want != "" && want != existing.ServiceStatus && !existing.IsDismantled() {
+			if err := applyCustomerStatus(ctx, d, tid, existing.ID, want); err != nil {
+				return nil, err
+			}
 		}
 		full, err := d.Store.GetCustomer(ctx, tid, existing.ID)
 		if err != nil {
@@ -5565,6 +5578,7 @@ type paymentWebhookInput struct {
 	XDRPToken          string `header:"X-DRP-Token"`
 	XEventType         string `header:"X-Event-Type"`
 	Authorization      string `header:"Authorization"`
+	UserAgent          string `header:"User-Agent"`
 }
 
 func registerPaymentWebhookRoute(api huma.API, d *Deps, provider string) {
@@ -5581,20 +5595,53 @@ func registerPaymentWebhookRoute(api huma.API, d *Deps, provider string) {
 	})
 }
 
+// webhookAck is a 200 OK body for webhooks we accept but do not act on, so a
+// misconfigured/test callback still gets a clear status instead of a 404.
+func webhookAck(status, reason string) *struct{ Body map[string]string } {
+	body := map[string]string{"status": status}
+	if reason != "" {
+		body["reason"] = reason
+	}
+	return &struct{ Body map[string]string }{Body: body}
+}
+
 func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, input *paymentWebhookInput) (*struct{ Body map[string]string }, error) {
+	started := time.Now()
 	providerName = normalizePaymentProviderName(providerName)
-	if providerName == payment.ProviderManual {
-		return nil, httpx.BadRequest("manual provider has no webhook")
-	}
-	if providerName != payment.ProviderDRP && providerName != payment.ProviderDuitku {
-		return nil, httpx.NotFound("provider not found")
-	}
 
 	raw := input.RawBody
 	bodyMap := payment.ParseWebhookBodyBytes(input.ContentType, raw)
-	parsed, _ := payment.ParseWebhookEvent(providerName, bodyMap)
+	parsed, parseErr := payment.ParseWebhookEvent(providerName, bodyMap)
 	if parsed == nil {
 		parsed = &payment.WebhookEvent{Raw: bodyMap, Status: "pending"}
+	}
+	parseErrStr := ""
+	if parseErr != nil {
+		parseErrStr = parseErr.Error()
+	}
+	slog.Info("payment webhook received",
+		"provider", providerName,
+		"content_type", input.ContentType,
+		"bytes", len(raw),
+		"external_id", parsed.ExternalID,
+		"reference", parsed.Reference,
+		"event_status", parsed.Status,
+		"amount", parsed.Amount,
+		"has_signature", strings.TrimSpace(input.XSignature) != "",
+		"has_drp_token", strings.TrimSpace(input.XDRPToken) != "",
+		"has_callback_token", strings.TrimSpace(input.XCallbackToken) != "",
+		"event_type", input.XEventType,
+		"user_agent", input.UserAgent,
+		"parse_error", parseErrStr,
+	)
+
+	if providerName == payment.ProviderManual {
+		slog.Warn("payment webhook ignored", "provider", providerName, "reason", "manual provider has no webhook")
+		return webhookAck("ignored", "manual provider has no webhook"), nil
+	}
+	if providerName != payment.ProviderDRP && providerName != payment.ProviderDuitku {
+		slog.Warn("payment webhook ignored", "provider", providerName, "reason", "unknown provider")
+		return webhookAck("received", "unknown provider"), nil
 	}
 
 	headers := map[string]string{
@@ -5612,19 +5659,24 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 	if parsed.ExternalID != "" {
 		if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, parsed.ExternalID); ierr == nil && pi != nil {
 			if normalizePaymentProviderName(pi.Provider) != providerName {
-				return nil, httpx.NotFound("payment intent not found")
+				slog.Warn("payment webhook ignored",
+					"provider", providerName, "external_id", parsed.ExternalID, "reason", "payment intent provider mismatch")
+				return webhookAck("ignored", "payment intent provider mismatch"), nil
 			}
 			prov, perr = resolvePaymentProvider(ctx, d, pi.TenantID, providerName)
+		} else {
+			slog.Info("payment webhook: no matching payment intent",
+				"provider", providerName, "external_id", parsed.ExternalID)
 		}
-	}
-	if prov == nil && d.Payments != nil && d.Payments.Has(providerName) {
-		prov, perr = d.Payments.Get(providerName)
 	}
 	if prov == nil {
+		reason := "provider not configured"
 		if perr != nil {
-			return nil, httpx.NotFound("provider not found")
+			reason = perr.Error()
 		}
-		return nil, httpx.NotFound("provider not found")
+		slog.Warn("payment webhook accepted but not processed",
+			"provider", providerName, "external_id", parsed.ExternalID, "reason", reason)
+		return webhookAck("received", reason), nil
 	}
 
 	var event *payment.WebhookEvent
@@ -5634,6 +5686,8 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		if softFail {
 			slog.Warn("webhook signature soft-fail in development", "provider", providerName, "err", verr)
 		} else {
+			slog.Warn("payment webhook rejected: invalid signature",
+				"provider", providerName, "external_id", parsed.ExternalID, "err", verr)
 			return nil, httpx.Unauthorized("invalid webhook signature")
 		}
 	} else {
@@ -5646,7 +5700,9 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 	if event.ExternalID != "" {
 		if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, event.ExternalID); ierr == nil && pi != nil {
 			if normalizePaymentProviderName(pi.Provider) != providerName {
-				return nil, httpx.NotFound("payment intent not found")
+				slog.Warn("payment webhook ignored",
+					"provider", providerName, "external_id", event.ExternalID, "reason", "payment intent provider mismatch")
+				return webhookAck("ignored", "payment intent provider mismatch"), nil
 			}
 			event.ExternalID = pi.ExternalID
 		}
@@ -5660,6 +5716,13 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		}
 	}
 
+	slog.Info("payment webhook processed",
+		"provider", providerName,
+		"external_id", event.ExternalID,
+		"event_status", event.Status,
+		"paid", payment.WebhookIsPaid(event.Status),
+		"duration_ms", time.Since(started).Milliseconds(),
+	)
 	return &struct{ Body map[string]string }{Body: map[string]string{"status": "ok"}}, nil
 }
 

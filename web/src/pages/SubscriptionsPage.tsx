@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { IconBan, IconBox, IconPencil, IconPlug, IconRefresh, IconTrash } from "../icons";
+import { IconBan, IconBox, IconEye, IconEyeOff, IconPencil, IconPlug, IconRefresh, IconTrash } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
 import {
@@ -36,6 +36,23 @@ function nextCycleAnchor(start: Date, day: number) {
   return new Date(start.getFullYear(), start.getMonth() + 1, d, 12, 0, 0, 0);
 }
 
+/** Password secret dengan toggle show/hide (ikon mata). */
+function SecretPasswordCell({ password }: { password?: string | null }) {
+  const [visible, setVisible] = useState(false);
+  if (!password) return <span className="text-[var(--muted)]">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="font-mono text-xs">{visible ? password : "••••••••"}</span>
+      <IconButton
+        label={visible ? "Sembunyikan password" : "Tampilkan password"}
+        onClick={() => setVisible((v) => !v)}
+      >
+        {visible ? <IconEyeOff /> : <IconEye />}
+      </IconButton>
+    </span>
+  );
+}
+
 export function SubscriptionsPage({
   customerId,
   createMode = false,
@@ -58,6 +75,7 @@ export function SubscriptionsPage({
     plan_id: string;
     router_id?: string | null;
     username: string;
+    password?: string | null;
     customer_name: string;
     plan_name: string;
     status: string;
@@ -785,9 +803,10 @@ export function SubscriptionsPage({
               : "Secret khusus pelanggan ini. Aktifkan dengan tanggal/prorata; ikon kotak Ganti paket untuk hitung selisih harga sisa hari."}
           </p>
           <Table
-            columns={["Username", "Paket", "ODP / Port", "Status", "Aksi"]}
+            columns={["Username", "Password", "Paket", "ODP / Port", "Status", "Aksi"]}
             rows={subRows.map((s) => [
           s.username,
+          <SecretPasswordCell key="pw" password={s.password} />,
           s.plan_name,
           s.odp_code
             ? `${s.odp_code}${s.port_number != null ? ` · P${s.port_number}` : ""}`

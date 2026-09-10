@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import App from "./App";
+import { AppRouter } from "./router";
 import { AppDialogProvider } from "./confirm";
 import { initTheme } from "./theme";
 import "sweetalert2/dist/sweetalert2.min.css";
@@ -15,7 +15,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={qc}>
       <AppDialogProvider>
-        <App />
+        <AppRouter />
       </AppDialogProvider>
     </QueryClientProvider>
   </StrictMode>

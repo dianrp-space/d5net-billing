@@ -301,14 +301,44 @@ export function AdminApp({
   const faviconUrl = branding.data?.favicon_url;
   const initial = (appName.trim()[0] || "D").toUpperCase();
   const [sidebarOpen, setSidebarOpenState] = useState(() => getSidebarOpen());
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches,
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const onChange = () => {
+      setIsMobile(mq.matches);
+      if (!mq.matches) setMobileNavOpen(false);
+    };
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [page]);
 
   function toggleSidebar() {
+    if (isMobile) {
+      setMobileNavOpen((prev) => !prev);
+      return;
+    }
     setSidebarOpenState((prev) => {
       const next = !prev;
       setSidebarOpen(next);
       return next;
     });
   }
+
+  function handleNavigate(next: Page, rest?: string[]) {
+    if (isMobile) setMobileNavOpen(false);
+    onNavigate(next, rest);
+  }
+
+  const navShown = isMobile ? mobileNavOpen : sidebarOpen;
 
   useEffect(() => {
     applyBrandingMeta({
@@ -319,7 +349,15 @@ export function AdminApp({
   }, [appName, faviconUrl, page]);
 
   return (
-    <div className={`app-shell${sidebarOpen ? "" : " is-sidebar-collapsed"}`}>
+    <div className={`app-shell${sidebarOpen ? "" : " is-sidebar-collapsed"}${mobileNavOpen ? " is-mobile-open" : ""}`}>
+      {mobileNavOpen && (
+        <button
+          type="button"
+          className="app-sidebar-backdrop"
+          aria-label="Tutup navigasi"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
       <aside className="app-sidebar" aria-label="Navigasi utama">
         <div className="app-sidebar-brand">
           {logoUrl ? (
@@ -344,7 +382,7 @@ export function AdminApp({
                     type="button"
                     title={n.label}
                     aria-label={n.label}
-                    onClick={() => onNavigate(n.id)}
+                    onClick={() => handleNavigate(n.id)}
                     className={`app-nav-item ${page === n.id || (n.id === "customers" && (customerSecretsId || customerGalleryId)) ? "is-active" : ""}`}
                   >
                     <span className="opacity-80">{n.icon}</span>
@@ -362,10 +400,10 @@ export function AdminApp({
           <div className="app-header-start">
             <IconButton
               className="app-header-sidebar-toggle"
-              label={sidebarOpen ? "Sembunyikan sidebar" : "Tampilkan sidebar"}
+              label={navShown ? "Sembunyikan sidebar" : "Tampilkan sidebar"}
               onClick={toggleSidebar}
             >
-              {sidebarOpen ? <PanelLeftClose /> : <PanelLeft />}
+              {navShown ? <PanelLeftClose /> : <PanelLeft />}
             </IconButton>
             <Breadcrumb className="app-header-breadcrumb">
               <BreadcrumbList>
@@ -375,7 +413,7 @@ export function AdminApp({
                       type="button"
                       className="inline-flex items-center gap-1.5"
                       onClick={() => {
-                        if (canAccessPage(perms, "dashboard")) onNavigate("dashboard");
+                        if (canAccessPage(perms, "dashboard")) handleNavigate("dashboard");
                       }}
                       title="Dashboard"
                       aria-label="Dashboard"
@@ -390,7 +428,7 @@ export function AdminApp({
                   <>
                     <BreadcrumbItem>
                       <BreadcrumbLink asChild>
-                        <button type="button" className="truncate" onClick={() => onNavigate("customers")}>
+                        <button type="button" className="truncate" onClick={() => handleNavigate("customers")}>
                           {pageTitles.customers}
                         </button>
                       </BreadcrumbLink>
@@ -436,7 +474,7 @@ export function AdminApp({
             <HeaderSearch
               allowedPages={perms}
               onNavigate={(next, rest) => {
-                if (isAdminPage(next) && canAccessPage(perms, next)) onNavigate(next, rest);
+                if (isAdminPage(next) && canAccessPage(perms, next)) handleNavigate(next, rest);
               }}
             />
             <IconButton label="Notifikasi">

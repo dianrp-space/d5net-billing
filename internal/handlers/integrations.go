@@ -650,21 +650,8 @@ func paymentWebhookURLFor(ctx context.Context, d *Deps, tid xid.ID, origin, refe
 }
 
 func paymentView(ctx context.Context, d *Deps, tid xid.ID, s paymentIntegrationStored, origin, referer, proto, forwardedHost, host string) paymentIntegrationView {
-	envKey := ""
-	envSecret := ""
-	if d != nil && d.Config != nil {
-		envKey = strings.TrimSpace(d.Config.DRPPaymentAPIKey)
-		envSecret = d.Config.DRPPaymentWebhookSecret
-	}
 	apiKey := decryptSecret(d, s.APIKey)
 	webhookSecret := decryptSecret(d, s.WebhookSecret)
-	envFallback := s.APIKey == "" && envKey != ""
-	if apiKey == "" {
-		apiKey = envKey
-	}
-	if webhookSecret == "" {
-		webhookSecret = envSecret
-	}
 	base := strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
 	if base == "" && d != nil && d.Config != nil {
 		base = strings.TrimRight(strings.TrimSpace(d.Config.DRPPaymentBaseURL), "/")
@@ -675,12 +662,12 @@ func paymentView(ctx context.Context, d *Deps, tid xid.ID, s paymentIntegrationS
 	hint := paymentWebhookPath()
 	webhookURL := paymentWebhookURL(ctx, d, tid, origin, referer, proto, forwardedHost, host)
 	return paymentIntegrationView{
-		Configured:       s.APIKey != "" || envKey != "",
+		Configured:       s.APIKey != "" && s.WebhookSecret != "",
 		Enabled:          s.Enabled,
 		BaseURL:          base,
 		Method:           "qris",
 		Provider:         payment.ProviderDRP,
-		EnvFallback:      envFallback,
+		EnvFallback:      false,
 		APIKey:           apiKey,
 		WebhookSecret:    webhookSecret,
 		ExpiresInMinutes: qrisExpiresMinutes(s, d),
@@ -752,21 +739,13 @@ func normalizePaymentProviderName(name string) string {
 	}
 }
 
-func drpCredentials(d *Deps, cfg paymentIntegrationStored) (baseURL, apiKey, webhookSecret string) {
+// tenantDRPCredentials returns only the tenant's own DRP credentials. Env
+// fallback is intentionally NOT applied here: env keys belong to the
+// platform/owner, never to tenants.
+func tenantDRPCredentials(d *Deps, cfg paymentIntegrationStored) (baseURL, apiKey, webhookSecret string) {
 	apiKey = decryptSecret(d, cfg.APIKey)
 	webhookSecret = decryptSecret(d, cfg.WebhookSecret)
 	baseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	if d != nil && d.Config != nil {
-		if apiKey == "" {
-			apiKey = strings.TrimSpace(d.Config.DRPPaymentAPIKey)
-		}
-		if webhookSecret == "" {
-			webhookSecret = d.Config.DRPPaymentWebhookSecret
-		}
-		if baseURL == "" {
-			baseURL = strings.TrimRight(strings.TrimSpace(d.Config.DRPPaymentBaseURL), "/")
-		}
-	}
 	if baseURL == "" {
 		baseURL = payment.DefaultDRPBaseURL
 	}
@@ -796,12 +775,11 @@ func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payO
 
 func drpPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
 	cfg, _ := loadPaymentIntegration(ctx, d, tenantID)
-	hasTenantCfg := cfg.APIKey != "" || cfg.WebhookSecret != "" || cfg.BaseURL != "" || cfg.Enabled
-	if hasTenantCfg && !cfg.Enabled {
+	if !cfg.Enabled {
 		return false
 	}
-	_, apiKey, _ := drpCredentials(d, cfg)
-	return apiKey != ""
+	_, apiKey, webhookSecret := tenantDRPCredentials(d, cfg)
+	return apiKey != "" && webhookSecret != ""
 }
 
 func duitkuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
@@ -812,11 +790,20 @@ func duitkuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
 	return strings.TrimSpace(cfg.MerchantCode) != "" && decryptSecret(d, cfg.APIKey) != ""
 }
 
-// resolvePaymentProvider prefers tenant integration keys, then falls back to env (DRP only).
+// resolvePaymentProvider resolves the gateway for a tenant using ONLY that
+// tenant's own integration credentials. Env keys are reserved for the
+// platform/owner context (nil tenant) and are never used for tenants.
 func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name string) (payment.Provider, error) {
 	name = normalizePaymentProviderName(name)
 	if name == payment.ProviderManual {
 		return d.Payments.Get(payment.ProviderManual)
+	}
+	if xid.IsNil(tenantID) {
+		// Platform/owner: env-configured registry.
+		if d.Payments != nil && d.Payments.Has(name) {
+			return d.Payments.Get(name)
+		}
+		return nil, httpx.BadRequest("payment gateway platform belum dikonfigurasi")
 	}
 	if name == payment.ProviderDuitku {
 		cfg, _ := loadDuitkuIntegration(ctx, d, tenantID)
@@ -833,16 +820,12 @@ func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name 
 		return nil, httpx.BadRequest("payment gateway tidak dikenali")
 	}
 	cfg, _ := loadPaymentIntegration(ctx, d, tenantID)
-	hasTenantCfg := cfg.APIKey != "" || cfg.WebhookSecret != "" || cfg.BaseURL != "" || cfg.Enabled
-	if hasTenantCfg && !cfg.Enabled {
+	if !cfg.Enabled {
 		return nil, httpx.BadRequest("DRP Payment belum diaktifkan di Integrasi")
 	}
-	baseURL, apiKey, webhookSecret := drpCredentials(d, cfg)
-	if apiKey == "" {
-		if d.Payments != nil && d.Payments.Has(payment.ProviderDRP) {
-			return d.Payments.Get(payment.ProviderDRP)
-		}
-		return nil, httpx.BadRequest("DRP Payment belum dikonfigurasi")
+	baseURL, apiKey, webhookSecret := tenantDRPCredentials(d, cfg)
+	if apiKey == "" || webhookSecret == "" {
+		return nil, httpx.BadRequest("DRP Payment belum dikonfigurasi (API key & webhook secret tenant)")
 	}
 	p := payment.NewDRPProvider(baseURL, apiKey, webhookSecret)
 	p.ExpiresInMinutes = qrisExpiresMinutes(cfg, d)
