@@ -311,9 +311,14 @@ export function RoutersPage() {
                 disabled={remove.isPending}
                 onClick={async () => {
                   const ok = await confirm({
-                    title: "Hapus router",
-                    description: `Hapus router "${r.name}"?`,
+                    title: `Hapus router "${r.name}"?`,
+                    description:
+                      `Router "${r.name}" akan dihapus permanen.\n\n` +
+                      `Router tidak bisa dihapus jika masih dipakai oleh langganan, IP pool, batch voucher, ` +
+                      `atau sebagai router isolir — pindahkan/hapus data tersebut dulu.\n\n` +
+                      `Metrik, log perintah, dan backup router ikut terhapus.`,
                     confirmLabel: "Hapus",
+                    danger: true,
                   });
                   if (!ok) return;
                   remove.mutate(r.id);

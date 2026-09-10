@@ -3019,6 +3019,16 @@ func registerRouters(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
+		blockers, err := d.Store.RouterBlockers(ctx, tid, input.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if len(blockers) > 0 {
+			return nil, httpx.BadRequest(
+				"Router tidak bisa dihapus karena masih dipakai: " + strings.Join(blockers, ", ") +
+					". Pindahkan atau hapus data tersebut dulu.",
+			)
+		}
 		if err := d.Store.DeleteRouter(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
 			return nil, httpx.NotFound("router not found")
 		} else if err != nil {

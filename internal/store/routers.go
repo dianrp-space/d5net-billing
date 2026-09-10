@@ -112,6 +112,40 @@ func (s *Store) DeleteRouter(ctx context.Context, tenantID xid.ID, id xid.ID) er
 	})
 }
 
+// RouterBlockers lists reasons a router cannot be deleted because other
+// records still depend on it (returned as human-readable labels).
+func (s *Store) RouterBlockers(ctx context.Context, tenantID, id xid.ID) ([]string, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	var subs, pools, vouchers int64
+	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM subscriptions WHERE tenant_id=$1 AND router_id=$2`, tenantID, id).Scan(&subs); err != nil {
+		return nil, err
+	}
+	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM ip_pools WHERE tenant_id=$1 AND router_id=$2`, tenantID, id).Scan(&pools); err != nil {
+		return nil, err
+	}
+	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM voucher_batches WHERE tenant_id=$1 AND router_id=$2`, tenantID, id).Scan(&vouchers); err != nil {
+		return nil, err
+	}
+	var blockers []string
+	if subs > 0 {
+		blockers = append(blockers, fmt.Sprintf("%d langganan", subs))
+	}
+	if pools > 0 {
+		blockers = append(blockers, fmt.Sprintf("%d IP pool", pools))
+	}
+	if vouchers > 0 {
+		blockers = append(blockers, fmt.Sprintf("%d batch voucher", vouchers))
+	}
+	var isolir IsolirNetworkSettings
+	if err := s.GetSettingJSON(ctx, tenantID, IsolirNetworkSettingKey, &isolir); err == nil &&
+		isolir.RouterID != nil && !xid.IsNil(*isolir.RouterID) && *isolir.RouterID == id {
+		blockers = append(blockers, "router isolir (Template Isolir)")
+	}
+	return blockers, nil
+}
+
 func (s *Store) LogRouterCommand(ctx context.Context, tenantID xid.ID, routerID xid.ID, userID *xid.ID, command, result string, success bool) error {
 	_, err := s.Pool.Exec(ctx, `
 		INSERT INTO router_command_logs (tenant_id, router_id, user_id, command, result, success)
