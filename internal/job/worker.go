@@ -610,7 +610,8 @@ func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, offsets []
 			if err != nil || !ok {
 				break
 			}
-			_ = w.notify.SendInvoiceReminder(ctx, tenantID, inv.CustomerID, cust.Phone, inv.InvoiceNumber, inv.TotalAmount, due.Format("02/01/2006"))
+			planName := w.store.PlanNameForSubscription(ctx, tenantID, inv.SubscriptionID)
+			_ = w.notify.SendInvoiceReminder(ctx, tenantID, cust.Phone, cust.FullName, planName, inv.InvoiceNumber, inv.TotalAmount, due.Format("02/01/2006"))
 			break
 		}
 	}

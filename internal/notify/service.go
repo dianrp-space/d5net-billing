@@ -384,17 +384,71 @@ func (s *Service) RenderTemplate(ctx context.Context, tenantID xid.ID, channel, 
 	return subject, body, nil
 }
 
-func defaultTemplate(channel, name string, vars map[string]string) (subject, body string) {
-	_ = channel
-	switch name {
-	case "invoice_reminder":
-		body = applyVars("Halo, tagihan {{invoice_number}} sebesar Rp {{amount}} jatuh tempo {{due_date}}. Bayar via portal pelanggan.", vars)
-	case "payment_confirmation":
-		body = applyVars("Pembayaran tagihan {{invoice_number}} sebesar Rp {{amount}} berhasil diterima. Terima kasih!", vars)
-	default:
-		body = applyVars("{{message}}", vars)
+// TemplateVariable describes a placeholder usable in a template body.
+type TemplateVariable struct {
+	Name string `json:"name"`
+	Desc string `json:"desc"`
+}
+
+// TemplateEvent describes an automatic notification event and its default copy.
+type TemplateEvent struct {
+	Event          string             `json:"event"`
+	Label          string             `json:"label"`
+	Description    string             `json:"description"`
+	Channels       []string           `json:"channels"`
+	Variables      []TemplateVariable `json:"variables"`
+	DefaultSubject string             `json:"default_subject"`
+	DefaultBody    string             `json:"default_body"`
+}
+
+// TemplateCatalog lists the notification events a tenant can customise.
+func TemplateCatalog() []TemplateEvent {
+	return []TemplateEvent{
+		{
+			Event:       "invoice_reminder",
+			Label:       "Pengingat tagihan (dunning)",
+			Description: "Dikirim otomatis sesuai offset hari di menu Cronjob.",
+			Channels:    []string{"whatsapp"},
+			Variables: []TemplateVariable{
+				{Name: "customer_name", Desc: "Nama pelanggan"},
+				{Name: "plan_name", Desc: "Nama paket/langganan"},
+				{Name: "invoice_number", Desc: "Nomor tagihan"},
+				{Name: "amount", Desc: "Nominal tagihan (angka)"},
+				{Name: "due_date", Desc: "Tanggal jatuh tempo"},
+			},
+			DefaultBody: "Halo {{customer_name}}, tagihan {{invoice_number}} sebesar Rp {{amount}} jatuh tempo {{due_date}}. Bayar via portal pelanggan.",
+		},
+		{
+			Event:       "payment_confirmation",
+			Label:       "Konfirmasi pembayaran",
+			Description: "Dikirim otomatis setelah pembayaran diterima.",
+			Channels:    []string{"whatsapp"},
+			Variables: []TemplateVariable{
+				{Name: "customer_name", Desc: "Nama pelanggan"},
+				{Name: "plan_name", Desc: "Nama paket/langganan"},
+				{Name: "invoice_number", Desc: "Nomor tagihan"},
+				{Name: "amount", Desc: "Nominal dibayar (angka)"},
+			},
+			DefaultBody: "Terima kasih {{customer_name}}! Pembayaran tagihan {{invoice_number}} sebesar Rp {{amount}} berhasil diterima.",
+		},
+		{
+			Event:       "broadcast",
+			Label:       "Broadcast manual",
+			Description: "Dipakai untuk pesan massal dari tab Broadcast.",
+			Channels:    []string{"whatsapp", "telegram", "email"},
+			Variables:   []TemplateVariable{{Name: "message", Desc: "Isi pesan"}},
+			DefaultBody: "{{message}}",
+		},
 	}
-	return "", body
+}
+
+func defaultTemplate(channel, name string, vars map[string]string) (subject, body string) {
+	for _, ev := range TemplateCatalog() {
+		if ev.Event == name {
+			return applyVars(ev.DefaultSubject, vars), applyVars(ev.DefaultBody, vars)
+		}
+	}
+	return "", applyVars("{{message}}", vars)
 }
 
 func applyVars(tpl string, vars map[string]string) string {
@@ -405,9 +459,10 @@ func applyVars(tpl string, vars map[string]string) string {
 	return out
 }
 
-func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, customerID xid.ID, phone, invoiceNum string, amount int64, dueDate string) error {
-	_ = customerID
+func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, phone, customerName, planName, invoiceNum string, amount int64, dueDate string) error {
 	vars := map[string]string{
+		"customer_name":  customerName,
+		"plan_name":      planName,
 		"invoice_number": invoiceNum,
 		"amount":         fmt.Sprintf("%d", amount),
 		"due_date":       dueDate,
@@ -419,8 +474,10 @@ func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, cust
 	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body})
 }
 
-func (s *Service) SendPaymentConfirmation(ctx context.Context, tenantID xid.ID, phone, invoiceNum string, amount int64) error {
+func (s *Service) SendPaymentConfirmation(ctx context.Context, tenantID xid.ID, phone, customerName, planName, invoiceNum string, amount int64) error {
 	vars := map[string]string{
+		"customer_name":  customerName,
+		"plan_name":      planName,
 		"invoice_number": invoiceNum,
 		"amount":         fmt.Sprintf("%d", amount),
 	}

@@ -296,6 +296,22 @@ func (s *Store) GetSubscription(ctx context.Context, tenantID xid.ID, id xid.ID)
 	return &sub, nil
 }
 
+// PlanNameForSubscription returns the plan name for a subscription id, or "".
+func (s *Store) PlanNameForSubscription(ctx context.Context, tenantID xid.ID, subID *xid.ID) string {
+	if subID == nil || xid.IsNil(*subID) {
+		return ""
+	}
+	var name string
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT COALESCE(p.name, '') FROM subscriptions s
+		JOIN plans p ON p.id = s.plan_id
+		WHERE s.tenant_id = $1 AND s.id = $2
+	`, tenantID, *subID).Scan(&name); err != nil {
+		return ""
+	}
+	return name
+}
+
 // FindProvisionableSubscriptionByCustomer returns the best subscription to sync for a customer
 // (active preferred, then suspended/overdue), optionally filtered by router.
 func (s *Store) FindProvisionableSubscriptionByCustomer(ctx context.Context, tenantID, customerID xid.ID, routerID *xid.ID) (*Subscription, error) {

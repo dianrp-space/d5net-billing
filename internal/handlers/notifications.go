@@ -7,6 +7,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/dianrp/drp-billing/internal/httpx"
+	"github.com/dianrp/drp-billing/internal/notify"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/xid"
 )
@@ -28,6 +29,13 @@ func registerNotifications(api huma.API, d *Deps) {
 			list = []store.NotificationTemplate{}
 		}
 		return &struct{ Body []store.NotificationTemplate }{Body: list}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-notification-template-events", Method: http.MethodGet, Path: "/api/notifications/templates/catalog",
+		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body []notify.TemplateEvent }, error) {
+		return &struct{ Body []notify.TemplateEvent }{Body: notify.TemplateCatalog()}, nil
 	})
 
 	huma.Register(api, huma.Operation{

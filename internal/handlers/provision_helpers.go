@@ -702,7 +702,8 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 	if inv != nil {
 		cust, _ := d.Store.GetCustomer(ctx, pi.TenantID, pi.CustomerID)
 		if cust != nil && cust.Phone != "" {
-			_ = d.Notify.SendPaymentConfirmation(ctx, pi.TenantID, cust.Phone, inv.InvoiceNumber, amount)
+			planName := d.Store.PlanNameForSubscription(ctx, pi.TenantID, inv.SubscriptionID)
+			_ = d.Notify.SendPaymentConfirmation(ctx, pi.TenantID, cust.Phone, cust.FullName, planName, inv.InvoiceNumber, amount)
 		}
 	}
 

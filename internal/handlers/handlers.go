@@ -3161,7 +3161,8 @@ func registerInvoices(api huma.API, d *Deps) {
 		}
 		cust, _ := d.Store.GetCustomer(ctx, tid, inv.CustomerID)
 		if cust != nil {
-			_ = d.Notify.SendPaymentConfirmation(ctx, tid, cust.Phone, inv.InvoiceNumber, amount)
+			planName := d.Store.PlanNameForSubscription(ctx, tid, inv.SubscriptionID)
+			_ = d.Notify.SendPaymentConfirmation(ctx, tid, cust.Phone, cust.FullName, planName, inv.InvoiceNumber, amount)
 		}
 		resumeAfterInvoicePaid(ctx, d, tid, inv)
 		return &struct{ Body store.Payment }{Body: *p}, nil
