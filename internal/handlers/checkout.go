@@ -60,15 +60,19 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 		Amount: amount, ReturnURL: returnURL,
 		ProductDetails: "Tagihan " + strings.TrimSpace(inv.InvoiceNumber),
 	}
-	if origin != "" {
-		req.CallbackURL = strings.TrimRight(origin, "/") + paymentWebhookPathFor(providerName)
-		if req.ReturnURL == "" {
-			req.ReturnURL = origin
-		}
-	}
 	var ten *store.Tenant
 	if t, terr := d.Store.GetTenant(ctx, tid); terr == nil {
 		ten = t
+	}
+	if origin != "" {
+		slug := ""
+		if ten != nil {
+			slug = ten.Slug
+		}
+		req.CallbackURL = strings.TrimRight(origin, "/") + paymentWebhookPathWithTenant(providerName, slug)
+		if req.ReturnURL == "" {
+			req.ReturnURL = origin
+		}
 	}
 	if ten != nil && ten.Email != nil {
 		req.Email = strings.TrimSpace(*ten.Email)

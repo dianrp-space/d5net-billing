@@ -5579,6 +5579,7 @@ type paymentWebhookInput struct {
 	XEventType         string `header:"X-Event-Type"`
 	Authorization      string `header:"Authorization"`
 	UserAgent          string `header:"User-Agent"`
+	Tenant             string `query:"tenant"`
 }
 
 func registerPaymentWebhookRoute(api huma.API, d *Deps, provider string) {
@@ -5656,6 +5657,7 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 
 	var prov payment.Provider
 	var perr error
+	reason := ""
 	if parsed.ExternalID != "" {
 		if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, parsed.ExternalID); ierr == nil && pi != nil {
 			if normalizePaymentProviderName(pi.Provider) != providerName {
@@ -5664,18 +5666,40 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 				return webhookAck("ignored", "payment intent provider mismatch"), nil
 			}
 			prov, perr = resolvePaymentProvider(ctx, d, pi.TenantID, providerName)
+			if prov == nil {
+				reason = "provider not configured"
+				if perr != nil {
+					reason = perr.Error()
+				}
+			}
 		} else {
 			slog.Info("payment webhook: no matching payment intent",
 				"provider", providerName, "external_id", parsed.ExternalID)
 		}
 	}
+	if prov == nil && strings.TrimSpace(input.Tenant) != "" {
+		if t, terr := d.Store.GetTenantBySlug(ctx, strings.TrimSpace(input.Tenant)); terr == nil && t != nil {
+			prov, perr = resolvePaymentProvider(ctx, d, t.ID, providerName)
+			if prov == nil {
+				reason = "provider not configured"
+				if perr != nil {
+					reason = perr.Error()
+				}
+			}
+		} else {
+			reason = "unknown tenant: " + strings.TrimSpace(input.Tenant)
+		}
+	}
 	if prov == nil {
-		reason := "provider not configured"
-		if perr != nil {
-			reason = perr.Error()
+		if reason == "" {
+			if parsed.ExternalID == "" {
+				reason = "missing external id (test webhook?)"
+			} else {
+				reason = "no matching payment intent (test webhook?)"
+			}
 		}
 		slog.Warn("payment webhook accepted but not processed",
-			"provider", providerName, "external_id", parsed.ExternalID, "reason", reason)
+			"provider", providerName, "external_id", parsed.ExternalID, "tenant", input.Tenant, "reason", reason)
 		return webhookAck("received", reason), nil
 	}
 
