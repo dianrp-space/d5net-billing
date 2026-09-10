@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { DEFAULT_BRAND_LOGO } from "./branding";
 import { toastError, toastSuccess } from "./swal";
 import { Button, Input, SearchableSelect, Section } from "./ui";
 
@@ -146,7 +147,7 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
   );
 
   const appName = brandingQ.data?.name || brandingQ.data?.app_name || tenantSlug || "ISP";
-  const logoURL = brandingQ.data?.logo_url || "";
+  const logoURL = brandingQ.data?.logo_url || DEFAULT_BRAND_LOGO;
   const loginURL = network.portal_base_url
     ? `${network.portal_base_url.replace(/\/$/, "")}/${tenantSlug || "slug"}/client`
     : `/${tenantSlug || "slug"}/client`;

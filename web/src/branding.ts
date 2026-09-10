@@ -1,3 +1,6 @@
+/** Default app logo/favicon shipped with the app (web/public). */
+export const DEFAULT_BRAND_LOGO = "/DRP-Gobill-logo.png";
+
 /** Apply favicon (and optional document title) from branding URLs. */
 export function applyBrandingMeta(opts: {
   appName?: string | null;
@@ -10,7 +13,7 @@ export function applyBrandingMeta(opts: {
     const sep = opts.separator ?? "·";
     document.title = opts.titleSuffix ? `${name} ${sep} ${opts.titleSuffix}` : name;
   }
-  const href = opts.faviconUrl?.trim();
+  const href = opts.faviconUrl?.trim() || DEFAULT_BRAND_LOGO;
   document
     .querySelectorAll("link[rel='icon'], link[rel='shortcut icon'], link[rel='apple-touch-icon']")
     .forEach((el) => {
@@ -18,11 +21,6 @@ export function applyBrandingMeta(opts: {
     });
   let link = document.querySelector<HTMLLinkElement>("link[rel='icon'][data-drp-brand]");
   let apple = document.querySelector<HTMLLinkElement>("link[rel='apple-touch-icon'][data-drp-brand]");
-  if (!href) {
-    link?.remove();
-    apple?.remove();
-    return;
-  }
   if (!link) {
     link = document.createElement("link");
     link.rel = "icon";

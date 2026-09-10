@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Home, PanelLeft, PanelLeftClose } from "lucide-react";
 import { api, apiDownload, clearClientSession, getClientSession, setClientSession } from "./api";
-import { applyBrandingMeta } from "./branding";
+import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
 import type { ClientPortalData } from "./TenantLogin";
 import { toastError, toastSuccess } from "./swal";
 import { ThemeToggle } from "./ThemeToggle";
@@ -264,7 +264,6 @@ export function ClientHome({
   const appName = (branding.data?.name || branding.data?.app_name || data.tenant_name || data.tenant_slug || "Portal").trim();
   const logoUrl = branding.data?.logo_url;
   const faviconUrl = branding.data?.favicon_url;
-  const initial = (appName.trim()[0] || "P").toUpperCase();
 
   useEffect(() => {
     applyBrandingMeta({
@@ -560,11 +559,7 @@ export function ClientHome({
     <div className={`app-shell app-shell--portal${sidebarOpen ? "" : " is-sidebar-collapsed"}`}>
       <aside className="app-sidebar" aria-label="Navigasi portal pelanggan">
         <div className="app-sidebar-brand">
-          {logoUrl ? (
-            <img src={logoUrl} alt="" className="app-sidebar-logo object-contain" />
-          ) : (
-            <div className="app-sidebar-logo">{initial}</div>
-          )}
+          <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="app-sidebar-logo object-contain" />
           <div className="app-sidebar-brand-text">
             <p className="text-[10px] font-medium text-[var(--stone)]">Portal pelanggan</p>
             <h1 className="text-sm font-bold">{appName}</h1>

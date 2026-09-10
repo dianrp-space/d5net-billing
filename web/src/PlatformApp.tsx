@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, ImageIcon, Users } from "lucide-react";
 import { api, apiUpload, clearPlatformToken } from "./api";
-import { applyBrandingMeta } from "./branding";
+import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
 import { BackupRestorePage } from "./BackupRestorePage";
 import { IconPencil, IconShield, IconTrash, IconUser } from "./icons";
 import { useAppDialog } from "./confirm";
@@ -60,9 +60,11 @@ export function PlatformApp({ onLogout }: { onLogout: () => void }) {
     <div className="mx-auto max-w-5xl p-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          {branding.data?.logo_url ? (
-            <img src={branding.data.logo_url} alt="" className="h-10 w-10 rounded-lg object-contain" />
-          ) : null}
+          <img
+            src={branding.data?.logo_url || DEFAULT_BRAND_LOGO}
+            alt=""
+            className="h-10 w-10 rounded-lg object-contain"
+          />
           <div>
             <div className="text-sm text-[var(--muted)]">{appName}</div>
             <h1 className="text-2xl font-semibold">Platform · {pageTitle}</h1>
@@ -207,9 +209,12 @@ function PlatformBranding() {
               {b?.logo_url ? (
                 <img src={b.logo_url} alt="" className="h-12 w-12 rounded-lg object-contain" />
               ) : (
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-dashed text-xs text-[var(--muted)]">
-                  —
-                </div>
+                <img
+                  src={DEFAULT_BRAND_LOGO}
+                  alt="Logo default"
+                  title="Logo default"
+                  className="h-12 w-12 rounded-lg object-contain opacity-70"
+                />
               )}
               <input
                 type="file"

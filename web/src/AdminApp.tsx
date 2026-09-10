@@ -2,7 +2,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { HeaderSearch } from "./HeaderSearch";
 import { UserMenu } from "./UserMenu";
 import { getSidebarOpen, setSidebarOpen } from "./navPersist";
-import { applyBrandingMeta } from "./branding";
+import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
 import { canAccessPage, canDispatchOps, firstAllowedPage, type MePermissions } from "./permissions";
 import { isAdminPage, pageTitles, type AdminPage } from "./admin/pages";
 import {
@@ -299,7 +299,6 @@ export function AdminApp({
   const appName = (branding.data?.name || branding.data?.app_name || tenantSlug || "drp-billing").trim();
   const logoUrl = branding.data?.logo_url;
   const faviconUrl = branding.data?.favicon_url;
-  const initial = (appName.trim()[0] || "D").toUpperCase();
   const [sidebarOpen, setSidebarOpenState] = useState(() => getSidebarOpen());
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(
@@ -360,11 +359,7 @@ export function AdminApp({
       )}
       <aside className="app-sidebar" aria-label="Navigasi utama">
         <div className="app-sidebar-brand">
-          {logoUrl ? (
-            <img src={logoUrl} alt="" className="app-sidebar-logo object-contain" />
-          ) : (
-            <div className="app-sidebar-logo">{initial}</div>
-          )}
+          <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="app-sidebar-logo object-contain" />
           <div className="app-sidebar-brand-text">
             <p className="text-[10px] font-medium text-[var(--stone)]">ISP Billing</p>
             <h1 className="text-sm font-bold">{appName}</h1>

@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { IconEye, IconEyeOff } from "./icons";
+import { DEFAULT_BRAND_LOGO } from "./branding";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -207,9 +208,7 @@ export function LoginShell({
     <div className="flex min-h-full items-center justify-center bg-[var(--bg)] p-6">
       <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
         <div className="mb-4 flex items-center gap-3">
-          {logoUrl ? (
-            <img src={logoUrl} alt="" className="h-10 w-10 rounded-lg object-contain" />
-          ) : null}
+          <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="h-10 w-10 rounded-lg object-contain" />
           <div className="min-w-0">
             <div className="text-sm tracking-wide text-[var(--muted)]">{brand}</div>
             <h1 className="text-xl font-bold tracking-tight">{title}</h1>

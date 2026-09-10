@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="web/public/DRP-Gobill-logo.png" alt="DRP GoBill" width="360" />
+</p>
+
 # drp-billing
 
 Aplikasi billing ISP fullstack untuk jaringan MikroTik (PPPoE/Hotspot).
