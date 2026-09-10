@@ -17,46 +17,6 @@ import (
 	"time"
 )
 
-type WhatsAppNotifier struct {
-	APIURL string
-	APIKey string
-}
-
-func (n *WhatsAppNotifier) Channel() string { return "whatsapp" }
-
-func (n *WhatsAppNotifier) Send(ctx context.Context, msg Message) error {
-	apiURL := n.APIURL
-	if apiURL == "" {
-		apiURL = os.Getenv("WHATSAPP_API_URL")
-	}
-	apiKey := n.APIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("WHATSAPP_API_KEY")
-	}
-	if apiURL == "" {
-		slog.Warn("whatsapp not configured, logging message", "to", msg.Recipient, "body", msg.Body)
-		return nil
-	}
-	payload, _ := json.Marshal(map[string]string{"phone": msg.Recipient, "message": msg.Body})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL+"/send", bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("whatsapp API error: %d", resp.StatusCode)
-	}
-	return nil
-}
-
 type TelegramNotifier struct {
 	BotToken string
 }

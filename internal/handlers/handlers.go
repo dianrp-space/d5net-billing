@@ -30,7 +30,6 @@ import (
 	"github.com/dianrp/drp-billing/internal/provisioner"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/tenant"
-	"github.com/dianrp/drp-billing/internal/wa"
 	"github.com/dianrp/drp-billing/internal/xid"
 )
 
@@ -43,7 +42,6 @@ type Deps struct {
 	Payments    *payment.Registry
 	Provisioner *provisioner.Registry
 	Config      *config.Config
-	WA          *wa.Manager
 	DBBackup    *dbbackup.Service
 	Jobs        JobRunner
 }

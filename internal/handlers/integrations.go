@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,7 +15,6 @@ import (
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/wa"
 	"github.com/dianrp/drp-billing/internal/xid"
-	"github.com/skip2/go-qrcode"
 )
 
 const (
@@ -93,23 +91,49 @@ type payOptionView struct {
 }
 
 type messagingIntegrationStored struct {
-	WhatsAppAPIURL   string `json:"whatsapp_api_url"`
-	WhatsAppAPIKey   string `json:"whatsapp_api_key"`
-	TelegramBotToken string `json:"telegram_bot_token"`
-	TelegramChatID   string `json:"telegram_chat_id"`
-	WhatsAppEnabled  bool   `json:"whatsapp_enabled"`
-	TelegramEnabled  bool   `json:"telegram_enabled"`
+	TelegramBotToken string           `json:"telegram_bot_token"`
+	TelegramChatID   string           `json:"telegram_chat_id"`
+	TelegramEnabled  bool             `json:"telegram_enabled"`
+	WhatsAppEnabled  bool             `json:"whatsapp_enabled"`
+	WhatsAppBaseURL  string           `json:"whatsapp_base_url"`
+	WhatsAppUsername string           `json:"whatsapp_username"`
+	WhatsAppPassword string           `json:"whatsapp_password"`
+	WhatsAppDeviceID string           `json:"whatsapp_device_id"` // legacy single device
+	WhatsAppDevices  []waDeviceStored `json:"whatsapp_devices"`
+}
+
+type waDeviceStored struct {
+	DeviceID string `json:"device_id"`
+	Label    string `json:"label"`
 }
 
 type messagingIntegrationView struct {
-	WhatsAppAPIURL     string `json:"whatsapp_api_url"`
-	WhatsAppConfigured bool   `json:"whatsapp_configured"`
 	TelegramConfigured bool   `json:"telegram_configured"`
 	TelegramChatID     string `json:"telegram_chat_id"`
-	WhatsAppEnabled    bool   `json:"whatsapp_enabled"`
 	TelegramEnabled    bool   `json:"telegram_enabled"`
-	WhatsAppAPIKey     string `json:"whatsapp_api_key,omitempty"`
 	TelegramBotToken   string `json:"telegram_bot_token,omitempty"`
+}
+
+type waDeviceView struct {
+	DeviceID string `json:"device_id"`
+	Label    string `json:"label"`
+}
+
+type whatsappIntegrationView struct {
+	Configured bool           `json:"configured"`
+	Enabled    bool           `json:"enabled"`
+	BaseURL    string         `json:"base_url"`
+	Username   string         `json:"username"`
+	Password   string         `json:"password,omitempty"`
+	Devices    []waDeviceView `json:"devices"`
+}
+
+type whatsappIntegrationPut struct {
+	Enabled  bool           `json:"enabled"`
+	BaseURL  string         `json:"base_url"`
+	Username string         `json:"username"`
+	Password string         `json:"password,omitempty"`
+	Devices  []waDeviceView `json:"devices"`
 }
 
 type telegramIntegrationPut struct {
@@ -401,111 +425,127 @@ func registerIntegrations(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "get-whatsapp-status", Method: http.MethodGet, Path: "/api/integrations/whatsapp/status",
+		OperationID: "get-whatsapp-integration", Method: http.MethodGet, Path: "/api/integrations/whatsapp",
 		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body waStatusView }, error) {
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body whatsappIntegrationView }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if d.WA == nil {
-			return nil, httpx.Internal(fmt.Errorf("whatsapp manager not configured"))
-		}
-		st, err := d.WA.Status(ctx, tid)
+		stored, err := loadMessagingIntegration(ctx, d, tid)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		cfg, _ := loadMessagingIntegration(ctx, d, tid)
-		return &struct{ Body waStatusView }{Body: toWAStatusView(st, cfg.WhatsAppEnabled)}, nil
+		return &struct{ Body whatsappIntegrationView }{Body: whatsappView(d, stored)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "connect-whatsapp", Method: http.MethodPost, Path: "/api/integrations/whatsapp/connect",
+		OperationID: "put-whatsapp-integration", Method: http.MethodPut, Path: "/api/integrations/whatsapp",
 		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		Body struct {
-			Enabled *bool `json:"enabled,omitempty"`
-		}
-	}) (*struct{ Body waStatusView }, error) {
+		Body whatsappIntegrationPut
+	}) (*struct{ Body whatsappIntegrationView }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if d.WA == nil {
-			return nil, httpx.Internal(fmt.Errorf("whatsapp manager not configured"))
-		}
-		cfg, err := loadMessagingIntegration(ctx, d, tid)
+		cur, err := loadMessagingIntegration(ctx, d, tid)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		if input.Body.Enabled != nil {
-			cfg.WhatsAppEnabled = *input.Body.Enabled
-			_ = d.Store.UpsertSettingJSON(ctx, tid, settingMessaging, cfg)
-		} else {
-			cfg.WhatsAppEnabled = true
-			_ = d.Store.UpsertSettingJSON(ctx, tid, settingMessaging, cfg)
+		base := strings.TrimRight(strings.TrimSpace(input.Body.BaseURL), "/")
+		if input.Body.Enabled && base == "" {
+			return nil, httpx.BadRequest("base URL gateway WhatsApp wajib diisi")
 		}
-		st, err := d.WA.Connect(ctx, tid)
+		cur.WhatsAppEnabled = input.Body.Enabled
+		cur.WhatsAppBaseURL = base
+		cur.WhatsAppUsername = strings.TrimSpace(input.Body.Username)
+		cur.WhatsAppDeviceID = ""
+		cur.WhatsAppDevices = normalizeWADevices(input.Body.Devices)
+		if v := strings.TrimSpace(input.Body.Password); v != "" {
+			enc, err := d.Encryptor.EncryptString(v)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			cur.WhatsAppPassword = enc
+		}
+		if err := d.Store.UpsertSettingJSON(ctx, tid, settingMessaging, cur); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body whatsappIntegrationView }{Body: whatsappView(d, cur)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "check-whatsapp-integration", Method: http.MethodPost, Path: "/api/integrations/whatsapp/check",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body whatsappCheckView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := loadMessagingIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if strings.TrimSpace(stored.WhatsAppBaseURL) == "" {
+			return nil, httpx.BadRequest("gateway WhatsApp belum dikonfigurasi")
+		}
+		pass := decryptSecret(d, stored.WhatsAppPassword)
+		out := &struct{ Body whatsappCheckView }{}
+		for _, dev := range effectiveWADevices(stored) {
+			row := whatsappDeviceStatus{DeviceID: dev.DeviceID, Label: dev.Label}
+			client := wa.NewClient(wa.Config{
+				BaseURL:  stored.WhatsAppBaseURL,
+				Username: stored.WhatsAppUsername,
+				Password: pass,
+				DeviceID: dev.DeviceID,
+			})
+			st, cerr := client.CheckStatus(ctx)
+			if cerr != nil {
+				row.Error = cerr.Error()
+			} else {
+				row.Connected = st.Connected
+				row.LoggedIn = st.LoggedIn
+				row.JID = st.JID
+			}
+			out.Body.Devices = append(out.Body.Devices, row)
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-whatsapp-devices", Method: http.MethodGet, Path: "/api/integrations/whatsapp/devices",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body whatsappDevicesView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := loadMessagingIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		client := wa.NewClient(wa.Config{
+			BaseURL:  stored.WhatsAppBaseURL,
+			Username: stored.WhatsAppUsername,
+			Password: decryptSecret(d, stored.WhatsAppPassword),
+		})
+		if !client.Configured() {
+			return nil, httpx.BadRequest("gateway WhatsApp belum dikonfigurasi")
+		}
+		list, err := client.ListDevices(ctx)
 		if err != nil {
 			return nil, httpx.BadRequest(err.Error())
 		}
-		return &struct{ Body waStatusView }{Body: toWAStatusView(st, cfg.WhatsAppEnabled)}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "pair-code-whatsapp", Method: http.MethodPost, Path: "/api/integrations/whatsapp/pair-code",
-		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, input *struct {
-		Body struct {
-			Phone string `json:"phone"`
+		out := &struct{ Body whatsappDevicesView }{}
+		for _, dev := range list {
+			out.Body.Devices = append(out.Body.Devices, whatsappGatewayDevice{
+				DeviceID: dev.DeviceID,
+				Name:     dev.Name,
+				JID:      dev.JID,
+			})
 		}
-	}) (*struct{ Body waStatusView }, error) {
-		tid, err := tenantIDFromCtx(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if d.WA == nil {
-			return nil, httpx.Internal(fmt.Errorf("whatsapp manager not configured"))
-		}
-		phone := strings.TrimSpace(input.Body.Phone)
-		if phone == "" {
-			return nil, httpx.BadRequest("nomor WhatsApp wajib diisi")
-		}
-		cfg, err := loadMessagingIntegration(ctx, d, tid)
-		if err != nil {
-			return nil, httpx.Internal(err)
-		}
-		cfg.WhatsAppEnabled = true
-		_ = d.Store.UpsertSettingJSON(ctx, tid, settingMessaging, cfg)
-		st, err := d.WA.PairCode(ctx, tid, phone)
-		if err != nil {
-			return nil, httpx.BadRequest(err.Error())
-		}
-		return &struct{ Body waStatusView }{Body: toWAStatusView(st, cfg.WhatsAppEnabled)}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "logout-whatsapp", Method: http.MethodPost, Path: "/api/integrations/whatsapp/logout",
-		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body waStatusView }, error) {
-		tid, err := tenantIDFromCtx(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if d.WA == nil {
-			return nil, httpx.Internal(fmt.Errorf("whatsapp manager not configured"))
-		}
-		if err := d.WA.Logout(ctx, tid); err != nil {
-			return nil, httpx.Internal(err)
-		}
-		cfg, _ := loadMessagingIntegration(ctx, d, tid)
-		cfg.WhatsAppEnabled = false
-		_ = d.Store.UpsertSettingJSON(ctx, tid, settingMessaging, cfg)
-		st, err := d.WA.Status(ctx, tid)
-		if err != nil {
-			return &struct{ Body waStatusView }{Body: waStatusView{Enabled: false}}, nil
-		}
-		return &struct{ Body waStatusView }{Body: toWAStatusView(st, false)}, nil
+		return out, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -542,42 +582,27 @@ type messagingTestView struct {
 	Channel string `json:"channel"`
 }
 
-type waStatusView struct {
-	Enabled       bool   `json:"enabled"`
-	Connected     bool   `json:"connected"`
-	LoggedIn      bool   `json:"logged_in"`
-	JID           string `json:"jid,omitempty"`
-	Phone         string `json:"phone,omitempty"`
-	QRCode        string `json:"qr_code,omitempty"`
-	QREvent       string `json:"qr_event,omitempty"`
-	QRError       string `json:"qr_error,omitempty"`
-	PairCode      string `json:"pair_code,omitempty"`
-	PairPhone     string `json:"pair_phone,omitempty"`
-	QRImageBase64 string `json:"qr_image_base64,omitempty"`
+type whatsappDeviceStatus struct {
+	DeviceID  string `json:"device_id"`
+	Label     string `json:"label,omitempty"`
+	Connected bool   `json:"connected"`
+	LoggedIn  bool   `json:"logged_in"`
+	JID       string `json:"jid,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
-func toWAStatusView(st *wa.Status, enabled bool) waStatusView {
-	if st == nil {
-		return waStatusView{Enabled: enabled}
-	}
-	out := waStatusView{
-		Enabled:   enabled,
-		Connected: st.Connected,
-		LoggedIn:  st.LoggedIn,
-		JID:       st.JID,
-		Phone:     st.Phone,
-		QRCode:    st.QRCode,
-		QREvent:   st.QREvent,
-		QRError:   st.QRError,
-		PairCode:  st.PairCode,
-		PairPhone: st.PairPhone,
-	}
-	if st.QRCode != "" {
-		if png, err := qrcode.Encode(st.QRCode, qrcode.Medium, 256); err == nil {
-			out.QRImageBase64 = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
-		}
-	}
-	return out
+type whatsappCheckView struct {
+	Devices []whatsappDeviceStatus `json:"devices"`
+}
+
+type whatsappGatewayDevice struct {
+	DeviceID string `json:"device_id"`
+	Name     string `json:"name,omitempty"`
+	JID      string `json:"jid,omitempty"`
+}
+
+type whatsappDevicesView struct {
+	Devices []whatsappGatewayDevice `json:"devices"`
 }
 
 func loadPaymentIntegration(ctx context.Context, d *Deps, tid xid.ID) (paymentIntegrationStored, error) {
@@ -788,14 +813,56 @@ func duitkuView(ctx context.Context, d *Deps, tid xid.ID, s duitkuIntegrationSto
 
 func messagingView(d *Deps, s messagingIntegrationStored) messagingIntegrationView {
 	return messagingIntegrationView{
-		WhatsAppAPIURL:     s.WhatsAppAPIURL,
-		WhatsAppConfigured: s.WhatsAppAPIKey != "",
 		TelegramConfigured: s.TelegramBotToken != "" && s.TelegramChatID != "",
 		TelegramChatID:     s.TelegramChatID,
-		WhatsAppEnabled:    s.WhatsAppEnabled,
 		TelegramEnabled:    s.TelegramEnabled,
 		TelegramBotToken:   decryptSecret(d, s.TelegramBotToken),
 	}
+}
+
+func whatsappView(d *Deps, s messagingIntegrationStored) whatsappIntegrationView {
+	devices := make([]waDeviceView, 0, len(s.WhatsAppDevices))
+	for _, dev := range effectiveWADevices(s) {
+		devices = append(devices, waDeviceView{DeviceID: dev.DeviceID, Label: dev.Label})
+	}
+	return whatsappIntegrationView{
+		Configured: strings.TrimSpace(s.WhatsAppBaseURL) != "",
+		Enabled:    s.WhatsAppEnabled,
+		BaseURL:    s.WhatsAppBaseURL,
+		Username:   s.WhatsAppUsername,
+		Password:   decryptSecret(d, s.WhatsAppPassword),
+		Devices:    devices,
+	}
+}
+
+// normalizeWADevices trims/dedupes device entries from a request.
+func normalizeWADevices(in []waDeviceView) []waDeviceStored {
+	seen := map[string]struct{}{}
+	out := make([]waDeviceStored, 0, len(in))
+	for _, dev := range in {
+		id := strings.TrimSpace(dev.DeviceID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, waDeviceStored{DeviceID: id, Label: strings.TrimSpace(dev.Label)})
+	}
+	return out
+}
+
+// effectiveWADevices returns the configured devices, falling back to the legacy
+// single device id, then to a single default (empty id = gateway default).
+func effectiveWADevices(s messagingIntegrationStored) []waDeviceStored {
+	if len(s.WhatsAppDevices) > 0 {
+		return s.WhatsAppDevices
+	}
+	if id := strings.TrimSpace(s.WhatsAppDeviceID); id != "" {
+		return []waDeviceStored{{DeviceID: id}}
+	}
+	return []waDeviceStored{{}}
 }
 
 func qrisExpiresMinutes(s paymentIntegrationStored, d *Deps) int {

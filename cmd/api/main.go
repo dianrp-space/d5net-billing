@@ -25,7 +25,6 @@ import (
 	"github.com/dianrp/drp-billing/internal/provisioner"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/tenant"
-	"github.com/dianrp/drp-billing/internal/wa"
 )
 
 func main() {
@@ -55,13 +54,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	waMgr, err := wa.NewManager(cfg.WhatsAppSessionDir)
-	if err != nil {
-		slog.Error("whatsapp manager", "err", err)
-		os.Exit(1)
-	}
-	go waMgr.RestoreConnectedTenants(ctx)
-
 	dbBackup, err := dbbackup.New(database.Pool, cfg.DatabaseURL, cfg.DBBackupDir)
 	if err != nil {
 		slog.Error("db backup", "err", err)
@@ -69,7 +61,7 @@ func main() {
 	}
 
 	billingEngine := billing.New(st)
-	notifySvc := notify.NewService(st).WithDecryptor(encryptor.DecryptString).WithWhatsApp(waMgr)
+	notifySvc := notify.NewService(st).WithDecryptor(encryptor.DecryptString)
 	payments := payment.NewRegistryWithTTL(cfg.DRPPaymentAPIKey, cfg.DRPPaymentWebhookSecret, cfg.DRPPaymentBaseURL, cfg.DRPPaymentExpiresInMinutes)
 	provReg := provisioner.NewRegistry(st, encryptor)
 	jobsWorker := job.NewWorker(st, billingEngine, notifySvc, monitor.NewPoller(st, encryptor, 0).WithNotify(notifySvc), provReg)
@@ -79,7 +71,7 @@ func main() {
 	deps := &handlers.Deps{
 		Store: st, Tokens: tokens, Encryptor: encryptor,
 		Billing: billingEngine, Notify: notifySvc, Payments: payments,
-		Provisioner: provReg, Config: cfg, WA: waMgr, DBBackup: dbBackup,
+		Provisioner: provReg, Config: cfg, DBBackup: dbBackup,
 		Jobs: jobsWorker,
 	}
 	handlers.RegisterAll(srv.API, deps)

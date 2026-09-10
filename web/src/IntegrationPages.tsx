@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -622,64 +622,117 @@ export function MessagingGWPage() {
   );
 }
 
-type WAStatus = {
+type WADevice = { device_id: string; label: string };
+type WhatsAppIntegration = {
+  configured: boolean;
   enabled: boolean;
+  base_url: string;
+  username: string;
+  password?: string;
+  devices: WADevice[];
+};
+type WACheckRow = {
+  device_id: string;
+  label?: string;
   connected: boolean;
   logged_in: boolean;
   jid?: string;
-  phone?: string;
-  qr_code?: string;
-  qr_event?: string;
-  qr_error?: string;
-  pair_code?: string;
-  pair_phone?: string;
-  qr_image_base64?: string;
+  error?: string;
 };
 
 function WhatsAppTab() {
   const qc = useQueryClient();
-  const status = useQuery({
+  const q = useQuery({
     queryKey: ["integration-whatsapp"],
-    queryFn: () => api<WAStatus>("/api/integrations/whatsapp/status"),
-    refetchInterval: (q) => {
-      const d = q?.state?.data as WAStatus | undefined;
-      if (d?.logged_in) return false;
-      if (d?.qr_code) return 2500;
-      return 8000;
-    },
+    queryFn: () => api<WhatsAppIntegration>("/api/integrations/whatsapp"),
   });
-
-  const connect = useMutation({
-    mutationFn: () => api<WAStatus>("/api/integrations/whatsapp/connect", { method: "POST", body: "{}" }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["integration-whatsapp"] });
-      void toastSuccess("Sesi WhatsApp dimulai — scan QR jika diminta");
-    },
-    onError: (e: Error) => void toastError(e.message),
+  const [form, setForm] = useState({
+    enabled: false,
+    base_url: "",
+    username: "",
+    password: "",
+    devices: [] as WADevice[],
   });
+  const [checks, setChecks] = useState<WACheckRow[]>([]);
 
-  const logout = useMutation({
-    mutationFn: () => api<WAStatus>("/api/integrations/whatsapp/logout", { method: "POST", body: "{}" }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["integration-whatsapp"] });
-      void toastSuccess("WhatsApp logout");
-    },
-    onError: (e: Error) => void toastError(e.message),
-  });
+  useEffect(() => {
+    if (!q.data) return;
+    setForm({
+      enabled: q.data.enabled,
+      base_url: q.data.base_url || "",
+      username: q.data.username || "",
+      password: q.data.password || "",
+      devices: Array.isArray(q.data.devices) && q.data.devices.length ? q.data.devices : [{ device_id: "", label: "" }],
+    });
+  }, [q.data]);
 
-  const [pairPhone, setPairPhone] = useState("");
-  const pair = useMutation({
+  const save = useMutation({
     mutationFn: () =>
-      api<WAStatus>("/api/integrations/whatsapp/pair-code", {
-        method: "POST",
-        body: JSON.stringify({ phone: pairPhone.trim() }),
+      api<WhatsAppIntegration>("/api/integrations/whatsapp", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: form.enabled,
+          base_url: form.base_url.trim(),
+          username: form.username.trim(),
+          password: form.password.trim() || undefined,
+          devices: form.devices
+            .map((d) => ({ device_id: d.device_id.trim(), label: d.label.trim() }))
+            .filter((d) => d.device_id !== ""),
+        }),
       }),
     onSuccess: (data) => {
       qc.setQueryData(["integration-whatsapp"], data);
       void qc.invalidateQueries({ queryKey: ["integration-whatsapp"] });
-      void toastSuccess("Kode pairing dibuat — masukkan di WhatsApp");
+      void toastSuccess("WhatsApp gateway disimpan");
     },
     onError: (e: Error) => void toastError(e.message),
+  });
+
+  const check = useMutation({
+    mutationFn: () =>
+      api<{ devices: WACheckRow[] }>("/api/integrations/whatsapp/check", { method: "POST", body: "{}" }),
+    onSuccess: (data) => {
+      const rows = data.devices || [];
+      setChecks(rows);
+      const ok = rows.filter((r) => r.logged_in).length;
+      void swalAlert({
+        title: ok > 0 ? "WhatsApp terhubung" : "Gateway merespons",
+        description:
+          `${ok}/${rows.length} nomor login` +
+          rows
+            .map((r) => `\n• ${r.device_id || "(default)"}: ${r.error ? r.error : r.logged_in ? "OK" : "belum login"}`)
+            .join(""),
+        icon: ok > 0 ? "success" : "warning",
+      });
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const [loadMsg, setLoadMsg] = useState("");
+  const loadDevices = useMutation({
+    mutationFn: () =>
+      api<{ devices: { device_id: string; name?: string; jid?: string }[] }>(
+        "/api/integrations/whatsapp/devices",
+      ),
+    onSuccess: (data) => {
+      const list = data.devices || [];
+      if (!list.length) {
+        setLoadMsg("Gateway tidak melaporkan device apa pun.");
+        return;
+      }
+      setForm((f) => {
+        const existing = new Set(f.devices.map((d) => d.device_id.trim()));
+        const merged = [...f.devices];
+        for (const d of list) {
+          if (!existing.has(d.device_id)) {
+            merged.push({ device_id: d.device_id, label: d.name || d.jid || "" });
+          }
+        }
+        return { ...f, devices: merged.filter((d, i) => i === 0 || d.device_id.trim() !== "") };
+      });
+      setLoadMsg(`Ditemukan ${list.length} device. Periksa & simpan.`);
+    },
+    onError: (e: Error) => setLoadMsg(e.message),
   });
 
   const [testPhone, setTestPhone] = useState("");
@@ -689,103 +742,156 @@ function WhatsAppTab() {
     onError: (e: Error) => void toastError(e.message),
   });
 
-  const st = status.data;
-
-  const prevLoggedIn = useRef(false);
-  useEffect(() => {
-    const now = Boolean(st?.logged_in);
-    if (now && !prevLoggedIn.current) {
-      void swalAlert({
-        title: "WhatsApp terhubung",
-        description: st?.phone ? `Perangkat berhasil ditautkan · ${st.phone}` : "Perangkat berhasil ditautkan.",
-        icon: "success",
-      });
-      void qc.invalidateQueries({ queryKey: ["integration-whatsapp"] });
-    }
-    prevLoggedIn.current = now;
-  }, [st?.logged_in, st?.phone, qc]);
+  function setDevice(i: number, patch: Partial<WADevice>) {
+    setForm((f) => ({ ...f, devices: f.devices.map((d, j) => (j === i ? { ...d, ...patch } : d)) }));
+  }
+  function addDevice() {
+    setForm((f) => ({ ...f, devices: [...f.devices, { device_id: "", label: "" }] }));
+  }
+  function removeDevice(i: number) {
+    setForm((f) => ({ ...f, devices: f.devices.filter((_, j) => j !== i) }));
+  }
 
   return (
-    <Section title="WhatsApp (whatsmeow)">
+    <Section title="WhatsApp (gateway eksternal)">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Pairing multi-device via QR atau kode (library <code className="text-xs">go.mau.fi/whatsmeow</code>). Setelah
-        login, notifikasi tenant dikirim lewat sesi ini.
+        Kirim WhatsApp lewat gateway GOWA (go-whatsapp-web-multidevice) milik tenant. Bisa lebih dari satu nomor
+        (device) pada base URL yang sama; pengiriman mencoba nomor berikutnya bila yang pertama gagal (redundan).
+        Login/scan QR di dashboard gateway.
       </p>
-      {status.isLoading ? (
+      {q.isLoading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
       ) : (
         <div className="grid max-w-xl gap-4">
-          <div className="rounded-xl border border-[var(--border)] p-3 text-sm">
-            <p>
-              Status:{" "}
-              <strong>
-                {st?.logged_in ? "terhubung" : st?.qr_code ? "menunggu scan QR" : "belum login"}
-              </strong>
-            </p>
-            <p className="text-[var(--muted)]">
-              Connected: {st?.connected ? "ya" : "tidak"}
-              {st?.phone ? ` · ${st.phone}` : ""}
-            </p>
-            {st?.qr_event ? <p className="text-xs text-[var(--muted)]">Event: {st.qr_event}</p> : null}
-            {st?.qr_error ? (
-              <p className="mt-1 text-xs text-[var(--danger)]">Error: {st.qr_error}</p>
-            ) : null}
-          </div>
-          {st?.qr_image_base64 && !st.logged_in ? (
-            <div className="rounded-xl border border-[var(--border)] p-4">
-              <p className="mb-2 text-sm font-medium">Scan QR dari WhatsApp → Perangkat tertaut</p>
-              <img src={st.qr_image_base64} alt="QR WhatsApp" className="mx-auto h-56 w-56 rounded-lg bg-white p-2" />
-              <p className="mt-2 text-center text-xs text-[var(--muted)]">
-                QR berganti otomatis tiap ±20 detik. Jika kadaluarsa, klik Connect lagi.
-              </p>
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Gateway WhatsApp</p>
+                <p className="text-[10px] text-[var(--muted)]">
+                  {q.data?.configured ? "base URL tersimpan" : "belum dikonfigurasi"}
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.enabled}
+                  onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+                />
+                Aktif
+              </label>
             </div>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn" disabled={connect.isPending} onClick={() => connect.mutate()}>
-              {st?.logged_in ? "Reconnect" : "Connect / Tampilkan QR"}
+            <div className="grid gap-2">
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Base URL gateway</span>
+                <input
+                  className="input"
+                  placeholder="https://wa-gateway.example.com"
+                  value={form.base_url}
+                  onChange={(e) => setForm({ ...form, base_url: e.target.value })}
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Basic Auth username</span>
+                <input
+                  className="input"
+                  placeholder="username"
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  autoComplete="off"
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Basic Auth password</span>
+                <SecretInput
+                  name="whatsapp-gateway-password"
+                  placeholder="password"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  autoComplete="new-password"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium">Nomor / device</p>
+              <button type="button" className="btn-ghost" onClick={addDevice}>
+                + Tambah nomor
+              </button>
+            </div>
+            <div className="grid gap-2">
+              {form.devices.map((d, i) => (
+                <div key={i} className="flex flex-wrap items-end gap-2">
+                  <label className="grid flex-1 gap-1 text-sm">
+                    <span className="text-[10px] text-[var(--muted)]">Device ID</span>
+                    <input
+                      className="input"
+                      placeholder="org_2 / 628xxx"
+                      value={d.device_id}
+                      onChange={(e) => setDevice(i, { device_id: e.target.value })}
+                    />
+                  </label>
+                  <label className="grid flex-1 gap-1 text-sm">
+                    <span className="text-[10px] text-[var(--muted)]">Label (opsional)</span>
+                    <input
+                      className="input"
+                      placeholder="Nomor utama"
+                      value={d.label}
+                      onChange={(e) => setDevice(i, { label: e.target.value })}
+                    />
+                  </label>
+                  <IconButton
+                    label="Hapus nomor"
+                    danger
+                    onClick={() => removeDevice(i)}
+                    disabled={form.devices.length <= 1}
+                  >
+                    <IconTrash />
+                  </IconButton>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={loadDevices.isPending || !form.base_url.trim()}
+                onClick={() => {
+                  setLoadMsg("");
+                  loadDevices.mutate();
+                }}
+              >
+                {loadDevices.isPending ? "Memuat..." : "Muat device dari gateway"}
+              </button>
+              {loadMsg ? <span className="text-xs text-[var(--muted)]">{loadMsg}</span> : null}
+            </div>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Kosongkan device ID untuk memakai device default gateway (bila gateway hanya punya satu nomor).
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Menyimpan..." : "Simpan"}
             </button>
             <button
               type="button"
               className="btn-ghost"
-              disabled={logout.isPending || (!st?.logged_in && !st?.qr_code)}
-              onClick={() => logout.mutate()}
+              disabled={check.isPending || !form.base_url.trim()}
+              onClick={() => check.mutate()}
             >
-              Logout
+              {check.isPending ? "Mengecek..." : "Cek koneksi"}
             </button>
           </div>
-
-          {!st?.logged_in ? (
-            <div className="rounded-xl border border-[var(--border)] p-3">
-              <p className="mb-1 text-sm font-medium">Login via kode (tanpa scan QR)</p>
-              <p className="mb-2 text-xs text-[var(--muted)]">
-                Masukkan nomor WhatsApp (format internasional, mis. 62812…). Di HP: WhatsApp → Perangkat tertaut →
-                Tautkan dengan nomor telepon, lalu masukkan kode di bawah.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <input
-                  className="input min-w-[200px] flex-1"
-                  placeholder="6281234567890"
-                  value={pairPhone}
-                  onChange={(e) => setPairPhone(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  disabled={pair.isPending || !pairPhone.trim()}
-                  onClick={() => pair.mutate()}
-                >
-                  {pair.isPending ? "Membuat…" : "Minta kode"}
-                </button>
-              </div>
-              {st?.pair_code ? (
-                <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-3 text-center">
-                  <p className="text-xs text-[var(--muted)]">Kode pairing</p>
-                  <p className="text-2xl font-bold tracking-[0.3em]">{st.pair_code}</p>
-                  {st.pair_phone ? (
-                    <p className="mt-1 text-xs text-[var(--muted)]">untuk {st.pair_phone}</p>
-                  ) : null}
-                </div>
-              ) : null}
+          {checks.length ? (
+            <div className="rounded-xl border border-[var(--border)] p-3 text-sm">
+              {checks.map((r) => (
+                <p key={r.device_id || "default"} className="text-[var(--muted)]">
+                  <strong className="text-[var(--text)]">{r.device_id || "(default)"}</strong>
+                  {r.label ? ` · ${r.label}` : ""}: {r.error ? r.error : r.logged_in ? `OK${r.jid ? ` · ${r.jid}` : ""}` : "belum login"}
+                </p>
+              ))}
             </div>
           ) : null}
 
@@ -794,22 +900,22 @@ function WhatsAppTab() {
             <div className="flex flex-wrap gap-2">
               <input
                 className="input min-w-[200px] flex-1"
-                placeholder="No. WhatsApp tujuan (08… / 62…)"
+                placeholder="No. WhatsApp tujuan (08\u2026 / 62\u2026)"
                 value={testPhone}
                 onChange={(e) => setTestPhone(e.target.value)}
               />
               <button
                 type="button"
                 className="btn-ghost"
-                disabled={testSend.isPending || !testPhone.trim() || !st?.logged_in}
+                disabled={testSend.isPending || !testPhone.trim()}
                 onClick={() => testSend.mutate()}
               >
-                {testSend.isPending ? "Mengirim…" : "Kirim tes"}
+                {testSend.isPending ? "Mengirim..." : "Kirim tes"}
               </button>
             </div>
-            {!st?.logged_in ? (
-              <p className="mt-1 text-xs text-[var(--muted)]">Connect WhatsApp dulu untuk tes kirim.</p>
-            ) : null}
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Simpan dulu perubahan base URL/kredensial, lalu kirim tes.
+            </p>
           </div>
         </div>
       )}

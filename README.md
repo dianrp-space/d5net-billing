@@ -129,7 +129,6 @@ ENCRYPTION_KEY='<tepat 32 karakter, openssl rand -base64 24 | cut -c1-32>'
 CORS_ORIGINS=https://billing.dianrp.com
 UPLOAD_DIR=./data/uploads
 ROUTER_BACKUP_DIR=./data/router-backups
-WHATSAPP_SESSION_DIR=./data/whatsapp
 DB_BACKUP_DIR=./data/db-backups
 WORKER_ENABLED=true
 ```
@@ -269,10 +268,12 @@ location /events/ {
 Di menu **Integrasi**:
 
 - **Payment Gateway** — DRP Payment (QRIS), kredensial per tenant atau env `DRP_PAYMENT_*`
-- **Messaging Gateway** — tab **WhatsApp** (pairing QR via [whatsmeow](https://github.com/tulir/whatsmeow), ke pelanggan) dan tab **Telegram** (bot token + chat ID **ops tenant** saja)
+- **Messaging Gateway** — tab **WhatsApp** (gateway eksternal GOWA: base URL + Basic Auth per tenant, multi-nomor) dan tab **Telegram** (bot token + chat ID **ops tenant** saja)
 - **Backup / Restore** — tenant: export/import JSON data tenant; platform/owner: `pg_dump` / `psql` penuh (dir `DB_BACKUP_DIR`)
 
-Sesi WhatsApp produksi: `WHATSAPP_SESSION_DIR=./data/whatsapp` (folder `data/` di repo). Setelah Connect + scan QR, notifikasi invoice/pembayaran memakai sesi tersebut.
+WhatsApp tidak lagi memakai sesi in-process: arahkan tab WhatsApp di Integrasi ke gateway [go-whatsapp-web-multidevice](https://github.com/aldinokemal/go-whatsapp-web-multidevice) (login/scan QR di dashboard gateway), lalu isi base URL + Basic Auth.
+
+**Multi-nomor (redundansi):** pada satu gateway/base URL yang sama, tenant bisa mendaftarkan lebih dari satu device (nomor). Tombol **Muat device dari gateway** mengisi daftar dari `GET /app/devices`; tiap device dipilih lewat header `X-Device-Id`. Saat mengirim, sistem mencoba nomor secara berurutan dan lanjut ke nomor berikutnya bila gagal (failover). **Cek koneksi** menampilkan status per nomor. Bila daftar dikosongkan, dipakai device default gateway.
 
 ## Fitur
 

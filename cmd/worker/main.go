@@ -16,7 +16,6 @@ import (
 	"github.com/dianrp/drp-billing/internal/notify"
 	"github.com/dianrp/drp-billing/internal/provisioner"
 	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/wa"
 )
 
 func main() {
@@ -45,15 +44,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	waMgr, err := wa.NewManager(cfg.WhatsAppSessionDir)
-	if err != nil {
-		slog.Error("whatsapp manager", "err", err)
-		os.Exit(1)
-	}
-	go waMgr.RestoreConnectedTenants(ctx)
-
 	billingEngine := billing.New(st)
-	notifySvc := notify.NewService(st).WithDecryptor(encryptor.DecryptString).WithWhatsApp(waMgr)
+	notifySvc := notify.NewService(st).WithDecryptor(encryptor.DecryptString)
 	poller := monitor.NewPoller(st, encryptor, 0).WithNotify(notifySvc)
 	provReg := provisioner.NewRegistry(st, encryptor)
 	worker := job.NewWorker(st, billingEngine, notifySvc, poller, provReg)

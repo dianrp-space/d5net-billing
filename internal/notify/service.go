@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dianrp/drp-billing/internal/store"
+	"github.com/dianrp/drp-billing/internal/wa"
 	"github.com/dianrp/drp-billing/internal/xid"
 )
 
@@ -29,12 +30,10 @@ type Service struct {
 	store     *store.Store
 	notifiers map[string]Notifier
 	decrypt   func(encoded string) (string, error)
-	wa        WhatsAppSender
 }
 
 func NewService(st *store.Store) *Service {
 	s := &Service{store: st, notifiers: make(map[string]Notifier)}
-	s.Register(&WhatsAppNotifier{})
 	s.Register(&TelegramNotifier{})
 	s.Register(&EmailNotifier{})
 	return s
@@ -43,16 +42,6 @@ func NewService(st *store.Store) *Service {
 func (s *Service) WithDecryptor(fn func(encoded string) (string, error)) *Service {
 	s.decrypt = fn
 	return s
-}
-
-func (s *Service) WithWhatsApp(sender WhatsAppSender) *Service {
-	s.wa = sender
-	return s
-}
-
-type WhatsAppSender interface {
-	IsReady(tenantID xid.ID) bool
-	SendText(ctx context.Context, tenantID xid.ID, phone, body string) error
 }
 
 func (s *Service) Register(n Notifier) {
@@ -123,7 +112,7 @@ func (s *Service) ProcessPending(ctx context.Context, limit int) (int, error) {
 			continue
 		}
 		n, ok := s.notifiers[channel]
-		if !ok {
+		if !ok && channel != "whatsapp" {
 			_, _ = s.store.Pool.Exec(ctx, `UPDATE notification_queue SET status='failed', error=$2, attempts=attempts+1 WHERE id=$1`, id, "unknown channel")
 			continue
 		}
@@ -132,26 +121,26 @@ func (s *Service) ProcessPending(ctx context.Context, limit int) (int, error) {
 			msg.Subject = *subject
 		}
 		var sendErr error
-		if channel == "whatsapp" && s.wa != nil && s.wa.IsReady(tenantID) {
-			sendErr = s.wa.SendText(ctx, tenantID, recipient, body)
-		} else {
-			sender := n
-			if channel == "whatsapp" || channel == "telegram" {
-				if overlay := s.tenantMessagingNotifier(ctx, tenantID, channel); overlay != nil {
-					sender = overlay
-				}
+		switch channel {
+		case "whatsapp":
+			sendErr = s.sendWhatsApp(ctx, tenantID, recipient, body)
+		case "telegram":
+			sender := s.tenantMessagingNotifier(ctx, tenantID, "telegram")
+			if sender == nil {
+				sender = n
 			}
-			if channel == "email" {
-				if overlay := s.tenantEmailNotifier(ctx, tenantID); overlay != nil {
-					sender = overlay
-				}
-			}
-			if channel == "telegram" {
-				if chatID := s.tenantTelegramChatID(ctx, tenantID); chatID != "" {
-					msg.Recipient = chatID
-				}
+			if chatID := s.tenantTelegramChatID(ctx, tenantID); chatID != "" {
+				msg.Recipient = chatID
 			}
 			sendErr = sender.Send(ctx, msg)
+		case "email":
+			sender := s.tenantEmailNotifier(ctx, tenantID)
+			if sender == nil {
+				sender = n
+			}
+			sendErr = sender.Send(ctx, msg)
+		default:
+			sendErr = fmt.Errorf("unknown channel")
 		}
 		if sendErr != nil {
 			_, _ = s.store.Pool.Exec(ctx, `UPDATE notification_queue SET status='failed', error=$2, attempts=attempts+1 WHERE id=$1`, id, sendErr.Error())
@@ -175,13 +164,10 @@ func (s *Service) SendTest(ctx context.Context, tenantID xid.ID, channel, recipi
 	}
 	switch channel {
 	case "whatsapp":
-		if s.wa == nil || !s.wa.IsReady(tenantID) {
-			return fmt.Errorf("sesi WhatsApp belum terhubung — connect & scan QR dulu")
-		}
 		if recipient == "" {
 			return fmt.Errorf("nomor WhatsApp tujuan wajib diisi")
 		}
-		return s.wa.SendText(ctx, tenantID, recipient, body)
+		return s.sendWhatsApp(ctx, tenantID, recipient, body)
 	case "telegram":
 		n := s.tenantMessagingNotifier(ctx, tenantID, "telegram")
 		if n == nil {
@@ -208,10 +194,78 @@ func (s *Service) SendTest(ctx context.Context, tenantID xid.ID, channel, recipi
 	}
 }
 
+type waDeviceCfg struct {
+	DeviceID string `json:"device_id"`
+	Label    string `json:"label"`
+}
+
 type tenantMessagingCfg struct {
-	TelegramBotToken string `json:"telegram_bot_token"`
-	TelegramChatID   string `json:"telegram_chat_id"`
-	TelegramEnabled  bool   `json:"telegram_enabled"`
+	TelegramBotToken string        `json:"telegram_bot_token"`
+	TelegramChatID   string        `json:"telegram_chat_id"`
+	TelegramEnabled  bool          `json:"telegram_enabled"`
+	WhatsAppEnabled  bool          `json:"whatsapp_enabled"`
+	WhatsAppBaseURL  string        `json:"whatsapp_base_url"`
+	WhatsAppUsername string        `json:"whatsapp_username"`
+	WhatsAppPassword string        `json:"whatsapp_password"`
+	WhatsAppDeviceID string        `json:"whatsapp_device_id"` // legacy single device
+	WhatsAppDevices  []waDeviceCfg `json:"whatsapp_devices"`
+}
+
+// tenantWhatsAppClients builds one gateway client per configured device
+// (same base URL + Basic Auth), for failover across multiple numbers. Returns
+// nil when WhatsApp is disabled/unconfigured.
+func (s *Service) tenantWhatsAppClients(ctx context.Context, tenantID xid.ID) []*wa.Client {
+	cfg, ok := s.loadTenantMessaging(ctx, tenantID)
+	if !ok || !cfg.WhatsAppEnabled {
+		return nil
+	}
+	base := strings.TrimSpace(cfg.WhatsAppBaseURL)
+	if base == "" {
+		return nil
+	}
+	pass := cfg.WhatsAppPassword
+	if pass != "" && s.decrypt != nil {
+		if plain, err := s.decrypt(pass); err == nil {
+			pass = plain
+		} else {
+			pass = ""
+		}
+	}
+	devices := cfg.WhatsAppDevices
+	if len(devices) == 0 {
+		if id := strings.TrimSpace(cfg.WhatsAppDeviceID); id != "" {
+			devices = []waDeviceCfg{{DeviceID: id}}
+		} else {
+			devices = []waDeviceCfg{{}}
+		}
+	}
+	clients := make([]*wa.Client, 0, len(devices))
+	for _, dev := range devices {
+		clients = append(clients, wa.NewClient(wa.Config{
+			BaseURL:  base,
+			Username: strings.TrimSpace(cfg.WhatsAppUsername),
+			Password: pass,
+			DeviceID: strings.TrimSpace(dev.DeviceID),
+		}))
+	}
+	return clients
+}
+
+// sendWhatsApp tries each configured number until one succeeds (redundancy).
+func (s *Service) sendWhatsApp(ctx context.Context, tenantID xid.ID, phone, body string) error {
+	clients := s.tenantWhatsAppClients(ctx, tenantID)
+	if len(clients) == 0 {
+		return fmt.Errorf("WhatsApp gateway belum dikonfigurasi/aktif untuk tenant")
+	}
+	var errs []string
+	for _, c := range clients {
+		if err := c.SendText(ctx, phone, body); err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("semua nomor WhatsApp gagal: %s", strings.Join(errs, "; "))
 }
 
 func (s *Service) loadTenantMessaging(ctx context.Context, tenantID xid.ID) (tenantMessagingCfg, bool) {

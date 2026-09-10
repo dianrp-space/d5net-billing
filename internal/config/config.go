@@ -20,7 +20,6 @@ type Config struct {
 	UploadDir                  string        `env:"UPLOAD_DIR" envDefault:"./data/uploads"`
 	RouterBackupDir            string        `env:"ROUTER_BACKUP_DIR" envDefault:"./data/router-backups"`
 	DBBackupDir                string        `env:"DB_BACKUP_DIR" envDefault:"./data/db-backups"`
-	WhatsAppSessionDir         string        `env:"WHATSAPP_SESSION_DIR" envDefault:"./data/whatsapp"`
 	WorkerEnabled              bool          `env:"WORKER_ENABLED" envDefault:"true"`
 	DRPPaymentBaseURL          string        `env:"DRP_PAYMENT_BASE_URL" envDefault:"https://payment.dianrp.com"`
 	DRPPaymentAPIKey           string        `env:"DRP_PAYMENT_API_KEY"`
