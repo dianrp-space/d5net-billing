@@ -164,6 +164,50 @@ func (s *Service) ProcessPending(ctx context.Context, limit int) (int, error) {
 	return sent, nil
 }
 
+// SendTest delivers a one-off message synchronously so admins can verify a
+// tenant's gateway configuration. It mirrors ProcessPending channel resolution
+// and returns an explicit error when the channel is not ready.
+func (s *Service) SendTest(ctx context.Context, tenantID xid.ID, channel, recipient, subject, body string) error {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	recipient = strings.TrimSpace(recipient)
+	if strings.TrimSpace(body) == "" {
+		body = "Tes notifikasi drp-billing — gateway berfungsi."
+	}
+	switch channel {
+	case "whatsapp":
+		if s.wa == nil || !s.wa.IsReady(tenantID) {
+			return fmt.Errorf("sesi WhatsApp belum terhubung — connect & scan QR dulu")
+		}
+		if recipient == "" {
+			return fmt.Errorf("nomor WhatsApp tujuan wajib diisi")
+		}
+		return s.wa.SendText(ctx, tenantID, recipient, body)
+	case "telegram":
+		n := s.tenantMessagingNotifier(ctx, tenantID, "telegram")
+		if n == nil {
+			return fmt.Errorf("Telegram belum diaktifkan/dikonfigurasi (bot token + chat ID)")
+		}
+		if recipient == "" {
+			recipient = s.tenantTelegramChatID(ctx, tenantID)
+		}
+		if recipient == "" {
+			return fmt.Errorf("chat ID Telegram wajib diisi")
+		}
+		return n.Send(ctx, Message{TenantID: tenantID, Channel: channel, Recipient: recipient, Subject: subject, Body: body})
+	case "email":
+		n := s.tenantEmailNotifier(ctx, tenantID)
+		if n == nil {
+			return fmt.Errorf("SMTP tenant belum diaktifkan/dikonfigurasi")
+		}
+		if recipient == "" {
+			return fmt.Errorf("alamat email tujuan wajib diisi")
+		}
+		return n.Send(ctx, Message{TenantID: tenantID, Channel: channel, Recipient: recipient, Subject: subject, Body: body})
+	default:
+		return fmt.Errorf("channel tidak dikenal: %s", channel)
+	}
+}
+
 type tenantMessagingCfg struct {
 	TelegramBotToken string `json:"telegram_bot_token"`
 	TelegramChatID   string `json:"telegram_chat_id"`

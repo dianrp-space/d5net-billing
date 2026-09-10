@@ -2,7 +2,9 @@ package wa
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +12,6 @@ import (
 	"time"
 
 	"github.com/dianrp/drp-billing/internal/xid"
-	_ "modernc.org/sqlite"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -18,6 +19,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
+	_ "modernc.org/sqlite"
 )
 
 // Status is the public session state for a tenant.
@@ -28,6 +30,9 @@ type Status struct {
 	Phone     string `json:"phone,omitempty"`
 	QRCode    string `json:"qr_code,omitempty"`
 	QREvent   string `json:"qr_event,omitempty"`
+	QRError   string `json:"qr_error,omitempty"`
+	PairCode  string `json:"pair_code,omitempty"`
+	PairPhone string `json:"pair_phone,omitempty"`
 }
 
 type session struct {
@@ -36,6 +41,10 @@ type session struct {
 	mu        sync.Mutex
 	qrCode    string
 	qrEvent   string
+	qrErr     string
+	qrWatch   bool
+	pairCode  string
+	pairPhone string
 }
 
 // Manager holds per-tenant whatsmeow clients (sqlite session files, no CGO).
@@ -86,15 +95,14 @@ func (m *Manager) getOrCreate(ctx context.Context, tenantID xid.ID) (*session, e
 	s := &session{client: client, container: container}
 	client.AddEventHandler(func(evt any) {
 		switch evt.(type) {
-		case *events.Connected:
-			s.mu.Lock()
-			s.qrCode = ""
-			s.qrEvent = "success"
-			s.mu.Unlock()
 		case *events.LoggedOut:
 			s.mu.Lock()
 			s.qrCode = ""
 			s.qrEvent = "logged_out"
+			s.qrErr = ""
+			s.qrWatch = false
+			s.pairCode = ""
+			s.pairPhone = ""
 			s.mu.Unlock()
 		}
 	})
@@ -121,28 +129,26 @@ func (m *Manager) Connect(ctx context.Context, tenantID xid.ID) (*Status, error)
 	}
 
 	needQR := s.client.Store.ID == nil
-	var qrChan <-chan whatsmeow.QRChannelItem
 	if needQR {
-		ch, err := s.client.GetQRChannel(ctx)
-		if err != nil {
-			return nil, err
-		}
-		qrChan = ch
-		go func() {
-			for evt := range qrChan {
+		s.mu.Lock()
+		watching := s.qrWatch
+		s.mu.Unlock()
+		if !watching {
+			ch, qerr := s.client.GetQRChannel(ctx)
+			if qerr != nil {
+				// Already connected/paired: fall through to normal connect.
+				if !errors.Is(qerr, whatsmeow.ErrQRAlreadyConnected) && !errors.Is(qerr, whatsmeow.ErrQRStoreContainsID) {
+					return nil, qerr
+				}
+			} else {
 				s.mu.Lock()
-				s.qrEvent = evt.Event
-				if evt.Event == "code" {
-					s.qrCode = evt.Code
-				}
-				if evt.Event == "success" || evt.Event == "timeout" || evt.Event == "err-client" {
-					if evt.Event != "success" {
-						s.qrCode = ""
-					}
-				}
+				s.qrWatch = true
+				s.qrCode = ""
+				s.qrErr = ""
 				s.mu.Unlock()
+				go s.watchQR(ctx, ch)
 			}
-		}()
+		}
 	}
 
 	if !s.client.IsConnected() {
@@ -150,10 +156,98 @@ func (m *Manager) Connect(ctx context.Context, tenantID xid.ID) (*Status, error)
 			return nil, err
 		}
 	}
-	// brief wait so first QR may arrive
-	if needQR {
-		time.Sleep(400 * time.Millisecond)
+	// Wait briefly so the socket is ready and the first QR may arrive.
+	s.client.WaitForConnection(5 * time.Second)
+	return m.Status(ctx, tenantID)
+}
+
+// watchQR keeps the latest QR code/state in the session. whatsmeow emits a new
+// "code" event before each code expires (auto-refresh); final events close the
+// channel.
+func (s *session) watchQR(ctx context.Context, ch <-chan whatsmeow.QRChannelItem) {
+	defer func() {
+		s.mu.Lock()
+		s.qrWatch = false
+		s.mu.Unlock()
+	}()
+	for evt := range ch {
+		s.mu.Lock()
+		switch evt.Event {
+		case whatsmeow.QRChannelEventCode:
+			s.qrCode = evt.Code
+			s.qrEvent = "code"
+			s.qrErr = ""
+		case whatsmeow.QRChannelEventError:
+			s.qrCode = ""
+			s.qrEvent = "error"
+			if evt.Error != nil {
+				s.qrErr = evt.Error.Error()
+			}
+		case whatsmeow.QRChannelEventPasskeyRequest:
+			s.qrEvent = "passkey-request"
+			s.qrErr = "Perangkat meminta passkey. Coba login via kode."
+		case whatsmeow.QRChannelEventPasskeyResponse:
+			s.qrEvent = "passkey-confirmation"
+		default:
+			s.qrEvent = evt.Event
+			if evt.Error != nil {
+				s.qrErr = evt.Error.Error()
+			}
+			if evt.Event != "success" {
+				s.qrCode = ""
+			}
+			if evt.Event == "success" {
+				s.pairCode = ""
+				s.pairPhone = ""
+			}
+		}
+		s.mu.Unlock()
+
+		if evt.Event == whatsmeow.QRChannelEventPasskeyResponse {
+			if err := s.client.SendPasskeyConfirmation(ctx); err != nil {
+				slog.Warn("whatsapp passkey confirmation failed", "err", err)
+			}
+		}
 	}
+}
+
+// PairCode links the tenant by phone number and returns an 8-character pairing
+// code (no QR scan needed). The client must be connected first.
+func (m *Manager) PairCode(ctx context.Context, tenantID xid.ID, phone string) (*Status, error) {
+	s, err := m.getOrCreate(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if s.client.IsLoggedIn() {
+		return nil, fmt.Errorf("WhatsApp sudah login")
+	}
+	if s.client.Store.ID != nil {
+		return nil, fmt.Errorf("perangkat sudah tertaut")
+	}
+	if !s.client.IsConnected() {
+		if err := s.client.Connect(); err != nil {
+			return nil, err
+		}
+	}
+	if !s.client.WaitForConnection(10 * time.Second) {
+		return nil, fmt.Errorf("gagal terhubung ke WhatsApp, coba lagi")
+	}
+	p := strings.TrimSpace(phone)
+	p = strings.ReplaceAll(p, " ", "")
+	p = strings.ReplaceAll(p, "-", "")
+	p = strings.TrimPrefix(p, "+")
+	if strings.HasPrefix(p, "0") {
+		p = "62" + strings.TrimPrefix(p, "0")
+	}
+	code, err := s.client.PairPhone(ctx, p, false, whatsmeow.PairClientChrome, "Chrome (Linux)")
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.pairCode = code
+	s.pairPhone = p
+	s.qrErr = ""
+	s.mu.Unlock()
 	return m.Status(ctx, tenantID)
 }
 
@@ -174,6 +268,9 @@ func (m *Manager) Status(ctx context.Context, tenantID xid.ID) (*Status, error) 
 	s.mu.Lock()
 	st.QRCode = s.qrCode
 	st.QREvent = s.qrEvent
+	st.QRError = s.qrErr
+	st.PairCode = s.pairCode
+	st.PairPhone = s.pairPhone
 	s.mu.Unlock()
 	return st, nil
 }
@@ -191,6 +288,10 @@ func (m *Manager) Logout(ctx context.Context, tenantID xid.ID) error {
 	s.mu.Lock()
 	s.qrCode = ""
 	s.qrEvent = "logged_out"
+	s.qrErr = ""
+	s.qrWatch = false
+	s.pairCode = ""
+	s.pairPhone = ""
 	s.mu.Unlock()
 
 	m.mu.Lock()

@@ -4,7 +4,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "./api";
 import { useAppDialog } from "./confirm";
-import { IconCopy, IconMail, IconSend, IconTrash } from "./icons";
+import { IconCopy, IconMail, IconSend, IconTrash, IconWhatsApp } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { usePersistedTab } from "./navPersist";
 import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
@@ -72,6 +72,14 @@ function paymentWebhookDisplayURL(path?: string, fallback = "/api/webhooks/payme
 }
 
 const EVENT_PRESETS = ["payment.paid", "invoice.created", "subscription.suspended", "subscription.activated"];
+
+/** Sends a one-off messaging-gateway test message (whatsapp|telegram|email). */
+function sendMessagingTest(payload: { channel: string; recipient?: string; subject?: string; body?: string }) {
+  return api<{ status: string; channel: string }>("/api/integrations/messaging/test", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
 
 export function WebhooksIntegrationPage() {
   const qc = useQueryClient();
@@ -588,7 +596,10 @@ export function MessagingGWPage() {
       className="space-y-0"
     >
       <TabsList aria-label="Messaging Gateway">
-        <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+        <TabsTrigger value="whatsapp">
+          <IconWhatsApp />
+          WhatsApp
+        </TabsTrigger>
         <TabsTrigger value="telegram">
           <IconSend />
           Telegram
@@ -619,6 +630,9 @@ type WAStatus = {
   phone?: string;
   qr_code?: string;
   qr_event?: string;
+  qr_error?: string;
+  pair_code?: string;
+  pair_phone?: string;
   qr_image_base64?: string;
 };
 
@@ -653,13 +667,35 @@ function WhatsAppTab() {
     onError: (e: Error) => void toastError(e.message),
   });
 
+  const [pairPhone, setPairPhone] = useState("");
+  const pair = useMutation({
+    mutationFn: () =>
+      api<WAStatus>("/api/integrations/whatsapp/pair-code", {
+        method: "POST",
+        body: JSON.stringify({ phone: pairPhone.trim() }),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(["integration-whatsapp"], data);
+      void qc.invalidateQueries({ queryKey: ["integration-whatsapp"] });
+      void toastSuccess("Kode pairing dibuat — masukkan di WhatsApp");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const [testPhone, setTestPhone] = useState("");
+  const testSend = useMutation({
+    mutationFn: () => sendMessagingTest({ channel: "whatsapp", recipient: testPhone.trim() }),
+    onSuccess: () => void toastSuccess("Pesan tes WhatsApp terkirim"),
+    onError: (e: Error) => void toastError(e.message),
+  });
+
   const st = status.data;
 
   return (
     <Section title="WhatsApp (whatsmeow)">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Pairing multi-device via QR (library <code className="text-xs">go.mau.fi/whatsmeow</code>). Setelah login,
-        notifikasi tenant dikirim lewat sesi ini.
+        Pairing multi-device via QR atau kode (library <code className="text-xs">go.mau.fi/whatsmeow</code>). Setelah
+        login, notifikasi tenant dikirim lewat sesi ini.
       </p>
       {status.isLoading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
@@ -677,11 +713,17 @@ function WhatsAppTab() {
               {st?.phone ? ` · ${st.phone}` : ""}
             </p>
             {st?.qr_event ? <p className="text-xs text-[var(--muted)]">Event: {st.qr_event}</p> : null}
+            {st?.qr_error ? (
+              <p className="mt-1 text-xs text-[var(--danger)]">Error: {st.qr_error}</p>
+            ) : null}
           </div>
           {st?.qr_image_base64 && !st.logged_in ? (
             <div className="rounded-xl border border-[var(--border)] p-4">
               <p className="mb-2 text-sm font-medium">Scan QR dari WhatsApp → Perangkat tertaut</p>
               <img src={st.qr_image_base64} alt="QR WhatsApp" className="mx-auto h-56 w-56 rounded-lg bg-white p-2" />
+              <p className="mt-2 text-center text-xs text-[var(--muted)]">
+                QR berganti otomatis tiap ±20 detik. Jika kadaluarsa, klik Connect lagi.
+              </p>
             </div>
           ) : null}
           <div className="flex flex-wrap gap-2">
@@ -696,6 +738,64 @@ function WhatsAppTab() {
             >
               Logout
             </button>
+          </div>
+
+          {!st?.logged_in ? (
+            <div className="rounded-xl border border-[var(--border)] p-3">
+              <p className="mb-1 text-sm font-medium">Login via kode (tanpa scan QR)</p>
+              <p className="mb-2 text-xs text-[var(--muted)]">
+                Masukkan nomor WhatsApp (format internasional, mis. 62812…). Di HP: WhatsApp → Perangkat tertaut →
+                Tautkan dengan nomor telepon, lalu masukkan kode di bawah.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  className="input min-w-[200px] flex-1"
+                  placeholder="6281234567890"
+                  value={pairPhone}
+                  onChange={(e) => setPairPhone(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={pair.isPending || !pairPhone.trim()}
+                  onClick={() => pair.mutate()}
+                >
+                  {pair.isPending ? "Membuat…" : "Minta kode"}
+                </button>
+              </div>
+              {st?.pair_code ? (
+                <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-3 text-center">
+                  <p className="text-xs text-[var(--muted)]">Kode pairing</p>
+                  <p className="text-2xl font-bold tracking-[0.3em]">{st.pair_code}</p>
+                  {st.pair_phone ? (
+                    <p className="mt-1 text-xs text-[var(--muted)]">untuk {st.pair_phone}</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <p className="mb-2 text-sm font-medium">Tes kirim</p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                className="input min-w-[200px] flex-1"
+                placeholder="No. WhatsApp tujuan (08… / 62…)"
+                value={testPhone}
+                onChange={(e) => setTestPhone(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={testSend.isPending || !testPhone.trim() || !st?.logged_in}
+                onClick={() => testSend.mutate()}
+              >
+                {testSend.isPending ? "Mengirim…" : "Kirim tes"}
+              </button>
+            </div>
+            {!st?.logged_in ? (
+              <p className="mt-1 text-xs text-[var(--muted)]">Connect WhatsApp dulu untuk tes kirim.</p>
+            ) : null}
           </div>
         </div>
       )}
@@ -754,6 +854,13 @@ function TelegramTab() {
     onError: (e: Error) => void toastError(e.message),
   });
 
+  const testSend = useMutation({
+    mutationFn: () =>
+      sendMessagingTest({ channel: "telegram", recipient: form.telegram_chat_id.trim() }),
+    onSuccess: () => void toastSuccess("Pesan tes Telegram terkirim"),
+    onError: (e: Error) => void toastError(e.message),
+  });
+
   return (
     <Section title="Telegram Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
@@ -804,9 +911,22 @@ function TelegramTab() {
               </label>
             </div>
           </div>
-          <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Menyimpan..." : "Simpan"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Menyimpan..." : "Simpan"}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={testSend.isPending || !form.telegram_chat_id.trim()}
+              onClick={() => testSend.mutate()}
+            >
+              {testSend.isPending ? "Mengirim..." : "Kirim tes"}
+            </button>
+          </div>
+          <p className="text-xs text-[var(--muted)]">
+            Simpan dulu perubahan token/chat ID, lalu kirim tes untuk memastikan bot berfungsi.
+          </p>
         </div>
       )}
     </Section>
@@ -882,6 +1002,13 @@ function SmtpTab() {
       void qc.invalidateQueries({ queryKey: ["integration-smtp"] });
       void toastSuccess("SMTP tenant disimpan");
     },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const [testEmail, setTestEmail] = useState("");
+  const testSend = useMutation({
+    mutationFn: () => sendMessagingTest({ channel: "email", recipient: testEmail.trim() }),
+    onSuccess: () => void toastSuccess("Email tes terkirim"),
     onError: (e: Error) => void toastError(e.message),
   });
 
@@ -984,9 +1111,34 @@ function SmtpTab() {
               </label>
             </div>
           </div>
-          <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Menyimpan..." : "Simpan"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Menyimpan..." : "Simpan"}
+            </button>
+          </div>
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <p className="mb-2 text-sm font-medium">Tes kirim email</p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                className="input min-w-[200px] flex-1"
+                type="email"
+                placeholder="Email tujuan tes"
+                value={testEmail}
+                onChange={(e) => setTestEmail(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={testSend.isPending || !testEmail.trim()}
+                onClick={() => testSend.mutate()}
+              >
+                {testSend.isPending ? "Mengirim..." : "Kirim tes"}
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Simpan dulu perubahan SMTP, lalu kirim tes untuk memastikan server email berfungsi.
+            </p>
+          </div>
         </div>
       )}
     </Section>

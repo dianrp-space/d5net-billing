@@ -453,6 +453,38 @@ func registerIntegrations(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "pair-code-whatsapp", Method: http.MethodPost, Path: "/api/integrations/whatsapp/pair-code",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			Phone string `json:"phone"`
+		}
+	}) (*struct{ Body waStatusView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if d.WA == nil {
+			return nil, httpx.Internal(fmt.Errorf("whatsapp manager not configured"))
+		}
+		phone := strings.TrimSpace(input.Body.Phone)
+		if phone == "" {
+			return nil, httpx.BadRequest("nomor WhatsApp wajib diisi")
+		}
+		cfg, err := loadMessagingIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		cfg.WhatsAppEnabled = true
+		_ = d.Store.UpsertSettingJSON(ctx, tid, settingMessaging, cfg)
+		st, err := d.WA.PairCode(ctx, tid, phone)
+		if err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+		return &struct{ Body waStatusView }{Body: toWAStatusView(st, cfg.WhatsAppEnabled)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "logout-whatsapp", Method: http.MethodPost, Path: "/api/integrations/whatsapp/logout",
 		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, _ *struct{}) (*struct{ Body waStatusView }, error) {
@@ -475,6 +507,39 @@ func registerIntegrations(api huma.API, d *Deps) {
 		}
 		return &struct{ Body waStatusView }{Body: toWAStatusView(st, false)}, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "test-messaging-integration", Method: http.MethodPost, Path: "/api/integrations/messaging/test",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			Channel   string `json:"channel"`
+			Recipient string `json:"recipient,omitempty"`
+			Subject   string `json:"subject,omitempty"`
+			Body      string `json:"body,omitempty"`
+		}
+	}) (*struct{ Body messagingTestView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if d.Notify == nil {
+			return nil, httpx.Internal(fmt.Errorf("notify service not configured"))
+		}
+		channel := strings.ToLower(strings.TrimSpace(input.Body.Channel))
+		if channel == "" {
+			return nil, httpx.BadRequest("channel wajib diisi")
+		}
+		if err := d.Notify.SendTest(ctx, tid, channel, input.Body.Recipient, input.Body.Subject, input.Body.Body); err != nil {
+			return nil, httpx.BadRequest(err.Error())
+		}
+		return &struct{ Body messagingTestView }{Body: messagingTestView{Status: "sent", Channel: channel}}, nil
+	})
+}
+
+type messagingTestView struct {
+	Status  string `json:"status"`
+	Channel string `json:"channel"`
 }
 
 type waStatusView struct {
@@ -485,6 +550,9 @@ type waStatusView struct {
 	Phone         string `json:"phone,omitempty"`
 	QRCode        string `json:"qr_code,omitempty"`
 	QREvent       string `json:"qr_event,omitempty"`
+	QRError       string `json:"qr_error,omitempty"`
+	PairCode      string `json:"pair_code,omitempty"`
+	PairPhone     string `json:"pair_phone,omitempty"`
 	QRImageBase64 string `json:"qr_image_base64,omitempty"`
 }
 
@@ -500,6 +568,9 @@ func toWAStatusView(st *wa.Status, enabled bool) waStatusView {
 		Phone:     st.Phone,
 		QRCode:    st.QRCode,
 		QREvent:   st.QREvent,
+		QRError:   st.QRError,
+		PairCode:  st.PairCode,
+		PairPhone: st.PairPhone,
 	}
 	if st.QRCode != "" {
 		if png, err := qrcode.Encode(st.QRCode, qrcode.Medium, 256); err == nil {

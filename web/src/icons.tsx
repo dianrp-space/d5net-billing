@@ -484,6 +484,16 @@ export function IconSend(props: IconProps) {
   );
 }
 
+/** WhatsApp — gelembung chat + handset. */
+export function IconWhatsApp(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 3a9 9 0 0 0-7.7 13.6L3 21l4.5-1.2A9 9 0 1 0 12 3Z" />
+      <path d="M8.9 8.5c.2-.4.4-.4.6-.4h.4c.2 0 .4 0 .6.5l.7 1.6c.1.2.1.4 0 .5l-.4.5c-.1.2-.2.3 0 .6.4.7 1.1 1.4 1.8 1.8.2.1.4.1.6 0l.5-.4c.2-.2.4-.2.6-.1l1.6.8c.4.2.5.4.5.6v.4c0 .2 0 .5-.4.6-.4.2-.9.3-1.5.2-1.3-.2-2.6-.9-3.6-1.9-1-1-1.7-2.3-1.9-3.6-.1-.6 0-1.1.2-1.5Z" />
+    </svg>
+  );
+}
+
 /** Email / SMTP. */
 export function IconMail(props: IconProps) {
   return (
