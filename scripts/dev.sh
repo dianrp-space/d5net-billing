@@ -27,7 +27,7 @@ set -a
 source .env
 set +a
 
-# System Go may be 1.25.x while whatsmeow needs >=1.26 / toolchain 1.27.
+# System Go may be older than the module toolchain (go.mod pins go1.27.1).
 # Use the official downloaded toolchain; never mix with a forced GOROOT.
 unset GOROOT
 export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.27.1}"
