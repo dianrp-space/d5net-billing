@@ -5,6 +5,7 @@ import { useConfirm } from "./confirm";
 import { IconRefresh } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { Button, Input, Label, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table } from "./ui";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 
 type JobSchedule = {
@@ -224,19 +225,48 @@ export function JobsSettingsPage() {
     runNow.mutate();
   }
 
+  function resetDefaults() {
+    if (!q.data?.defaults) return;
+    setForm({ ...q.data.defaults });
+    setOffsetsText(offsetsToText(q.data.defaults.dunning_offsets));
+    setIsolirGraceDays(clampIsolirGrace(q.data.isolir_grace_days));
+  }
+
   return (
-    <Section title="Cronjob">
+    <Section
+      title="Cronjob"
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" onClick={onRunNow} disabled={runNow.isPending || !form}>
+            <IconRefresh />
+            {runNow.isPending ? "Menjalankan…" : "Jalankan sekarang"}
+          </Button>
+          <Button type="button" variant="ghost" onClick={resetDefaults} disabled={!form}>
+            Reset
+          </Button>
+          <Button type="submit" form="jobs-form" disabled={save.isPending || !form}>
+            {save.isPending ? "Menyimpan…" : "Simpan"}
+          </Button>
+        </div>
+      }
+    >
       <p className="mb-5 max-w-2xl text-sm text-[var(--muted)]">
-        Atur interval worker (tagihan/isolir) dan poller router (login API MikroTik untuk metrik).
-        Reconcile dan laporan tetap sekali per jadwal (idempoten).
+        Atur interval worker (tagihan/isolir) dan poller router (login API MikroTik untuk metrik). Reconcile dan
+        laporan tetap sekali per jadwal (idempoten).
       </p>
 
       {q.isLoading || !form ? (
         <p className="text-sm text-[var(--muted)]">Memuat pengaturan…</p>
       ) : (
-        <form className="grid gap-5" onSubmit={onSubmit}>
-          <div className="panel-card flex flex-col gap-4 p-4 sm:flex-row sm:items-end sm:justify-between">
-            <div className="grid flex-1 gap-4 sm:grid-cols-3">
+        <form id="jobs-form" className="grid gap-5" onSubmit={onSubmit}>
+          <div className="panel-card p-4">
+            <div className="mb-3">
+              <h3 className="text-sm font-semibold">Interval &amp; antrian</h3>
+              <p className="mt-0.5 text-xs text-[var(--muted)]">
+                Seberapa sering worker dan poller router berjalan, serta ukuran batch notifikasi.
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <Label className="mb-1.5 block">Interval worker</Label>
                 <Select
@@ -284,27 +314,8 @@ export function JobsSettingsPage() {
                   value={form.notify_batch_size}
                   onChange={(e) => patch("notify_batch_size", Number(e.target.value))}
                 />
+                <p className="mt-1 text-xs text-[var(--muted)]">Jumlah pesan per pemrosesan antrian.</p>
               </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={onRunNow} disabled={runNow.isPending}>
-                <IconRefresh />
-                {runNow.isPending ? "Menjalankan…" : "Jalankan sekarang"}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  if (!q.data?.defaults) return;
-                  setForm({ ...q.data.defaults });
-                  setOffsetsText(offsetsToText(q.data.defaults.dunning_offsets));
-                }}
-              >
-                Reset
-              </Button>
-              <Button type="submit" disabled={save.isPending}>
-                {save.isPending ? "Menyimpan…" : "Simpan"}
-              </Button>
             </div>
           </div>
 
@@ -312,7 +323,9 @@ export function JobsSettingsPage() {
             <div className="panel-card space-y-3 p-4">
               <div>
                 <h3 className="text-sm font-semibold">Setiap siklus</h3>
-                <p className="mt-0.5 text-xs text-[var(--muted)]">Jalan otomatis sesuai interval, atau lewat tombol di atas.</p>
+                <p className="mt-0.5 text-xs text-[var(--muted)]">
+                  Jalan otomatis sesuai interval, atau lewat tombol di atas.
+                </p>
               </div>
               <JobRow
                 checked={form.billing_enabled}
@@ -472,7 +485,17 @@ export function JobsSettingsPage() {
         </p>
         <Table
           columns={["Waktu", "Job", "Key", "Status"]}
-          rows={runs.map((r) => [formatWhen(r.created_at), r.job_name, r.job_key, r.status])}
+          rows={runs.map((r) => [
+            formatWhen(r.created_at),
+            r.job_name,
+            r.job_key,
+            <Badge
+              key={r.id}
+              variant={r.status === "done" ? "success" : r.status === "failed" ? "danger" : "outline"}
+            >
+              {r.status}
+            </Badge>,
+          ])}
         />
       </div>
     </Section>
