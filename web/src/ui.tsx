@@ -198,6 +198,7 @@ export function LoginShell({
   logoUrl,
   badge,
   footer,
+  visual,
   children,
 }: {
   brand?: string;
@@ -206,25 +207,43 @@ export function LoginShell({
   logoUrl?: string | null;
   badge?: ReactNode;
   footer?: ReactNode;
+  /** Bila diisi: layout split startup (panel visual + form). */
+  visual?: ReactNode;
   children: ReactNode;
 }) {
+  const card = (
+    <div className="auth-card">
+      <div className="auth-card-bar" aria-hidden />
+      <div className="auth-card-body">
+        <div className="text-center">
+          <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="auth-logo" />
+          <div className="auth-brand">{brand}</div>
+          <h1 className="auth-title">{title}</h1>
+          {badge ? <span className="auth-badge">{badge}</span> : null}
+          <p className="auth-subtitle">{subtitle}</p>
+        </div>
+        {children}
+        {footer ? <div className="auth-footer">{footer}</div> : null}
+      </div>
+    </div>
+  );
+  if (visual) {
+    return (
+      <div className="auth-split">
+        <aside className="auth-visual">
+          <div className="auth-visual-inner">{visual}</div>
+        </aside>
+        <div className="auth-pane">
+          <div className="auth-glow" aria-hidden />
+          {card}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="auth-wrap">
       <div className="auth-glow" aria-hidden />
-      <div className="auth-card">
-        <div className="auth-card-bar" aria-hidden />
-        <div className="auth-card-body">
-          <div className="text-center">
-            <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="auth-logo" />
-            <div className="auth-brand">{brand}</div>
-            <h1 className="auth-title">{title}</h1>
-            {badge ? <span className="auth-badge">{badge}</span> : null}
-            <p className="auth-subtitle">{subtitle}</p>
-          </div>
-          {children}
-          {footer ? <div className="auth-footer">{footer}</div> : null}
-        </div>
-      </div>
+      {card}
     </div>
   );
 }

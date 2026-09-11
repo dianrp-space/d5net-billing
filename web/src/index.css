@@ -1347,3 +1347,102 @@ input, select, textarea, button { font: inherit; }
 .auth-error svg { flex-shrink: 0; margin-top: 0.1rem; }
 .auth-footer { margin-top: 1.25rem; text-align: center; font-size: 0.8rem; color: var(--muted); }
 .auth-footer a { color: var(--accent); font-weight: 600; display: inline-flex; align-items: center; gap: 0.3rem; }
+
+/* ---- auth split (startup-style: visual + form) ---- */
+.auth-split {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg);
+}
+.auth-visual {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d1117;
+  color: #eef1f4;
+  padding: 3rem;
+}
+.auth-visual::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(560px 340px at 18% 8%, rgb(224 49 49 / 0.28), transparent 65%),
+    radial-gradient(640px 420px at 95% 100%, rgb(224 49 49 / 0.14), transparent 60%),
+    radial-gradient(400px 300px at 80% 12%, rgb(255 255 255 / 0.06), transparent 70%);
+}
+.auth-visual::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(560px 480px at 40% 45%, black 30%, transparent 75%);
+}
+.auth-visual-inner { position: relative; z-index: 1; width: 100%; max-width: 29rem; }
+.auth-visual-brand {
+  display: inline-block;
+  background: #fff;
+  border-radius: 1rem;
+  padding: 0.9rem 1.4rem;
+  box-shadow: 0 20px 50px -20px rgb(0 0 0 / 0.6);
+}
+.auth-visual-brand img { display: block; height: 3.4rem; width: auto; }
+.auth-visual-title { margin-top: 1.6rem; font-size: 2rem; line-height: 1.15; font-weight: 800; letter-spacing: -0.02em; }
+.auth-visual-title em { font-style: normal; color: #ff6b6b; }
+.auth-visual-sub { margin-top: 0.7rem; font-size: 0.95rem; line-height: 1.6; color: #b9c1c9; }
+.auth-visual-feats { margin-top: 1.6rem; display: grid; gap: 0.8rem; }
+.auth-visual-feat { display: flex; gap: 0.75rem; align-items: flex-start; }
+.auth-visual-feat-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.1rem;
+  width: 2.1rem;
+  border-radius: 0.7rem;
+  background: rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  color: #ffb3b3;
+}
+.auth-visual-feat b { display: block; font-size: 0.88rem; }
+.auth-visual-feat span { display: block; font-size: 0.8rem; color: #9aa3ad; }
+.auth-mock {
+  margin-top: 1.7rem;
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.07);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  backdrop-filter: blur(6px);
+  padding: 1rem 1.1rem;
+  box-shadow: 0 24px 50px -24px rgb(0 0 0 / 0.7);
+}
+.auth-mock + .auth-mock { margin-top: 0.8rem; }
+.auth-mock-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.78rem; }
+.auth-mock-no { font-family: ui-monospace, monospace; color: #cfd6dd; }
+.auth-mock-paid {
+  border-radius: 999px;
+  background: rgb(46 204 113 / 0.18);
+  border: 1px solid rgb(46 204 113 / 0.45);
+  color: #7bed9f;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.auth-mock-amount { margin-top: 0.35rem; font-size: 1.35rem; font-weight: 800; letter-spacing: -0.01em; }
+.auth-mock-bar { margin-top: 0.6rem; height: 0.4rem; border-radius: 999px; background: rgb(255 255 255 / 0.12); overflow: hidden; }
+.auth-mock-bar i { display: block; height: 100%; width: 100%; border-radius: 999px; background: linear-gradient(90deg, #ff6b6b, #e03131); }
+.auth-mock-toast { display: flex; align-items: center; gap: 0.6rem; font-size: 0.83rem; font-weight: 600; }
+.auth-mock-toast svg { color: #7bed9f; flex-shrink: 0; }
+.auth-mock-toast small { display: block; font-weight: 400; color: #9aa3ad; }
+.auth-pane { position: relative; display: flex; align-items: center; justify-content: center; padding: 1.5rem; overflow: hidden; }
+.auth-pane .auth-card { margin: 0; }
+@media (max-width: 920px) {
+  .auth-split { grid-template-columns: 1fr; }
+  .auth-visual { display: none; }
+}

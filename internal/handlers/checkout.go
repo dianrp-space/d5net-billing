@@ -65,11 +65,7 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 		ten = t
 	}
 	if origin != "" {
-		slug := ""
-		if ten != nil {
-			slug = ten.Slug
-		}
-		req.CallbackURL = strings.TrimRight(origin, "/") + paymentWebhookPathWithTenant(providerName, slug)
+		req.CallbackURL = strings.TrimRight(origin, "/") + paymentWebhookPathFor(providerName)
 		if req.ReturnURL == "" {
 			req.ReturnURL = origin
 		}

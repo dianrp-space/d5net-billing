@@ -580,27 +580,6 @@ func paymentWebhookPathFor(provider string) string {
 	return "/api/webhooks/payment/" + normalizePaymentProviderName(provider)
 }
 
-// paymentWebhookPathWithTenant appends the tenant hint so the (shared) webhook
-// endpoint can resolve per-tenant gateway credentials even for a test payload
-// that has no matching payment intent.
-func paymentWebhookPathWithTenant(provider, slug string) string {
-	path := paymentWebhookPathFor(provider)
-	if strings.TrimSpace(slug) == "" {
-		return path
-	}
-	return path + "?tenant=" + url.QueryEscape(strings.TrimSpace(slug))
-}
-
-func tenantSlug(ctx context.Context, d *Deps, tid xid.ID) string {
-	if d == nil || d.Store == nil || xid.IsNil(tid) {
-		return ""
-	}
-	if t, err := d.Store.GetTenant(ctx, tid); err == nil && t != nil {
-		return t.Slug
-	}
-	return ""
-}
-
 func originFromReferer(referer string) string {
 	u, err := url.Parse(strings.TrimSpace(referer))
 	if err != nil || u.Scheme == "" || u.Host == "" {
@@ -659,7 +638,7 @@ func appPublicOrigin(ctx context.Context, d *Deps, tid xid.ID, origin, referer, 
 }
 
 func paymentWebhookURLFor(ctx context.Context, d *Deps, tid xid.ID, origin, referer, proto, forwardedHost, host, provider string) string {
-	path := paymentWebhookPathWithTenant(provider, tenantSlug(ctx, d, tid))
+	path := paymentWebhookPathFor(provider)
 	if app := appPublicOrigin(ctx, d, tid, origin, referer, proto, forwardedHost, host); app != "" {
 		return app + path
 	}

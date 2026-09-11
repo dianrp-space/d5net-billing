@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
+  BellRing,
   CircleAlert,
+  CircleCheck,
+  Gauge,
+  Headset,
   Loader2,
   LockKeyhole,
   Mail,
   Phone,
   ShieldCheck,
   UserRound,
+  Wifi,
+  Zap,
 } from "lucide-react";
 import { api, setClientSession, setToken } from "./api";
 import { applyBrandingMeta } from "./branding";
@@ -76,6 +82,70 @@ type PublicBranding = {
 };
 
 type LoginMode = "admin" | "client";
+
+function LoginVisual({ mode, brand }: { mode: LoginMode; brand: string }) {
+  const isAdmin = mode === "admin";
+  const feats = isAdmin
+    ? [
+        { icon: <Gauge size={17} />, title: "Satu panel operasional", desc: "Pelanggan, tagihan, isolir & tiket dalam satu dasbor." },
+        { icon: <Wifi size={17} />, title: "Monitoring jaringan", desc: "Router MikroTik, sesi, dan MAP FTTH real-time." },
+        { icon: <Headset size={17} />, title: "Respon gangguan cepat", desc: "Tiket & work order teknisi tercatat rapi." },
+      ]
+    : [
+        { icon: <Zap size={17} />, title: "Bayar online kapan saja", desc: "VA bank, e-wallet, retail, sampai QRIS." },
+        { icon: <BellRing size={17} />, title: "Pengingat otomatis", desc: "Info tagihan & isolir via WhatsApp." },
+        { icon: <UserRound size={17} />, title: "Portal mandiri", desc: "Cek paket, tagihan & riwayat bayar sendiri." },
+      ];
+  return (
+    <>
+      <span className="auth-visual-brand">
+        <img src="/d5net.webp" alt={brand} />
+      </span>
+      <h2 className="auth-visual-title">
+        {isAdmin ? (
+          <>Satu panel untuk <em>seluruh jaringan.</em></>
+        ) : (
+          <>Internet lancar, <em>bayar sat-set.</em></>
+        )}
+      </h2>
+      <p className="auth-visual-sub">
+        {isAdmin
+          ? `Kelola pelanggan, tagihan, dan perangkat ${brand} dari mana saja.`
+          : `Portal pembayaran tagihan ${brand} — cepat, aman, tanpa antre.`}
+      </p>
+      <div className="auth-visual-feats">
+        {feats.map((f) => (
+          <div key={f.title} className="auth-visual-feat">
+            <span className="auth-visual-feat-icon">{f.icon}</span>
+            <div>
+              <b>{f.title}</b>
+              <span>{f.desc}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="auth-mock">
+        <div className="auth-mock-row">
+          <span className="auth-mock-no">INV-D5N-2026090001-092026</span>
+          <span className="auth-mock-paid">Lunas</span>
+        </div>
+        <div className="auth-mock-amount">Rp 150.000</div>
+        <div className="auth-mock-bar" aria-hidden>
+          <i />
+        </div>
+      </div>
+      <div className="auth-mock">
+        <div className="auth-mock-toast">
+          <CircleCheck size={18} />
+          <div>
+            Pembayaran diterima
+            <small>Tagihan sudah lunas — layanan aktif kembali.</small>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
 
 export function TenantLogin({
   mode,
@@ -163,6 +233,7 @@ export function TenantLogin({
         logoUrl={tenant?.logo_url}
         title={isAdmin ? "Masuk admin" : "Login Portal Pelanggan"}
         subtitle={isAdmin ? "Panel administrator" : "Cek paket & tagihan · password default = nomor HP"}
+        visual={<LoginVisual mode={mode} brand={brand} />}
         badge={
           isAdmin ? (
             <>
