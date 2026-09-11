@@ -598,8 +598,7 @@ func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, offsets []
 		return
 	}
 	for _, inv := range invoices {
-		cust, err := w.store.GetCustomer(ctx, tenantID, inv.CustomerID)
-		if err != nil {
+		if strings.TrimSpace(inv.CustomerPhone) == "" {
 			continue
 		}
 		if inv.SubscriptionID != nil {
@@ -622,7 +621,7 @@ func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, offsets []
 				break
 			}
 			planName := w.store.PlanNameForSubscription(ctx, tenantID, inv.SubscriptionID)
-			_ = w.notify.SendInvoiceReminder(ctx, tenantID, cust.Phone, cust.FullName, planName, inv.InvoiceNumber, inv.TotalAmount, due.Format("02/01/2006"))
+			_ = w.notify.SendInvoiceReminder(ctx, tenantID, inv.CustomerPhone, inv.CustomerName, planName, inv.InvoiceNumber, inv.TotalAmount, due.Format("02/01/2006"))
 			break
 		}
 	}

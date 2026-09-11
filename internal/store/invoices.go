@@ -29,6 +29,7 @@ type Invoice struct {
 	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
 	CustomerName   string     `json:"customer_name,omitempty"`
 	CustomerCode   string     `json:"customer_code,omitempty"`
+	CustomerPhone  string     `json:"customer_phone,omitempty"`
 }
 
 type InvoiceItem struct {
@@ -537,7 +538,7 @@ func (s *Store) ListDunningInvoices(ctx context.Context, tenantID xid.ID) ([]Inv
 	// Unpaid invoices due within 7 days or overdue up to 3 days (H-7 … H+3).
 	rows, err := s.Pool.Query(ctx, `
 		SELECT i.id, i.tenant_id, i.customer_id, i.subscription_id, i.invoice_number, i.subtotal, i.tax_amount,
-		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name
+		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name, c.phone
 		FROM invoices i JOIN customers c ON c.id = i.customer_id
 		WHERE i.tenant_id = $1
 		  AND i.deleted_at IS NULL
@@ -554,7 +555,7 @@ func (s *Store) ListDunningInvoices(ctx context.Context, tenantID xid.ID) ([]Inv
 		var inv Invoice
 		if err := rows.Scan(&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.SubscriptionID, &inv.InvoiceNumber,
 			&inv.Subtotal, &inv.TaxAmount, &inv.DiscountAmount, &inv.TotalAmount, &inv.PaidAmount,
-			&inv.Status, &inv.DueDate, &inv.IssuedAt, &inv.PaidAt, &inv.DeletedAt, &inv.CustomerName); err != nil {
+			&inv.Status, &inv.DueDate, &inv.IssuedAt, &inv.PaidAt, &inv.DeletedAt, &inv.CustomerName, &inv.CustomerPhone); err != nil {
 			return nil, err
 		}
 		list = append(list, inv)

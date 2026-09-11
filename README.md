@@ -127,7 +127,7 @@ Isi minimal (sesuaikan). Path data relatif ke folder repo:
 ```bash
 APP_ENV=production
 HTTP_ADDR=127.0.0.1:8088
-DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/d5net_billing?sslmode=disable
+DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/d5net_billing?sslmode=disable&pool_max_conns=20
 JWT_SECRET='<acak panjang, openssl rand -hex 32>'
 ENCRYPTION_KEY='<tepat 32 karakter, openssl rand -base64 24 | cut -c1-32>'
 CORS_ORIGINS=https://delimanet.dianrp.com
