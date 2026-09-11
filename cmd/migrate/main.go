@@ -2,15 +2,29 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/dianrp-space/d5net-billing/internal/envfile"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
+
+// stripPoolRuntimeParams menghapus parameter pool_* dari RuntimeParams.
+// pgxpool.ParseConfig memahami pool_max_conns dkk untuk sisi klien, tapi
+// membiarkannya di ConnConfig.RuntimeParams sehingga ikut dikirim ke server
+// saat startup → FATAL: unrecognized configuration parameter (SQLSTATE 42704).
+func stripPoolRuntimeParams(cfg *pgx.ConnConfig) {
+	for k := range cfg.RuntimeParams {
+		if strings.HasPrefix(k, "pool_") {
+			delete(cfg.RuntimeParams, k)
+		}
+	}
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -21,10 +35,14 @@ func main() {
 	if dsn == "" {
 		log.Fatal("DATABASE_URL required")
 	}
-	db, err := sql.Open("pgx", dsn)
+	// Parse via pgxpool agar parameter khusus pool (pool_max_conns, dll)
+	// tidak diteruskan ke server sebagai runtime parameter (FATAL 42704).
+	poolCfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		log.Fatal(err)
 	}
+	stripPoolRuntimeParams(poolCfg.ConnConfig)
+	db := stdlib.OpenDB(*poolCfg.ConnConfig)
 	defer db.Close()
 
 	if err := goose.SetDialect("postgres"); err != nil {
