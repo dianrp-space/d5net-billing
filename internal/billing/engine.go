@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 const defaultLateFeePercent = 5.0
@@ -121,6 +121,12 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 
 	dueDay := e.store.ResolvePlanDueDay(ctx, tenantID, plan.ID, cust.ClusterID, plan.DueDay)
 	dueDate := NextDueDate(time.Now(), dueDay)
+	if priorCount == 0 {
+		// Tagihan pertama jatuh tempo hari itu juga agar pelanggan baru
+		// langsung bayar; tagihan rutin berikutnya tetap ikut due day kalender.
+		now := time.Now()
+		dueDate = time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
+	}
 	inv := &store.Invoice{
 		TenantID:       tenantID,
 		CustomerID:     sub.CustomerID,
