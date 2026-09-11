@@ -504,6 +504,16 @@ export function IconMail(props: IconProps) {
   );
 }
 
+/** Chat / live-chat (Chatwoot). */
+export function IconChat(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 5h16v11H9l-5 4Z" />
+      <path d="M8 9.5h8M8 12.5h5" />
+    </svg>
+  );
+}
+
 /** Roles — hak akses / lencana ceklis. */
 export function IconShieldCheck(props: IconProps) {
   return (

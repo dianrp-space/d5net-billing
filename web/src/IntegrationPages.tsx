@@ -4,7 +4,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "./api";
 import { useAppDialog } from "./confirm";
-import { IconCopy, IconMail, IconSend, IconTrash, IconWhatsApp } from "./icons";
+import { IconChat, IconCopy, IconMail, IconSend, IconTrash, IconWhatsApp } from "./icons";
 import { swalAlert, toastError, toastSuccess } from "./swal";
 import { usePersistedTab } from "./navPersist";
 import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
@@ -646,13 +646,13 @@ function ProviderAccordionItem({
 }
 
 export function MessagingGWPage() {
-  const [tab, setTab] = usePersistedTab("messaging-channel", "whatsapp", ["whatsapp", "telegram", "email"]);
-  const current = tab === "telegram" || tab === "email" ? tab : "whatsapp";
+  const [tab, setTab] = usePersistedTab("messaging-channel", "whatsapp", ["whatsapp", "telegram", "email", "chatwoot"]);
+  const current = tab === "telegram" || tab === "email" || tab === "chatwoot" ? tab : "whatsapp";
   return (
     <Tabs
       value={current}
       onValueChange={(v) => {
-        if (v === "whatsapp" || v === "telegram" || v === "email") setTab(v);
+        if (v === "whatsapp" || v === "telegram" || v === "email" || v === "chatwoot") setTab(v);
       }}
       className="space-y-0"
     >
@@ -669,6 +669,10 @@ export function MessagingGWPage() {
           <IconMail />
           Email
         </TabsTrigger>
+        <TabsTrigger value="chatwoot">
+          <IconChat />
+          Chatwoot
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="whatsapp">
         <WhatsAppTab />
@@ -678,6 +682,9 @@ export function MessagingGWPage() {
       </TabsContent>
       <TabsContent value="email">
         <SmtpTab />
+      </TabsContent>
+      <TabsContent value="chatwoot">
+        <ChatwootTab />
       </TabsContent>
     </Tabs>
   );
@@ -1239,6 +1246,122 @@ function TelegramTab() {
           </div>
           <p className="text-xs text-[var(--muted)]">
             Simpan dulu perubahan token/chat ID, lalu kirim tes untuk memastikan bot berfungsi.
+          </p>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+type ChatwootIntegration = {
+  configured: boolean;
+  enabled: boolean;
+  base_url: string;
+  website_token?: string;
+};
+
+function ChatwootTab() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["integration-chatwoot"],
+    queryFn: () => api<ChatwootIntegration>("/api/integrations/chatwoot"),
+  });
+  const [form, setForm] = useState({
+    chatwoot_enabled: false,
+    chatwoot_base_url: "",
+    chatwoot_website_token: "",
+  });
+
+  useEffect(() => {
+    if (!q.data) return;
+    setForm({
+      chatwoot_enabled: q.data.enabled,
+      chatwoot_base_url: q.data.base_url || "",
+      chatwoot_website_token: q.data.website_token || "",
+    });
+  }, [q.data]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api<ChatwootIntegration>("/api/integrations/chatwoot", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: form.chatwoot_enabled,
+          base_url: form.chatwoot_base_url.trim(),
+          website_token: form.chatwoot_website_token.trim() || undefined,
+        }),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(["integration-chatwoot"], data);
+      setForm({
+        chatwoot_enabled: data.enabled,
+        chatwoot_base_url: data.base_url || "",
+        chatwoot_website_token: data.website_token || form.chatwoot_website_token,
+      });
+      void qc.invalidateQueries({ queryKey: ["integration-chatwoot"] });
+      void toastSuccess("Chatwoot disimpan");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  return (
+    <Section title="Chatwoot (live chat)">
+      <p className="mb-4 text-sm text-[var(--muted)]">
+        Widget live-chat di landing page & portal pelanggan. Buat <strong>Website Inbox</strong> di
+        dashboard Chatwoot, lalu isi base URL server dan website token-nya di sini.
+      </p>
+      {q.isLoading ? (
+        <p className="text-[var(--muted)]">Memuat...</p>
+      ) : (
+        <div className="grid max-w-xl gap-4">
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Widget chat</p>
+                <p className="text-[10px] text-[var(--muted)]">
+                  {q.data?.configured ? "terhubung ke inbox" : "butuh base URL + website token"}
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.chatwoot_enabled}
+                  onChange={(e) => setForm({ ...form, chatwoot_enabled: e.target.checked })}
+                />
+                Aktif
+              </label>
+            </div>
+            <div className="grid gap-2">
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Base URL Chatwoot</span>
+                <input
+                  className="input"
+                  placeholder="https://chat.example.com"
+                  value={form.chatwoot_base_url}
+                  onChange={(e) => setForm({ ...form, chatwoot_base_url: e.target.value })}
+                  autoComplete="off"
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Website token (inbox)</span>
+                <SecretInput
+                  name="chatwoot-website-token"
+                  placeholder="Token inbox website"
+                  value={form.chatwoot_website_token}
+                  onChange={(e) => setForm({ ...form, chatwoot_website_token: e.target.value })}
+                  autoComplete="new-password"
+                />
+              </label>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Menyimpan..." : "Simpan"}
+            </button>
+          </div>
+          <p className="text-xs text-[var(--muted)]">
+            Widget muncul otomatis di landing & portal pelanggan setelah disimpan & aktif.
+            Di portal, nama + nomor pelanggan diteruskan ke chat.
           </p>
         </div>
       )}

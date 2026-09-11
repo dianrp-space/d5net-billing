@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/dianrp-space/d5net-billing/internal/httpx"
@@ -37,6 +38,10 @@ func registerPublicBranding(api huma.API, d *Deps) {
 			LogoURL      *string `json:"logo_url,omitempty"`
 			FaviconURL   *string `json:"favicon_url,omitempty"`
 			PrimaryColor string  `json:"primary_color,omitempty"`
+			Chatwoot     *struct {
+				BaseURL      string `json:"base_url"`
+				WebsiteToken string `json:"website_token"`
+			} `json:"chatwoot,omitempty"`
 		}
 	}, error) {
 		ten, err := singleTenant(ctx, d)
@@ -55,6 +60,10 @@ func registerPublicBranding(api huma.API, d *Deps) {
 				LogoURL      *string `json:"logo_url,omitempty"`
 				FaviconURL   *string `json:"favicon_url,omitempty"`
 				PrimaryColor string  `json:"primary_color,omitempty"`
+				Chatwoot     *struct {
+					BaseURL      string `json:"base_url"`
+					WebsiteToken string `json:"website_token"`
+				} `json:"chatwoot,omitempty"`
 			}
 		}{}
 		out.Body.Name = ten.Name
@@ -62,6 +71,15 @@ func registerPublicBranding(api huma.API, d *Deps) {
 		out.Body.LogoURL = view.Effective.LogoURL
 		out.Body.FaviconURL = view.Effective.FaviconURL
 		out.Body.PrimaryColor = gen.PrimaryColor
+		if msg, lerr := loadMessagingIntegration(ctx, d, ten.ID); lerr == nil && msg.ChatwootEnabled {
+			if base := strings.TrimRight(strings.TrimSpace(msg.ChatwootBaseURL), "/"); base != "" &&
+				strings.TrimSpace(msg.ChatwootWebsiteToken) != "" {
+				out.Body.Chatwoot = &struct {
+					BaseURL      string `json:"base_url"`
+					WebsiteToken string `json:"website_token"`
+				}{BaseURL: base, WebsiteToken: strings.TrimSpace(msg.ChatwootWebsiteToken)}
+			}
+		}
 		return out, nil
 	})
 }

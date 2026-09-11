@@ -115,6 +115,10 @@ type messagingIntegrationStored struct {
 	// WhatsAppBotDeviceID memilih nomor yang menjadi bot; kosong = nomor pertama/default.
 	WhatsAppBotEnabled  bool   `json:"whatsapp_bot_enabled"`
 	WhatsAppBotDeviceID string `json:"whatsapp_bot_device_id"`
+	// Chatwoot: live-chat widget di landing + portal pelanggan.
+	ChatwootEnabled      bool   `json:"chatwoot_enabled"`
+	ChatwootBaseURL      string `json:"chatwoot_base_url"`
+	ChatwootWebsiteToken string `json:"chatwoot_website_token"`
 }
 
 type waDeviceStored struct {
@@ -164,6 +168,19 @@ type telegramIntegrationPut struct {
 	TelegramEnabled  bool   `json:"telegram_enabled"`
 	TelegramChatID   string `json:"telegram_chat_id"`
 	TelegramBotToken string `json:"telegram_bot_token,omitempty"`
+}
+
+type chatwootIntegrationView struct {
+	Configured   bool   `json:"configured"`
+	Enabled      bool   `json:"enabled"`
+	BaseURL      string `json:"base_url"`
+	WebsiteToken string `json:"website_token,omitempty"`
+}
+
+type chatwootIntegrationPut struct {
+	Enabled      bool   `json:"enabled"`
+	BaseURL      string `json:"base_url"`
+	WebsiteToken string `json:"website_token,omitempty"`
 }
 
 type smtpIntegrationStored struct {
@@ -406,6 +423,48 @@ func registerIntegrations(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body messagingIntegrationView }{Body: messagingView(d, cur)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-chatwoot-integration", Method: http.MethodGet, Path: "/api/integrations/chatwoot",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body chatwootIntegrationView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := loadMessagingIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body chatwootIntegrationView }{Body: chatwootView(stored)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "put-chatwoot-integration", Method: http.MethodPut, Path: "/api/integrations/chatwoot",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body chatwootIntegrationPut
+	}) (*struct{ Body chatwootIntegrationView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cur, err := loadMessagingIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		cur.ChatwootEnabled = input.Body.Enabled
+		if v := strings.TrimRight(strings.TrimSpace(input.Body.BaseURL), "/"); v != "" {
+			cur.ChatwootBaseURL = v
+		}
+		if v := strings.TrimSpace(input.Body.WebsiteToken); v != "" {
+			cur.ChatwootWebsiteToken = v
+		}
+		if err := d.Store.UpsertSettingJSON(ctx, tid, settingMessaging, cur); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body chatwootIntegrationView }{Body: chatwootView(cur)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -831,6 +890,16 @@ func messagingView(d *Deps, s messagingIntegrationStored) messagingIntegrationVi
 		TelegramChatID:     s.TelegramChatID,
 		TelegramEnabled:    s.TelegramEnabled,
 		TelegramBotToken:   decryptSecret(d, s.TelegramBotToken),
+	}
+}
+
+func chatwootView(s messagingIntegrationStored) chatwootIntegrationView {
+	base := strings.TrimRight(strings.TrimSpace(s.ChatwootBaseURL), "/")
+	return chatwootIntegrationView{
+		Configured:   base != "" && strings.TrimSpace(s.ChatwootWebsiteToken) != "",
+		Enabled:      s.ChatwootEnabled,
+		BaseURL:      base,
+		WebsiteToken: strings.TrimSpace(s.ChatwootWebsiteToken),
 	}
 }
 
