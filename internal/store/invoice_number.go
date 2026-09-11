@@ -35,7 +35,8 @@ func randomInvoiceSuffix(n int) string {
 	return string(b)
 }
 
-// FormatInvoiceNumber builds INV-<customer_code>-<mmyyyy>-<6 char>.
+// FormatInvoiceNumber builds INV-<customer_code>-<mmyyyy><6 char>.
+// Nomor yang sama dikirim sebagai merchantOrderId (ref) ke payment gateway.
 func FormatInvoiceNumber(customerCode string, at time.Time) string {
 	if at.IsZero() {
 		at = time.Now()
@@ -59,12 +60,12 @@ func formatInvoiceNumber(customerCode string, at time.Time, suffix string) strin
 	if code == "" {
 		code = "cust"
 	}
-	// "INV-" + code + "-" + mmyyyy + "-" + suffix
-	budget := invoiceNumberMaxLen - (4 + 1 + 6 + 1 + invoiceNumberSuffixLen)
+	// "INV-" + code + "-" + mmyyyy + suffix (tanpa strip sebelum suffix)
+	budget := invoiceNumberMaxLen - (4 + 1 + 6 + invoiceNumberSuffixLen)
 	if len(code) > budget {
 		code = code[:budget]
 	}
-	return "INV-" + code + "-" + period + "-" + suffix
+	return "INV-" + code + "-" + period + suffix
 }
 
 func sanitizeInvoiceToken(s string) string {

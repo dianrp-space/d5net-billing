@@ -84,6 +84,7 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 			req.Email = strings.TrimSpace(*cust.Email)
 		}
 	}
+	// Nomor invoice dipakai langsung sebagai ref merchantOrderId ke payment gateway.
 	req.MerchantOrderID = strings.TrimSpace(inv.InvoiceNumber)
 	if req.MerchantOrderID == "" {
 		req.MerchantOrderID = store.FormatInvoiceNumber("", time.Now())

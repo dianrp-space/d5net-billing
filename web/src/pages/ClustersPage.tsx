@@ -181,7 +181,7 @@ export function ClustersPage() {
   );
   const saving = create.isPending || update.isPending;
   const dialogOpen = createOpen || Boolean(editId);
-  const examplePrefix = (form.customer_code_prefix || form.code || "BTC").toUpperCase().replace(/[^A-Z0-9]/g, "") || "BTC";
+  const examplePrefix = (form.customer_code_prefix || form.code || "D5N").toUpperCase().replace(/[^A-Z0-9]/g, "") || "D5N";
   const yyyymm = new Date().toISOString().slice(0, 7).replace("-", "");
   const exampleCode = (form.customer_code_pattern || "{prefix}-{yyyymm}{seq}")
     .replace("{prefix}", examplePrefix)

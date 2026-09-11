@@ -27,7 +27,7 @@ Semua fase **sudah diisi implementasi yang bisa dijalankan** (bukan lagi kerangk
 ## Cluster / POP (2026-09-04)
 - CRUD `/api/clusters` (tabel `sites`) — banyak POP per tenant
 - Relasi: `routers.site_id` / `customers.cluster_id` → cluster
-- Kode pelanggan: pola default `{prefix}-{yyyymm}{seq}` (mis. `BTC-2026090001`), prefix & pola bisa dikustom per cluster; override manual saat create
+- Kode pelanggan: pola default `{prefix}-{yyyymm}{seq}` (mis. `D5N-2026090001`), prefix & pola bisa dikustom per cluster; override manual saat create
 - Migrasi `006_clusters.sql`
 
 ## Plan offers per cluster (2026-09-04)

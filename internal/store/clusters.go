@@ -33,7 +33,7 @@ type Cluster struct {
 const defaultCustomerCodePattern = "{prefix}-{yyyymm}{seq}"
 
 // DefaultCustomerCodePrefix dipakai saat prefix kosong (mis. kode tenant tanpa cluster).
-const DefaultCustomerCodePrefix = "BTC"
+const DefaultCustomerCodePrefix = "D5N"
 
 func NormalizeClusterCode(s string) string {
 	var b strings.Builder

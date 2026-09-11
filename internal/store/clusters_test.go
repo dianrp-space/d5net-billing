@@ -17,6 +17,9 @@ func TestFormatCustomerCode(t *testing.T) {
 	if got2 != want2 {
 		t.Fatalf("got %q want %q", got2, want2)
 	}
+	if got := FormatCustomerCode("", "", 4, now, 7); got != "D5N-2026090007" {
+		t.Fatalf("default fallback = %q", got)
+	}
 }
 
 func TestNormalizeClusterCode(t *testing.T) {

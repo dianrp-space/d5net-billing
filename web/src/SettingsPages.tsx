@@ -626,10 +626,10 @@ function InvoiceFormPreview({
   const payLines = previewLines(form.payment_instructions);
   const footLines = previewLines(form.footer_note);
 
-  // Mirror store.FormatInvoiceNumber: INV-<kode pelanggan>-<mmyyyy>-<6 char>.
+  // Mirror store.FormatInvoiceNumber: INV-<kode pelanggan>-<mmyyyy><6 char>.
   const now = new Date();
   const period = `${String(now.getMonth() + 1).padStart(2, "0")}${now.getFullYear()}`;
-  const invoiceNo = `INV-BTC-2026090001-${period}-A3F9K2`;
+  const invoiceNo = `INV-D5N-2026090001-${period}A3F9K2`;
   const fmtDate = (d: Date) => d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
   const issuedAt = fmtDate(new Date(now.getFullYear(), now.getMonth(), 1));
   const dueAt = fmtDate(new Date(now.getFullYear(), now.getMonth(), 8));
@@ -694,7 +694,7 @@ function InvoiceFormPreview({
         {/* Bill to */}
         <p className="text-[10px] font-semibold tracking-wide text-slate-500">DITAGIHKAN KEPADA</p>
         <p className="mt-1 font-semibold text-slate-900">Budi Santoso</p>
-        <p className="text-[11px] text-slate-500">Kode: BTC-2026090001</p>
+        <p className="text-[11px] text-slate-500">Kode: D5N-2026090001</p>
         <p className="text-[11px] text-slate-500">Jl. Kenanga No. 5</p>
         <p className="text-[11px] text-slate-500">Telp: 0812-3456-7890</p>
 
