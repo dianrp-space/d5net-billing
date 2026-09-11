@@ -63,9 +63,8 @@ export function Landing({ onGoLogin }: { onGoLogin: () => void }) {
         applyBrandingMeta({
           appName: b.name || b.app_name,
           faviconUrl: b.favicon_url,
-          titleSuffix: "Portal Tagihan Internet",
-          separator: "-",
         });
+        document.title = "Delima Net - Portal Pembayaran Internet";
       } catch {
         /* keep defaults */
       }
