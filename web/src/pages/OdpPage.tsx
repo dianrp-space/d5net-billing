@@ -10,8 +10,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MapPin } from "lucide-react";
 import { MapODP } from "../FtthMap";
 import { getLastOdpCluster, setLastOdpCluster } from "../navPersist";
+import type { AdminPage } from "../admin/pages";
 
-export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
+export function OdpPage({ tenantSlug, onNavigate }: { tenantSlug?: string; onNavigate?: (page: AdminPage) => void }) {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
   type ClusterTab = {
@@ -269,7 +270,19 @@ export function OdpPage({ tenantSlug }: { tenantSlug?: string }) {
     <Section title="MAP FTTH">
       {clusters.length === 0 && unassignedCount === 0 ? (
         <p className="mb-4 text-sm text-[var(--muted)]">
-          Belum ada cluster. Buat Cluster/POP dulu (isi lat/long) agar tab &amp; peta bisa dipakai.
+          Belum ada cluster.{" "}
+          {onNavigate ? (
+            <button
+              type="button"
+              className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+              onClick={() => onNavigate("clusters")}
+            >
+              Buat Cluster/POP dulu →
+            </button>
+          ) : (
+            "Buat Cluster/POP dulu"
+          )}{" "}
+          (isi lat/long) agar tab &amp; peta bisa dipakai.
         </p>
       ) : (
         <div className="mb-4">

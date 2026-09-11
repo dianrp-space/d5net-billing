@@ -23,6 +23,7 @@ import {
 } from "../ui";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import type { AdminPage } from "../admin/pages";
 
 function clampCycleStartDay(n: number | undefined) {
   const v = Math.floor(Number(n) || 1);
@@ -60,12 +61,15 @@ export function SubscriptionsPage({
   onBack,
   onOpenList,
   onOpenCreate,
+  onNavigatePage,
 }: {
   customerId: string;
   createMode?: boolean;
   onBack: () => void;
   onOpenList: () => void;
   onOpenCreate: () => void;
+  /** Shortcut ke halaman setup terkait (router, paket). */
+  onNavigatePage?: (page: AdminPage) => void;
 }) {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
@@ -979,6 +983,18 @@ export function SubscriptionsPage({
               keywords: r.name,
             }))}
           />
+          {routers.length === 0 && onNavigatePage ? (
+            <p className="text-xs text-[var(--muted)] sm:col-span-2">
+              Belum ada router yang tersedia.{" "}
+              <button
+                type="button"
+                className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                onClick={() => onNavigatePage("routers")}
+              >
+                Tambah di halaman Router →
+              </button>
+            </p>
+          ) : null}
           <SearchableSelect
             allowClear
             clearLabel="— ODP (opsional) —"
@@ -1157,7 +1173,16 @@ export function SubscriptionsPage({
 
           {clusterId && offers.length === 0 && (
             <p className="text-sm text-[var(--danger)] sm:col-span-2">
-              Belum ada offer paket untuk cluster ini.
+              Belum ada offer paket untuk cluster ini.{" "}
+              {onNavigatePage ? (
+                <button
+                  type="button"
+                  className="font-medium underline-offset-2 hover:underline"
+                  onClick={() => onNavigatePage("plans")}
+                >
+                  Atur di halaman Paket →
+                </button>
+              ) : null}
             </p>
           )}
           <div className="flex flex-wrap gap-2 sm:col-span-2">

@@ -23,8 +23,9 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { AdminPage } from "../admin/pages";
 
-export function PlansPage() {
+export function PlansPage({ onNavigate }: { onNavigate?: (page: AdminPage) => void }) {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
   type PlanRow = {
@@ -549,7 +550,19 @@ export function PlansPage() {
       )}
       {clusters.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">
-          Belum ada cluster. Buat Cluster/POP dulu agar harga per cluster bisa ditampilkan per tab.
+          Belum ada cluster.{" "}
+          {onNavigate ? (
+            <button
+              type="button"
+              className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+              onClick={() => onNavigate("clusters")}
+            >
+              Buat Cluster/POP dulu →
+            </button>
+          ) : (
+            "Buat Cluster/POP dulu"
+          )}{" "}
+          agar harga per cluster bisa ditampilkan per tab.
         </p>
       ) : (
         <>
@@ -886,7 +899,19 @@ export function PlansPage() {
               <p className="text-xs text-[var(--muted)]">Pilih cluster dulu untuk melihat pool yang tersedia.</p>
             ) : poolsForCluster.length === 0 ? (
               <p className="text-xs text-[var(--muted)]">
-                Belum ada IP pool di cluster ini. Buat di menu IP Pool (tab cluster ini), atau biarkan Auto.
+                Belum ada IP pool di cluster ini.{" "}
+                {onNavigate ? (
+                  <button
+                    type="button"
+                    className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                    onClick={() => onNavigate("ip-pool")}
+                  >
+                    Buat di menu IP Pool →
+                  </button>
+                ) : (
+                  "Buat di menu IP Pool"
+                )}{" "}
+                (tab cluster ini), atau biarkan Auto.
               </p>
             ) : (
               <p className="text-xs text-[var(--muted)]">

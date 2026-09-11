@@ -14,6 +14,7 @@ import {
 import { IconButton, Button, Input, Label, Section, Table } from "../ui";
 import { ListToolbar, usePagination } from "../ListToolbar";
 import { Checkbox } from "@/components/ui/checkbox";
+import type { AdminPage } from "../admin/pages";
 
 type ClusterRow = {
   id: string;
@@ -134,7 +135,7 @@ function RadiusEditor({
   );
 }
 
-export function CoveragePage({ canEdit }: { canEdit: boolean }) {
+export function CoveragePage({ canEdit, onNavigate }: { canEdit: boolean; onNavigate?: (page: AdminPage) => void }) {
   const qc = useQueryClient();
   const mapRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -607,7 +608,29 @@ export function CoveragePage({ canEdit }: { canEdit: boolean }) {
       ) : null}
       {popsWithCoords.length === 0 && odpsWithCoords.length === 0 ? (
         <p className="mt-3 text-sm text-[var(--muted)]">
-          Belum ada POP/ODP berkoordinat. Isi lat/long di Cluster / POP atau MAP FTTH.
+          Belum ada POP/ODP berkoordinat. Isi lat/long di{" "}
+          {onNavigate ? (
+            <>
+              <button
+                type="button"
+                className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                onClick={() => onNavigate("clusters")}
+              >
+                Cluster / POP
+              </button>{" "}
+              atau{" "}
+              <button
+                type="button"
+                className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                onClick={() => onNavigate("odp")}
+              >
+                MAP FTTH
+              </button>
+              .
+            </>
+          ) : (
+            "Cluster / POP atau MAP FTTH."
+          )}
         </p>
       ) : null}
     </Section>

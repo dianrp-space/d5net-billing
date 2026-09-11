@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IconPencil, IconTrash, IconWrench } from "../icons";
 import { ListToolbar, matchesQuery } from "../ListToolbar";
 import { getLastIpPoolCluster, setLastIpPoolCluster } from "../navPersist";
+import type { AdminPage } from "../admin/pages";
 import { toastError, toastSuccess } from "../swal";
 import {
   Button,
@@ -19,7 +20,7 @@ import {
   Table,
 } from "../ui";
 
-export function IPPoolPage({ tenantSlug }: { tenantSlug?: string }) {
+export function IPPoolPage({ tenantSlug, onNavigate }: { tenantSlug?: string; onNavigate?: (page: AdminPage) => void }) {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
   type IpPoolRow = {
@@ -301,7 +302,19 @@ export function IPPoolPage({ tenantSlug }: { tenantSlug?: string }) {
     >
       {clusters.length === 0 && unassignedCount === 0 ? (
         <p className="mb-4 text-sm text-[var(--muted)]">
-          Belum ada cluster. Buat Cluster/POP dulu agar pool bisa dikelompokkan per tab.
+          Belum ada cluster.{" "}
+          {onNavigate ? (
+            <button
+              type="button"
+              className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+              onClick={() => onNavigate("clusters")}
+            >
+              Buat Cluster/POP dulu →
+            </button>
+          ) : (
+            "Buat Cluster/POP dulu"
+          )}{" "}
+          agar pool bisa dikelompokkan per tab.
         </p>
       ) : (
         <div className="mb-4">

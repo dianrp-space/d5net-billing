@@ -513,20 +513,22 @@ export function AdminApp({
                   onBack={() => onNavigate("customers")}
                   onOpenList={() => onNavigate("customers", [customerSecretsId, "secrets"])}
                   onOpenCreate={() => onNavigate("customers", [customerSecretsId, "secrets", "new"])}
+                  onNavigatePage={(p) => onNavigate(p)}
                 />
               ) : null}
               {page === "clusters" && <ClustersPage />}
-              {page === "plans" && <PlansPage />}
+              {page === "plans" && <PlansPage onNavigate={(p) => onNavigate(p)} />}
               {page === "discounts" && <DiscountsPage />}
               {page === "invoices" && <InvoicesPage />}
               {page === "payments" && <PaymentsPage />}
               {page === "routers" && <RoutersPage />}
-              {page === "ip-pool" && <IPPoolPage tenantSlug={tenantSlug} />}
+              {page === "ip-pool" && <IPPoolPage tenantSlug={tenantSlug} onNavigate={(p) => onNavigate(p)} />}
               {page === "tickets" && <TicketsPage />}
               {page === "sla-report" && <SLAReportPage />}
-              {page === "odp" && <OdpPage tenantSlug={tenantSlug} />}
+              {page === "odp" && <OdpPage tenantSlug={tenantSlug} onNavigate={(p) => onNavigate(p)} />}
               {page === "coverage" && (
                 <CoveragePage
+                  onNavigate={(p) => onNavigate(p)}
                   canEdit={
                     canAccessPage(perms, "clusters") ||
                     canAccessPage(perms, "odp") ||
