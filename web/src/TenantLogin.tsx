@@ -32,6 +32,7 @@ export type PortalCustomer = {
   cluster_name?: string | null;
   service_status?: string;
   is_active?: boolean;
+  photo_url?: string | null;
 };
 
 export type ClientPortalData = {

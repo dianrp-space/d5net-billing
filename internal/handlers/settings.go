@@ -223,8 +223,74 @@ func MountStaticAndUploads(r chi.Router, d *Deps) {
 	r.Post("/api/tickets/{id}/messages/photos", ticketMessagePhotoUpload(d))
 	r.Post("/api/tickets/photos", ticketDraftPhotoUpload(d))
 	r.Post("/api/customers/{id}/documents/photos", customerDocumentPhotoUpload(d))
+	r.Post("/api/portal/account/photo", portalCustomerPhotoUpload(d))
 	r.Post("/api/me/avatar", meAvatarUpload(d))
 	MountDBBackupRoutes(r, d)
+}
+
+// portalCustomerPhotoUpload lets a portal customer upload/remove their own
+// profile photo. Auth via portal token (Authorization header).
+func portalCustomerPhotoUpload(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		ten, custs, err := authenticatePortalRequest(ctx, d, r.Header.Get("Authorization"), "", "", "")
+		if err != nil || len(custs) == 0 {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		if err := r.ParseMultipartForm(upload.MaxBytes + (2 << 20)); err != nil {
+			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
+			return
+		}
+		target := custs[0]
+		if raw := strings.TrimSpace(r.FormValue("customer_id")); raw != "" {
+			cid, perr := xid.Parse(raw)
+			if perr != nil || xid.IsNil(cid) {
+				http.Error(w, `{"error":"customer tidak valid"}`, http.StatusBadRequest)
+				return
+			}
+			found := false
+			for _, c := range custs {
+				if c != nil && c.ID == cid {
+					target = c
+					found = true
+					break
+				}
+			}
+			if !found {
+				http.Error(w, `{"error":"akun tidak ditemukan"}`, http.StatusBadRequest)
+				return
+			}
+		} else if len(custs) > 1 {
+			http.Error(w, `{"error":"pilih akun yang fotonya diubah"}`, http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(r.FormValue("remove")) == "true" {
+			if err := d.Store.UpdateCustomerPhoto(ctx, ten.ID, target.ID, nil); err != nil {
+				http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, map[string]any{"url": nil})
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, `{"error":"file is required"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		kind := fmt.Sprintf("customer-photo-%s", target.ID.String())
+		url, err := saveUpload(d, ten.ID, false, kind, file, header.Filename, header.Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+		if err := d.Store.UpdateCustomerPhoto(ctx, ten.ID, target.ID, &url); err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]string{"url": url})
+	}
 }
 
 func ticketDraftPhotoUpload(d *Deps) http.HandlerFunc {

@@ -24,9 +24,10 @@ type Customer struct {
 	Longitude      *float64   `json:"longitude,omitempty"`
 	IdentityType   *string    `json:"identity_type,omitempty"`
 	IdentityNumber *string    `json:"identity_number,omitempty"`
-	IsActive       bool       `json:"is_active"`
-	PortalEnabled  bool       `json:"portal_enabled"`
-	DismantledAt   *time.Time `json:"dismantled_at,omitempty"`
+	IsActive        bool       `json:"is_active"`
+	PortalEnabled   bool       `json:"portal_enabled"`
+	PhotoURL        *string    `json:"photo_url,omitempty"`
+	DismantledAt    *time.Time `json:"dismantled_at,omitempty"`
 	ServiceStatus  string     `json:"service_status"`
 	// SubStatus is the aggregate live subscription state (active/isolir/overdue)
 	// used to derive ServiceStatus; not serialized on its own.
@@ -147,7 +148,7 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 func customerScanDest(c *Customer) []any {
 	return []any{
 		&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
-		&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.DismantledAt, &c.CreatedAt,
+		&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.PhotoURL, &c.DismantledAt, &c.CreatedAt,
 		&c.ClusterName, &c.ClusterCode, &c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName, &c.SubStatus,
 	}
 }
@@ -167,7 +168,7 @@ func scanCustomer(row interface{ Scan(dest ...any) error }) (*Customer, error) {
 
 const customerSelect = `
 	SELECT c.id, c.tenant_id, c.cluster_id, c.customer_code, c.full_name, c.email, c.phone, c.address,
-	       c.latitude, c.longitude, c.identity_type, c.identity_number, c.is_active, c.portal_enabled, c.dismantled_at, c.created_at,
+	       c.latitude, c.longitude, c.identity_type, c.identity_number, c.is_active, c.portal_enabled, c.photo_url, c.dismantled_at, c.created_at,
 	       COALESCE(s.name, ''), COALESCE(s.code, ''),
 	       c.reseller_id, COALESCE(r.name, ''), c.sales_user_id, COALESCE(u.full_name, ''),
 	       COALESCE((

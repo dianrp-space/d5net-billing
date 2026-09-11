@@ -147,13 +147,21 @@ export function ClientIdCard({
       {/* badan kartu */}
       <div className="flex gap-4 px-4 py-4 sm:px-5">
         <div className="flex shrink-0 flex-col items-center gap-2">
-          <span
-            className="flex h-16 w-16 items-center justify-center rounded-2xl text-xl font-bold text-white sm:h-20 sm:w-20 sm:text-2xl"
-            style={{ background: "linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000))" }}
-            aria-hidden
-          >
-            {initials(current.full_name)}
-          </span>
+          {current.photo_url?.trim() ? (
+            <img
+              src={current.photo_url}
+              alt={current.full_name}
+              className="h-16 w-16 rounded-2xl object-cover sm:h-20 sm:w-20"
+            />
+          ) : (
+            <span
+              className="flex h-16 w-16 items-center justify-center rounded-2xl text-xl font-bold text-white sm:h-20 sm:w-20 sm:text-2xl"
+              style={{ background: "linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000))" }}
+              aria-hidden
+            >
+              {initials(current.full_name)}
+            </span>
+          )}
           <span
             className="inline-block h-2 w-2 rounded-full"
             style={{ background: st.tone }}

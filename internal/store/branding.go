@@ -489,6 +489,23 @@ func (s *Store) UpdatePortalUser(ctx context.Context, tenantID, customerID xid.I
 	return nil
 }
 
+func (s *Store) UpdateCustomerPhoto(ctx context.Context, tenantID, customerID xid.ID, photoURL *string) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE customers SET photo_url=$3, updated_at=NOW()
+		WHERE tenant_id=$1 AND id=$2
+	`, tenantID, customerID, photoURL)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) GetCustomerPasswordHash(ctx context.Context, tenantID, customerID xid.ID) (string, error) {
 	var hash *string
 	err := s.Pool.QueryRow(ctx, `

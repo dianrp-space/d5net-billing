@@ -1,10 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Home, PanelLeft, PanelLeftClose } from "lucide-react";
 import { api, apiDownload, clearClientSession, getClientSession, setClientSession } from "./api";
 import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
-import type { ClientPortalData } from "./TenantLogin";
+import type { ClientPortalData, PortalCustomer } from "./TenantLogin";
 import { ClientIdCard } from "./ClientIdCard";
+import { ChatwootWidget } from "./ChatwootWidget";
 import { toastError, toastSuccess } from "./swal";
 import { ThemeToggle } from "./ThemeToggle";
 import {
@@ -299,6 +300,104 @@ export function ClientHome({
     : undefined;
   const ticketAccountId = ticketAccount || accounts[0]?.id || "";
 
+  // Foto profil: override lokal per akun + patch sesi portal.
+  const [photoMap, setPhotoMap] = useState<Record<string, string | null>>({});
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoErr, setPhotoErr] = useState("");
+  const [photoKeySel, setPhotoKeySel] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const photoKeyOf = (c: { id?: string; customer_code: string }) => c.id || c.customer_code;
+  function photoOf(c: PortalCustomer): string | null {
+    const k = photoKeyOf(c);
+    if (k && k in photoMap) return photoMap[k];
+    return c.photo_url?.trim() || null;
+  }
+  const cardAccounts = fullAccounts.map((c) => ({ ...c, photo_url: photoOf(c) }));
+  const cardCustomer = data.customer ? { ...data.customer, photo_url: photoOf(data.customer) } : null;
+  const photoFirstKey = fullAccounts.length ? photoKeyOf(fullAccounts[0]) : "";
+  const photoSelKey = photoKeySel || photoFirstKey;
+  const photoTarget = fullAccounts.find((c) => photoKeyOf(c) === photoSelKey) || fullAccounts[0];
+  const photoTargetUrl = photoTarget ? photoOf(photoTarget) : null;
+
+  function applyPhoto(target: PortalCustomer, url: string | null) {
+    const key = photoKeyOf(target);
+    setPhotoMap((m) => ({ ...m, [key]: url }));
+    const sess = getClientSession<ClientPortalData>();
+    if (sess) {
+      const same = (c: PortalCustomer) =>
+        (target.id && c.id === target.id) || c.customer_code === target.customer_code;
+      if (Array.isArray(sess.customers)) {
+        sess.customers = sess.customers.map((c) => (same(c) ? { ...c, photo_url: url } : c));
+      }
+      if (sess.customer && same(sess.customer)) {
+        sess.customer = { ...sess.customer, photo_url: url };
+      }
+      setClientSession(sess);
+    }
+  }
+
+  async function uploadPhoto(file: File) {
+    if (!photoTarget || photoBusy) return;
+    setPhotoBusy(true);
+    setPhotoErr("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (multi) fd.append("customer_id", photoTarget.id || "");
+      const res = await fetch("/api/portal/account/photo", {
+        method: "POST",
+        headers: data.portal_token ? { Authorization: `Bearer ${data.portal_token}` } : {},
+        body: fd,
+      });
+      let body: { url?: string; error?: string; detail?: string } = {};
+      try {
+        body = (await res.json()) as typeof body;
+      } catch {
+        /* abaikan */
+      }
+      if (!res.ok || !body.url) throw new Error(body.error || body.detail || "Upload gagal");
+      applyPhoto(photoTarget, body.url);
+      void toastSuccess("Foto profil diperbarui");
+    } catch (e: unknown) {
+      setPhotoErr(e instanceof Error ? e.message : "Upload gagal");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  async function removePhoto() {
+    if (!photoTarget || photoBusy) return;
+    setPhotoBusy(true);
+    setPhotoErr("");
+    try {
+      const fd = new FormData();
+      fd.append("remove", "true");
+      if (multi) fd.append("customer_id", photoTarget.id || "");
+      const res = await fetch("/api/portal/account/photo", {
+        method: "POST",
+        headers: data.portal_token ? { Authorization: `Bearer ${data.portal_token}` } : {},
+        body: fd,
+      });
+      if (!res.ok) {
+        let msg = "Hapus foto gagal";
+        try {
+          const body = (await res.json()) as { error?: string; detail?: string };
+          msg = body.error || body.detail || msg;
+        } catch {
+          /* abaikan */
+        }
+        throw new Error(msg);
+      }
+      applyPhoto(photoTarget, null);
+      void toastSuccess("Foto profil dihapus");
+    } catch (e: unknown) {
+      setPhotoErr(e instanceof Error ? e.message : "Hapus foto gagal");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
   const ticketsQ = useQuery({
     queryKey: ["portal-tickets", data.tenant_slug],
     queryFn: () => api<{ data: PortalTicket[] }>("/api/portal/tickets", { headers: portalHeaders }),
@@ -559,6 +658,18 @@ export function ClientHome({
 
   return (
     <div className={`app-shell app-shell--portal${sidebarOpen ? "" : " is-sidebar-collapsed"}`}>
+      <ChatwootWidget
+        identity={
+          fullAccounts[0]
+            ? {
+                id: fullAccounts[0].id || fullAccounts[0].customer_code,
+                name: fullAccounts[0].full_name,
+                phone: fullAccounts[0].phone,
+                email: fullAccounts[0].email || undefined,
+              }
+            : null
+        }
+      />
       <aside className="app-sidebar" aria-label="Navigasi portal pelanggan">
         <div className="app-sidebar-brand">
           <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="app-sidebar-logo object-contain" />
@@ -589,7 +700,15 @@ export function ClientHome({
         </nav>
         <div className="app-sidebar-foot">
           <div className="app-user-chip">
-            <div className="app-user-avatar">{(greeting.trim()[0] || "P").toUpperCase()}</div>
+            {(() => {
+              const first = fullAccounts[0];
+              const url = first ? photoOf(first) : null;
+              return url ? (
+                <img src={url} alt="" className="app-user-avatar app-user-avatar--img object-cover" />
+              ) : (
+                <div className="app-user-avatar">{(greeting.trim()[0] || "P").toUpperCase()}</div>
+              );
+            })()}
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{greeting}</p>
               <p className="truncate text-xs text-[var(--muted)]">{data.customer?.phone || data.customer?.customer_code || ""}</p>
@@ -662,8 +781,8 @@ export function ClientHome({
                 ) : null}
               </div>
               <ClientIdCard
-                customer={data.customer ?? null}
-                accounts={fullAccounts}
+                customer={cardCustomer}
+                accounts={cardAccounts}
                 providerName={appName}
                 logoUrl={logoUrl}
               />
@@ -1003,6 +1122,80 @@ export function ClientHome({
             </div>
           ) : null}
 
+          {page === "account" ? (
+            <Section title="Foto profil">
+              {photoTarget ? (
+                <div className="flex flex-wrap items-center gap-4">
+                  {photoTargetUrl ? (
+                    <img src={photoTargetUrl} alt="" className="h-20 w-20 rounded-2xl object-cover" />
+                  ) : (
+                    <span
+                      className="flex h-20 w-20 items-center justify-center rounded-2xl text-2xl font-bold text-white"
+                      style={{ background: "linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000))" }}
+                      aria-hidden
+                    >
+                      {(photoTarget.full_name.trim()[0] || "P").toUpperCase()}
+                    </span>
+                  )}
+                  <div className="grid min-w-0 flex-1 gap-2">
+                    {multi ? (
+                      <label className="grid max-w-md gap-1 text-sm">
+                        <span className="text-[var(--muted)]">Akun</span>
+                        <select
+                          className="input"
+                          value={photoSelKey}
+                          onChange={(e) => setPhotoKeySel(e.target.value)}
+                        >
+                          {fullAccounts.map((a) => (
+                            <option key={photoKeyOf(a)} value={photoKeyOf(a)}>
+                              {accountLabel(a.customer_code, a.full_name)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <p className="text-sm font-medium">{accountLabel(photoTarget.customer_code, photoTarget.full_name)}</p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        disabled={photoBusy}
+                        onClick={() => fileRef.current?.click()}
+                      >
+                        {photoBusy ? "Mengunggah..." : "Pilih foto..."}
+                      </button>
+                      {photoTargetUrl ? (
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          disabled={photoBusy}
+                          onClick={() => void removePhoto()}
+                        >
+                          Hapus foto
+                        </button>
+                      ) : null}
+                    </div>
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (f) void uploadPhoto(f);
+                      }}
+                    />
+                    <p className="text-xs text-[var(--muted)]">JPG / PNG / WebP, otomatis dikompresi.</p>
+                    {photoErr && <p className="text-sm text-[var(--danger)]">{photoErr}</p>}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-[var(--muted)]">Belum ada akun.</p>
+              )}
+            </Section>
+          ) : null}
           {page === "account" ? (
             <Section title="Ganti password">
               <form className="grid max-w-md gap-3" onSubmit={onChangePassword}>
