@@ -107,6 +107,7 @@ export function InvoicesPage() {
         </Button>
       </ListToolbar>
       <Table
+        rowNumberStart={page * limit + 1}
         columns={["Nomor", "Pelanggan", "Jatuh tempo", "Total", "Terbayar", "Status", "Aksi"]}
         rows={rows.map((i) => [
           i.invoice_number,

@@ -416,6 +416,7 @@ export function CustomersPage({
         total={total}
       />
       <Table
+        rowNumberStart={page * limit + 1}
         columns={["Kode", "Cluster", "Nama", "Telepon", "Atribusi", "Status", "Aksi"]}
         rows={rows.map((c) => [
           c.customer_code,

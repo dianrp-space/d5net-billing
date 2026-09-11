@@ -241,6 +241,7 @@ export function VouchersPage() {
         onPageChange={setBatchPage}
       />
       <Table
+        rowNumberStart={batchPage * 25 + 1}
         columns={["Batch", "Router", "Paket", "Harga", "Qty", "Sync", "Tersedia", "Terpakai", "Aksi"]}
         rows={batchPageItems.map((b) => [
           <div key={`${b.id}-n`}>
@@ -492,6 +493,7 @@ export function VouchersPage() {
             </div>
 
             <Table
+              rowNumberStart={codePage * 50 + 1}
               columns={["Kode", "Status", "Dipakai oleh", "Dipakai pada", "Kadaluarsa"]}
               rows={codePageItems.map((c) => [
                 <code key={`${c.id}-c`} className="text-xs font-semibold">

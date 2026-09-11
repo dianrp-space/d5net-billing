@@ -112,6 +112,7 @@ export function PaymentsPage() {
         total={total}
       />
       <Table
+        rowNumberStart={page * limit + 1}
         columns={["Tanggal", "Pelanggan", "Tagihan", "Metode", "Jumlah", "Status", "Aksi"]}
         rows={rows.map((p) => [
           paymentWhen(p),

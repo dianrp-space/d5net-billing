@@ -573,6 +573,7 @@ export function TicketsPage() {
           />
 
           <Table
+            rowNumberStart={page * limit + 1}
             columns={["Subjek", "Pelanggan", "Teknisi", "Kategori", "Prioritas", "Status", "SLA", "Aksi"]}
             onRowClick={(i) => openDetail(list[i])}
             rows={list.map((t) => [

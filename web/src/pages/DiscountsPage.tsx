@@ -263,6 +263,7 @@ export function DiscountsPage() {
       />
 
       <Table
+        rowNumberStart={discPage * 25 + 1}
         columns={["Nama", "Paket", "Diskon", "Periode", "Sasaran", "Status", "Aksi"]}
         rows={discPageItems.map((r) => [
           r.name,

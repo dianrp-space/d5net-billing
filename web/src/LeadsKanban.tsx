@@ -730,6 +730,7 @@ export function LeadsPage() {
             onPageChange={setLeadPage}
           />
           <Table
+            rowNumberStart={leadPage * 25 + 1}
             columns={["Nama", "Telepon", "Status", "Teknisi", "Atribusi", "Dibuat", "Aksi"]}
             onRowClick={(i) => openDetail(leadPageItems[i])}
             rows={leadPageItems.map((l) => [

@@ -341,6 +341,7 @@ export function OdpPage({ tenantSlug, onNavigate }: { tenantSlug?: string; onNav
         </span>
       </ListToolbar>
       <Table
+        rowNumberStart={odpPage * 25 + 1}
         columns={["Nama", "Kode", "Port", "Terpakai", "Sisa", "Koordinat", "Coverage", "Aksi"]}
         rows={odpPageItems.map((o) => [
           o.name,

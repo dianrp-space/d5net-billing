@@ -42,16 +42,22 @@ export function Table({
   columns,
   rows,
   onRowClick,
+  rowNumberStart = 1,
+  hideRowNumber = false,
 }: {
   columns: string[];
   rows: ReactNode[][];
   onRowClick?: (index: number) => void;
+  /** Nomor urut baris pertama (untuk tabel ber-halaman: page * limit + 1). */
+  rowNumberStart?: number;
+  hideRowNumber?: boolean;
 }) {
+  const cols = hideRowNumber ? columns : ["No", ...columns];
   return (
     <UiTable>
       <TableHeader>
         <TableRow>
-          {columns.map((c) => (
+          {cols.map((c) => (
             <TableHead key={c}>{c}</TableHead>
           ))}
         </TableRow>
@@ -59,7 +65,7 @@ export function Table({
       <TableBody>
         {rows.length === 0 ? (
           <TableRow>
-            <TableCell colSpan={columns.length} className="text-[var(--muted)]">
+            <TableCell colSpan={cols.length} className="text-[var(--muted)]">
               Belum ada data
             </TableCell>
           </TableRow>
@@ -70,6 +76,11 @@ export function Table({
               className={onRowClick ? "cursor-pointer hover:bg-[var(--panel-muted)]/60" : undefined}
               onClick={onRowClick ? () => onRowClick(i) : undefined}
             >
+              {!hideRowNumber ? (
+                <TableCell key="no" className="w-10 tabular-nums text-[var(--muted)]">
+                  {rowNumberStart + i}
+                </TableCell>
+              ) : null}
               {r.map((c, j) => (
                 <TableCell key={j} onClick={j === r.length - 1 && onRowClick ? (e) => e.stopPropagation() : undefined}>
                   {c}

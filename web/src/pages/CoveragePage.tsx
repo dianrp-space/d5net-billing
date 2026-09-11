@@ -549,6 +549,7 @@ export function CoveragePage({ canEdit, onNavigate }: { canEdit: boolean; onNavi
 
       <h2 className="mb-2 mt-8 text-sm font-semibold">POP</h2>
       <Table
+        rowNumberStart={popPage * 25 + 1}
         columns={canEdit ? ["Nama", "Kode", "Koordinat", "Radius", "Aksi"] : ["Nama", "Kode", "Koordinat", "Radius"]}
         rows={popPageItems.map((c) => {
           const cells: (string | number | ReactNode)[] = [
@@ -576,6 +577,7 @@ export function CoveragePage({ canEdit, onNavigate }: { canEdit: boolean; onNavi
 
       <h2 className="mb-2 mt-8 text-sm font-semibold">ODP</h2>
       <Table
+        rowNumberStart={covOdpPage * 25 + 1}
         columns={canEdit ? ["Nama", "Kode", "Sisa port", "Koordinat", "Radius", "Aksi"] : ["Nama", "Kode", "Sisa port", "Koordinat", "Radius"]}
         rows={covOdpPageItems.map((o) => {
           const cells: (string | number | ReactNode)[] = [
