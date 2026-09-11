@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 )
@@ -123,6 +125,67 @@ func (c *Client) SendText(ctx context.Context, phone, body string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.applyHeaders(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("whatsapp gateway %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return nil
+}
+
+// SendImage calls POST /send/image (multipart) with PNG/JPEG bytes.
+func (c *Client) SendImage(ctx context.Context, phone, caption string, png []byte) error {
+	return c.sendMedia(ctx, "/send/image", "image", phone, caption, "qris.png", "image/png", png)
+}
+
+// SendFile calls POST /send/file (multipart), e.g. for invoice PDFs.
+func (c *Client) SendFile(ctx context.Context, phone, caption, filename, mime string, data []byte) error {
+	return c.sendMedia(ctx, "/send/file", "file", phone, caption, filename, mime, data)
+}
+
+func (c *Client) sendMedia(ctx context.Context, path, field, phone, caption, filename, mime string, data []byte) error {
+	if !c.Configured() {
+		return fmt.Errorf("whatsapp gateway belum dikonfigurasi")
+	}
+	p := NormalizePhone(phone)
+	if p == "" {
+		return fmt.Errorf("nomor WhatsApp kosong")
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("media kosong")
+	}
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("phone", p)
+	if strings.TrimSpace(caption) != "" {
+		_ = w.WriteField("caption", caption)
+	}
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, field, filename))
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	h.Set("Content-Type", mime)
+	fw, err := w.CreatePart(h)
+	if err != nil {
+		return err
+	}
+	if _, err := fw.Write(data); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+path, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
 	c.applyHeaders(req)
 	resp, err := c.http.Do(req)
 	if err != nil {

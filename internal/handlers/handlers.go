@@ -5778,29 +5778,51 @@ func registerWebhooks(api huma.API, d *Deps) {
 
 	huma.Register(api, huma.Operation{
 		OperationID: "whatsapp-webhook", Method: http.MethodPost, Path: "/api/webhooks/whatsapp",
+		Summary: "GOWA incoming message webhook (customer bot)",
 		Tags: []string{"Webhooks"},
 	}, func(ctx context.Context, input *struct {
-		Body struct {
-			TenantID xid.ID `json:"tenant_id"`
-			Phone    string `json:"phone"`
-			Message  string `json:"message"`
-		}
+		Body whatsappWebhookInput
 	}) (*struct {
 		Body struct {
 			Reply string `json:"reply"`
 		}
 	}, error) {
-		reply, err := d.Notify.HandleWhatsAppBot(ctx, input.Body.TenantID, input.Body.Phone, input.Body.Message)
-		if err != nil {
-			return nil, httpx.Internal(err)
-		}
-		return &struct {
+		empty := &struct {
 			Body struct {
 				Reply string `json:"reply"`
 			}
-		}{Body: struct {
-			Reply string `json:"reply"`
-		}{Reply: reply}}, nil
+		}{}
+		b := input.Body
+		// Bot pushes replies straight from the bot number; the webhook
+		// itself always answers empty.
+		if strings.TrimSpace(b.Event) != "" {
+			in, ok := parseGOWAMessage(&b)
+			if !ok {
+				return empty, nil
+			}
+			ten, terr := singleTenant(ctx, d)
+			if terr != nil || ten == nil {
+				return empty, nil
+			}
+			handleWhatsAppBotMessage(ctx, d, ten.ID, ten, in)
+			return empty, nil
+		}
+		if strings.TrimSpace(b.Message) == "" {
+			return empty, nil
+		}
+		tid := b.TenantID
+		ten, terr := d.Store.GetTenant(ctx, tid)
+		if terr != nil || ten == nil {
+			fallback, ferr := singleTenant(ctx, d)
+			if ferr != nil || fallback == nil {
+				return empty, nil
+			}
+			tid, ten = fallback.ID, fallback
+		}
+		handleWhatsAppBotMessage(ctx, d, tid, ten, waBotIncoming{
+			From: b.Phone, ChatID: b.Phone, Body: b.Message,
+		})
+		return empty, nil
 	})
 }
 

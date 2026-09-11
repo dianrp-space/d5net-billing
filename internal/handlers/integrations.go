@@ -69,6 +69,10 @@ type messagingIntegrationStored struct {
 	WhatsAppPassword string           `json:"whatsapp_password"`
 	WhatsAppDeviceID string           `json:"whatsapp_device_id"` // legacy single device
 	WhatsAppDevices  []waDeviceStored `json:"whatsapp_devices"`
+	// WhatsAppBotEnabled mengaktifkan bot perintah pelanggan (/tagihan, /link, /qris).
+	// WhatsAppBotDeviceID memilih nomor yang menjadi bot; kosong = nomor pertama/default.
+	WhatsAppBotEnabled  bool   `json:"whatsapp_bot_enabled"`
+	WhatsAppBotDeviceID string `json:"whatsapp_bot_device_id"`
 }
 
 type waDeviceStored struct {
@@ -97,14 +101,18 @@ type whatsappIntegrationView struct {
 	Username   string         `json:"username"`
 	Password   string         `json:"password,omitempty"`
 	Devices    []waDeviceView `json:"devices"`
+	BotEnabled bool           `json:"bot_enabled"`
+	BotDevice  string         `json:"bot_device_id,omitempty"`
 }
 
 type whatsappIntegrationPut struct {
-	Enabled  bool           `json:"enabled"`
-	BaseURL  string         `json:"base_url"`
-	Username string         `json:"username"`
-	Password string         `json:"password,omitempty"`
-	Devices  []waDeviceView `json:"devices"`
+	Enabled     bool           `json:"enabled"`
+	BaseURL     string         `json:"base_url"`
+	Username    string         `json:"username"`
+	Password    string         `json:"password,omitempty"`
+	Devices     []waDeviceView `json:"devices"`
+	BotEnabled  bool           `json:"bot_enabled"`
+	BotDeviceID string         `json:"bot_device_id,omitempty"`
 }
 
 type telegramIntegrationPut struct {
@@ -366,6 +374,8 @@ func registerIntegrations(api huma.API, d *Deps) {
 		cur.WhatsAppUsername = strings.TrimSpace(input.Body.Username)
 		cur.WhatsAppDeviceID = ""
 		cur.WhatsAppDevices = normalizeWADevices(input.Body.Devices)
+		cur.WhatsAppBotEnabled = input.Body.BotEnabled
+		cur.WhatsAppBotDeviceID = strings.TrimSpace(input.Body.BotDeviceID)
 		if v := strings.TrimSpace(input.Body.Password); v != "" {
 			enc, err := d.Encryptor.EncryptString(v)
 			if err != nil {
@@ -691,6 +701,8 @@ func whatsappView(d *Deps, s messagingIntegrationStored) whatsappIntegrationView
 		Username:   s.WhatsAppUsername,
 		Password:   decryptSecret(d, s.WhatsAppPassword),
 		Devices:    devices,
+		BotEnabled: s.WhatsAppBotEnabled,
+		BotDevice:  strings.TrimSpace(s.WhatsAppBotDeviceID),
 	}
 }
 

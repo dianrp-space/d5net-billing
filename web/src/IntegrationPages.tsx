@@ -468,6 +468,8 @@ type WhatsAppIntegration = {
   username: string;
   password?: string;
   devices: WADevice[];
+  bot_enabled: boolean;
+  bot_device_id?: string;
 };
 type WACheckRow = {
   device_id: string;
@@ -490,6 +492,8 @@ function WhatsAppTab() {
     username: "",
     password: "",
     devices: [] as WADevice[],
+    bot_enabled: false,
+    bot_device_id: "",
   });
   const [checks, setChecks] = useState<WACheckRow[]>([]);
 
@@ -502,6 +506,8 @@ function WhatsAppTab() {
       username: q.data.username || "",
       password: q.data.password || "",
       devices: [...devices].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0)),
+      bot_enabled: q.data.bot_enabled,
+      bot_device_id: q.data.bot_device_id || "",
     });
   }, [q.data]);
 
@@ -517,6 +523,8 @@ function WhatsAppTab() {
           devices: form.devices
             .map((d, i) => ({ device_id: d.device_id.trim(), label: d.label.trim(), priority: i }))
             .filter((d) => d.device_id !== ""),
+          bot_enabled: form.bot_enabled,
+          bot_device_id: form.bot_device_id.trim() || undefined,
         }),
       }),
     onSuccess: (data) => {
@@ -755,6 +763,79 @@ function WhatsAppTab() {
             <p className="mt-1 text-xs text-[var(--muted)]">
               Kosongkan device ID untuk memakai device default gateway (bila gateway hanya punya satu nomor).
             </p>
+          </div>
+
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Bot WhatsApp pelanggan</p>
+                <p className="text-[10px] text-[var(--muted)]">
+                  Jawab <code>/tagihan</code> · <code>/link</code> · <code>/qris</code> bila ada tagihan berjalan
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.bot_enabled}
+                  onChange={(e) => setForm({ ...form, bot_enabled: e.target.checked })}
+                />
+                Aktif
+              </label>
+            </div>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Nomor bot (device ID)</span>
+              <select
+                className="input"
+                value={form.bot_device_id}
+                onChange={(e) => setForm({ ...form, bot_device_id: e.target.value })}
+              >
+                <option value="">— Nomor pertama / default —</option>
+                {form.devices
+                  .map((d) => d.device_id.trim())
+                  .filter((id) => id !== "")
+                  .map((id) => {
+                    const dev = form.devices.find((d) => d.device_id.trim() === id);
+                    const label = dev?.label?.trim();
+                    return (
+                      <option key={id} value={id}>
+                        {label ? `${id} · ${label}` : id}
+                      </option>
+                    );
+                  })}
+              </select>
+              <span className="text-[11px] text-[var(--muted)]">
+                Bot hanya membalas dari nomor ini. Di dashboard gateway, arahkan webhook device ini ke URL di bawah
+                dengan event <code>message</code>.
+              </span>
+            </label>
+            <label className="mt-2 grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Webhook URL bot</span>
+              <div className="flex gap-2">
+                <input
+                  className="input min-w-0 flex-1 font-mono text-xs"
+                  readOnly
+                  value={typeof window === "undefined" ? "/api/webhooks/whatsapp" : `${window.location.origin}/api/webhooks/whatsapp`}
+                />
+                <IconButton
+                  label="Salin webhook URL"
+                  onClick={() => {
+                    const url = `${window.location.origin}/api/webhooks/whatsapp`;
+                    void navigator.clipboard
+                      .writeText(url)
+                      .then(() => toastSuccess("Webhook URL disalin"))
+                      .catch(() => toastError("Gagal menyalin. Salin manual dari kolom URL."));
+                  }}
+                >
+                  <IconCopy />
+                </IconButton>
+              </div>
+            </label>
+            <ul className="mt-2 space-y-1 text-[11px] leading-relaxed text-[var(--muted)]">
+              <li><code>/tagihan</code> — kirim PDF tagihan berjalan.</li>
+              <li><code>/link</code> — kirim link bayar online.</li>
+              <li><code>/qris</code> — kirim QR bayar langsung (fallback ke link bila QR tidak tersedia).</li>
+              <li>Perintah lain tidak dibalas. Tanpa tagihan berjalan, bot membalas info lunas/belum terbit.</li>
+            </ul>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
