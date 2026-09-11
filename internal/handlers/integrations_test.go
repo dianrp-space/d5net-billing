@@ -22,49 +22,6 @@ func TestOriginFromReferer(t *testing.T) {
 	}
 }
 
-func TestPaymentViewReturnsDecryptedSecretsAndAppWebhookURL(t *testing.T) {
-	enc, err := auth.NewEncryptor("01234567890123456789012345678901")
-	if err != nil {
-		t.Fatal(err)
-	}
-	apiKey, err := enc.EncryptString("drp_live_saved")
-	if err != nil {
-		t.Fatal(err)
-	}
-	secret, err := enc.EncryptString("whsec_saved")
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := &Deps{Encryptor: enc}
-	view := paymentView(context.Background(), d, xid.Nil(), paymentIntegrationStored{
-		APIKey:        apiKey,
-		WebhookSecret: secret,
-		Enabled:       true,
-	}, "http://localhost:5173", "", "", "", "127.0.0.1:8080")
-	if view.APIKey != "drp_live_saved" {
-		t.Fatalf("api_key = %q", view.APIKey)
-	}
-	if view.WebhookSecret != "whsec_saved" {
-		t.Fatalf("webhook_secret = %q", view.WebhookSecret)
-	}
-	wantURL := "http://localhost:5173/api/webhooks/payment/drp"
-	if view.WebhookURL != wantURL {
-		t.Fatalf("webhook_url = %q, want %q", view.WebhookURL, wantURL)
-	}
-	if view.ExpiresInMinutes != 15 {
-		t.Fatalf("ttl default = %d", view.ExpiresInMinutes)
-	}
-	viewTTL := paymentView(context.Background(), d, xid.Nil(), paymentIntegrationStored{
-		APIKey:           apiKey,
-		WebhookSecret:    secret,
-		ExpiresInMinutes: 1440,
-		Enabled:          true,
-	}, "http://localhost:5173", "", "", "", "127.0.0.1:8080")
-	if viewTTL.ExpiresInMinutes != 1440 {
-		t.Fatalf("ttl = %d", viewTTL.ExpiresInMinutes)
-	}
-}
-
 func TestDuitkuViewReturnsDecryptedKeyAndCallbackURL(t *testing.T) {
 	enc, err := auth.NewEncryptor("01234567890123456789012345678901")
 	if err != nil {
@@ -93,14 +50,11 @@ func TestDuitkuViewReturnsDecryptedKeyAndCallbackURL(t *testing.T) {
 	if view.MerchantCode != "D1234" {
 		t.Fatalf("merchant = %q", view.MerchantCode)
 	}
-	if normalizePaymentProviderName("pop") != "duitku" || normalizePaymentProviderName("qris") != "drp" {
+	if normalizePaymentProviderName("pop") != "duitku" || normalizePaymentProviderName("") != "duitku" {
 		t.Fatal("normalize aliases")
 	}
 	if paymentWebhookPathFor("duitku") != "/api/webhooks/payment/duitku" {
 		t.Fatalf("duitku path = %q", paymentWebhookPathFor("duitku"))
-	}
-	if paymentWebhookPathFor("drp") != "/api/webhooks/payment/drp" {
-		t.Fatalf("drp path = %q", paymentWebhookPathFor("drp"))
 	}
 }
 

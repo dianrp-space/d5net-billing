@@ -2,19 +2,19 @@
 # Update produksi (idempotent): git pull → build jika ada perubahan → migrate → restart bila perlu.
 #
 # Semua path di folder situs (user dianrp):
-#   APP_DIR=/www/wwwroot/billing.dianrp.com
+#   APP_DIR=/www/wwwroot/delimanet.dianrp.com
 #   WEB_ROOT=$APP_DIR/web/dist
 #   binary    → $APP_DIR/bin
 #   env       → $APP_DIR/.env
 #   data      → $APP_DIR/data
 #
 # Jalankan sebagai root:
-#   sudo bash /www/wwwroot/billing.dianrp.com/deploy/scripts/update.sh
+#   sudo bash /www/wwwroot/delimanet.dianrp.com/deploy/scripts/update.sh
 #
 # Paksa ulang: FORCE_NPM=1 FORCE_WEB=1 FORCE_GO=1 FORCE_RESTART=1
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/www/wwwroot/billing.dianrp.com}"
+APP_DIR="${APP_DIR:-/www/wwwroot/delimanet.dianrp.com}"
 WEB_ROOT="${WEB_ROOT:-${APP_DIR}/web/dist}"
 BIN_DIR="${BIN_DIR:-${APP_DIR}/bin}"
 ENV_FILE="${ENV_FILE:-${APP_DIR}/.env}"
@@ -23,8 +23,8 @@ CACHE_DIR="${CACHE_DIR:-${APP_DIR}/.update-cache}"
 APP_USER="${APP_USER:-dianrp}"
 BRANCH="${BRANCH:-main}"
 REMOTE="${REMOTE:-origin}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8087/api/health}"
-SERVICES="${SERVICES:-drp-api drp-worker}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8088/api/health}"
+SERVICES="${SERVICES:-d5net-billing-api d5net-billing-worker}"
 FORCE_NPM="${FORCE_NPM:-0}"
 FORCE_WEB="${FORCE_WEB:-0}"
 FORCE_GO="${FORCE_GO:-0}"
@@ -114,7 +114,7 @@ need_cmd curl
 need_cmd sha256sum
 need_cmd find
 
-exec 9>"/tmp/drp-billing-update.lock"
+exec 9>"/tmp/d5net-billing-update.lock"
 flock -n 9 || die "update lain sedang berjalan"
 
 cd "${APP_DIR}"
@@ -166,18 +166,18 @@ if [[ "${FORCE_GO}" == "1" ]]; then
 elif ! stamp_ok "${CACHE_DIR}/go-build" "${go_digest}"; then
   need_go=1
 else
-  for b in drp-api drp-worker drp-migrate drpctl; do
+  for b in d5net-billing-api d5net-billing-worker drp-migrate drpctl; do
     [[ -x "${BIN_DIR}/${b}" ]] || need_go=1
   done
 fi
 if [[ "${need_go}" -eq 0 ]]; then
   printf '    skip go build (sumber Go tidak berubah)\n'
 else
-  as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-api" ./cmd/api
-  as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-worker" ./cmd/worker
+  as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/d5net-billing-api" ./cmd/api
+  as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/d5net-billing-worker" ./cmd/worker
   as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drp-migrate" ./cmd/migrate
   as_app env CGO_ENABLED=0 GOTOOLCHAIN="${GOTOOLCHAIN}" go build -trimpath -ldflags="-s -w" -o "${BIN_DIR}/drpctl" ./cmd/drpctl
-  chmod 0755 "${BIN_DIR}/drp-api" "${BIN_DIR}/drp-worker" "${BIN_DIR}/drp-migrate" "${BIN_DIR}/drpctl"
+  chmod 0755 "${BIN_DIR}/d5net-billing-api" "${BIN_DIR}/d5net-billing-worker" "${BIN_DIR}/drp-migrate" "${BIN_DIR}/drpctl"
   write_stamp "${CACHE_DIR}/go-build" "${go_digest}"
   rebuilt_go=1
 fi

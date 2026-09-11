@@ -7,7 +7,6 @@ import { PortalPayHost } from "./PayMethodDialog";
 import { isInvoiceUnpaid, type PayableInvoice } from "./payMethod";
 
 type PublicTenant = {
-  slug: string;
   name: string;
   app_name?: string;
   logo_url?: string | null;
@@ -32,7 +31,7 @@ type IsolirSession = {
 };
 
 /** Public isolir portal: login singkat → daftar tagihan unpaid. */
-export function IsolirPortalPage({ slug }: { slug: string }) {
+export function IsolirPortalPage() {
   const [tenant, setTenant] = useState<PublicTenant | null>(null);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -68,7 +67,7 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
     let cancelled = false;
     (async () => {
       try {
-        const t = await api<PublicTenant>(`/api/public/tenants/${encodeURIComponent(slug)}`);
+        const t = await api<PublicTenant>("/api/public/branding");
         if (!cancelled) {
           setTenant(t);
           applyBrandingMeta({
@@ -78,13 +77,13 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
           });
         }
       } catch {
-        if (!cancelled) setErr("Tenant tidak ditemukan.");
+        if (!cancelled) setErr("Provider tidak ditemukan.");
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, []);
 
   async function onLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -99,12 +98,12 @@ export function IsolirPortalPage({ slug }: { slug: string }) {
         portal_token?: string;
       }>("/api/portal/login", {
         method: "POST",
-        body: JSON.stringify({ phone, password, tenant_slug: slug }),
+        body: JSON.stringify({ phone, password }),
       });
       setSession({
         customer: data.customer,
         invoices: (data.invoices || []).filter(isInvoiceUnpaid),
-        tenant_slug: data.tenant_slug || slug,
+        tenant_slug: data.tenant_slug || "",
         tenant_name: data.tenant_name || tenant?.name || "",
         portal_token: data.portal_token,
       });

@@ -3,9 +3,6 @@ package payment
 import "testing"
 
 func TestMethodFromProvider(t *testing.T) {
-	if got := MethodFromProvider("drp"); got != MethodQRIS {
-		t.Fatalf("drp: %q", got)
-	}
 	if got := MethodFromProvider("qris"); got != MethodQRIS {
 		t.Fatalf("qris: %q", got)
 	}

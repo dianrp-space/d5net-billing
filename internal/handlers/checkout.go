@@ -38,7 +38,7 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	}
 	providerName = normalizePaymentProviderName(providerName)
 	if providerName == payment.ProviderManual {
-		return nil, httpx.BadRequest("gunakan pembayaran online (QRIS / Duitku)")
+		return nil, httpx.BadRequest("gunakan pembayaran online (Duitku)")
 	}
 	if existing, err := d.Store.GetLatestPendingPaymentIntent(ctx, tid, inv.ID, providerName); err == nil && existing != nil && existing.Amount == amount {
 		if existing.QRString != "" || strings.TrimSpace(existing.CheckoutURL) != "" {

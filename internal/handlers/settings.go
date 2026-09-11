@@ -207,81 +207,16 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 	})
 }
 
-func registerPlatformBranding(api huma.API, d *Deps) {
-	huma.Register(api, huma.Operation{
-		OperationID: "get-platform-branding", Method: http.MethodGet, Path: "/api/platform/branding",
-		Tags: []string{"Platform"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body store.Branding }, error) {
-		if err := requirePlatform(ctx); err != nil {
-			return nil, err
-		}
-		b, err := d.Store.GetPlatformBranding(ctx)
-		if err != nil {
-			return nil, httpx.Internal(err)
-		}
-		return &struct{ Body store.Branding }{Body: *b}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "put-platform-branding", Method: http.MethodPut, Path: "/api/platform/branding",
-		Tags: []string{"Platform"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, input *struct {
-		Body struct {
-			AppName              string  `json:"app_name"`
-			LogoURL              *string `json:"logo_url,omitempty"`
-			FaviconURL           *string `json:"favicon_url,omitempty"`
-			MapPopIconURL        *string `json:"map_pop_icon_url,omitempty"`
-			MapODPIconURL        *string `json:"map_odp_icon_url,omitempty"`
-			MapCustomerIconURL   *string `json:"map_customer_icon_url,omitempty"`
-			ClearLogo            bool    `json:"clear_logo,omitempty"`
-			ClearFavicon         bool    `json:"clear_favicon,omitempty"`
-			ClearMapPopIcon      bool    `json:"clear_map_pop_icon,omitempty"`
-			ClearMapODPIcon      bool    `json:"clear_map_odp_icon,omitempty"`
-			ClearMapCustomerIcon bool    `json:"clear_map_customer_icon,omitempty"`
-		}
-	}) (*struct{ Body store.Branding }, error) {
-		if err := requirePlatform(ctx); err != nil {
-			return nil, err
-		}
-		cur, err := d.Store.GetPlatformBranding(ctx)
-		if err != nil {
-			return nil, httpx.Internal(err)
-		}
-		b := &store.Branding{AppName: strings.TrimSpace(input.Body.AppName)}
-		if b.AppName == "" {
-			b.AppName = "drp-billing"
-		}
-		b.LogoURL = pickBrandingURL(input.Body.ClearLogo, input.Body.LogoURL, cur.LogoURL)
-		b.FaviconURL = pickBrandingURL(input.Body.ClearFavicon, input.Body.FaviconURL, cur.FaviconURL)
-		b.MapPopIconURL = pickBrandingURL(input.Body.ClearMapPopIcon, input.Body.MapPopIconURL, cur.MapPopIconURL)
-		b.MapODPIconURL = pickBrandingURL(input.Body.ClearMapODPIcon, input.Body.MapODPIconURL, cur.MapODPIconURL)
-		b.MapCustomerIconURL = pickBrandingURL(input.Body.ClearMapCustomerIcon, input.Body.MapCustomerIconURL, cur.MapCustomerIconURL)
-		if err := d.Store.UpdatePlatformBranding(ctx, b); err != nil {
-			return nil, httpx.Internal(err)
-		}
-		out, err := d.Store.GetPlatformBranding(ctx)
-		if err != nil {
-			return nil, httpx.Internal(err)
-		}
-		return &struct{ Body store.Branding }{Body: *out}, nil
-	})
-}
-
 // MountStaticAndUploads serves uploaded assets and registers multipart upload endpoints on chi.
 func MountStaticAndUploads(r chi.Router, d *Deps) {
 	_ = os.MkdirAll(d.Config.UploadDir, 0o755)
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir(d.Config.UploadDir))))
 
-	r.Post("/api/settings/branding/logo", uploadHandler(d, false, "logo"))
-	r.Post("/api/settings/branding/favicon", uploadHandler(d, false, "favicon"))
-	r.Post("/api/settings/branding/map-pop", uploadHandler(d, false, "map-pop"))
-	r.Post("/api/settings/branding/map-odp", uploadHandler(d, false, "map-odp"))
-	r.Post("/api/settings/branding/map-customer", uploadHandler(d, false, "map-customer"))
-	r.Post("/api/platform/branding/logo", uploadHandler(d, true, "logo"))
-	r.Post("/api/platform/branding/favicon", uploadHandler(d, true, "favicon"))
-	r.Post("/api/platform/branding/map-pop", uploadHandler(d, true, "map-pop"))
-	r.Post("/api/platform/branding/map-odp", uploadHandler(d, true, "map-odp"))
-	r.Post("/api/platform/branding/map-customer", uploadHandler(d, true, "map-customer"))
+	r.Post("/api/settings/branding/logo", uploadHandler(d, "logo"))
+	r.Post("/api/settings/branding/favicon", uploadHandler(d, "favicon"))
+	r.Post("/api/settings/branding/map-pop", uploadHandler(d, "map-pop"))
+	r.Post("/api/settings/branding/map-odp", uploadHandler(d, "map-odp"))
+	r.Post("/api/settings/branding/map-customer", uploadHandler(d, "map-customer"))
 	r.Post("/api/work-orders/{id}/photos", workOrderPhotoUpload(d))
 	r.Post("/api/leads/{id}/comments/photos", leadCommentPhotoUpload(d))
 	r.Post("/api/leads/{id}/documents/photos", leadDocumentPhotoUpload(d))
@@ -616,27 +551,18 @@ func workOrderPhotoUpload(d *Deps) http.HandlerFunc {
 	}
 }
 
-func uploadHandler(d *Deps, platform bool, kind string) http.HandlerFunc {
+func uploadHandler(d *Deps, kind string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		var tid xid.ID
-		if platform {
-			if err := requirePlatform(ctx); err != nil {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			// Distinguish auth vs permission so the SPA does not treat 403 as session expiry.
+			if _, ok := tenant.FromContext(ctx); !ok {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
-		} else {
-			id, err := requireSettings(ctx, d)
-			if err != nil {
-				// Distinguish auth vs permission so the SPA does not treat 403 as session expiry.
-				if _, ok := tenant.FromContext(ctx); !ok {
-					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-					return
-				}
-				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
-				return
-			}
-			tid = id
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			return
 		}
 		if err := r.ParseMultipartForm(2 << 20); err != nil {
 			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
@@ -648,27 +574,18 @@ func uploadHandler(d *Deps, platform bool, kind string) http.HandlerFunc {
 			return
 		}
 		defer file.Close()
-		url, err := saveUpload(d, tid, platform, kind, file, header.Filename, header.Size)
+		url, err := saveUpload(d, tid, false, kind, file, header.Filename, header.Size)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
 			return
 		}
-		if platform {
-			cur, _ := d.Store.GetPlatformBranding(ctx)
-			if cur == nil {
-				cur = &store.Branding{AppName: "drp-billing"}
-			}
-			setBrandingURL(cur, kind, &url)
-			_ = d.Store.UpdatePlatformBranding(ctx, cur)
-		} else {
-			raw, err := d.Store.GetTenantBrandingRaw(ctx, tid)
-			if err != nil {
-				http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-				return
-			}
-			setBrandingURL(raw, kind, &url)
-			_ = d.Store.UpdateTenantBranding(ctx, tid, raw)
+		raw, err := d.Store.GetTenantBrandingRaw(ctx, tid)
+		if err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
 		}
+		setBrandingURL(raw, kind, &url)
+		_ = d.Store.UpdateTenantBranding(ctx, tid, raw)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
 	}

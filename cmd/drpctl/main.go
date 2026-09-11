@@ -39,8 +39,6 @@ func main() {
 		createAdmin(ctx, st, os.Args[2:])
 	case "create-tenant":
 		createTenant(ctx, st, os.Args[2:])
-	case "create-platform-admin":
-		createPlatformAdmin(ctx, st, os.Args[2:])
 	case "set-password":
 		setPassword(ctx, st, os.Args[2:])
 	case "import-mysql-customers":
@@ -54,7 +52,6 @@ func main() {
 func printUsage() {
 	fmt.Println(`drpctl commands:
   create-tenant         --slug SLUG --name NAME --email EMAIL --password PASS --full-name NAME
-  create-platform-admin --email EMAIL --password PASS --full-name NAME
   create-admin          --email EMAIL --password PASS --full-name NAME --tenant-id UUID
   set-password          --email EMAIL --password PASS
   import-mysql-customers --mysql-dsn DSN --tenant-id UUID`)
@@ -98,29 +95,8 @@ func createTenant(ctx context.Context, st *store.Store, args []string) {
 		log.Fatal(err)
 	}
 	fmt.Printf("Created tenant id=%s user id=%s\n", tid, uid)
-	fmt.Printf("Admin login: /%s/login\n", *slug)
-	fmt.Printf("Client login: /%s/client/login\n", *slug)
-}
-
-func createPlatformAdmin(ctx context.Context, st *store.Store, args []string) {
-	fs := flag.NewFlagSet("create-platform-admin", flag.ExitOnError)
-	email := fs.String("email", "", "")
-	password := fs.String("password", "", "")
-	fullName := fs.String("full-name", "Platform Admin", "")
-	_ = fs.Parse(args)
-	if *email == "" || *password == "" {
-		log.Fatal("--email and --password required")
-	}
-	hash, err := auth.HashPassword(*password)
-	if err != nil {
-		log.Fatal(err)
-	}
-	id, err := st.CreatePlatformAdmin(ctx, strings.ToLower(strings.TrimSpace(*email)), hash, *fullName)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Created platform admin id=%s email=%s\n", id, *email)
-	fmt.Println("Login: /login")
+	fmt.Println("Admin login: /admin/login")
+	fmt.Println("Client login: /login")
 }
 
 func createAdmin(ctx context.Context, st *store.Store, args []string) {

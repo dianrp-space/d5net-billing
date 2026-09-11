@@ -4,6 +4,7 @@ import { Home, PanelLeft, PanelLeftClose } from "lucide-react";
 import { api, apiDownload, clearClientSession, getClientSession, setClientSession } from "./api";
 import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
 import type { ClientPortalData } from "./TenantLogin";
+import { ClientIdCard } from "./ClientIdCard";
 import { toastError, toastSuccess } from "./swal";
 import { ThemeToggle } from "./ThemeToggle";
 import {
@@ -249,15 +250,14 @@ export function ClientHome({
   const qc = useQueryClient();
 
   const branding = useQuery({
-    queryKey: ["public-tenant-branding", data.tenant_slug],
+    queryKey: ["public-branding"],
     queryFn: () =>
       api<{
         app_name?: string;
         name?: string;
         logo_url?: string | null;
         favicon_url?: string | null;
-      }>(`/api/public/tenants/${encodeURIComponent(data.tenant_slug || "")}`),
-    enabled: Boolean(data.tenant_slug),
+      }>("/api/public/branding"),
     retry: false,
   });
 
@@ -279,6 +279,8 @@ export function ClientHome({
     : data.customer
       ? [{ id: data.customer.id || "", full_name: data.customer.full_name, phone: data.customer.phone, customer_code: data.customer.customer_code }]
       : [];
+  const fullAccounts =
+    data.customers?.length ? data.customers : data.customer ? [data.customer] : [];
   const multi = accounts.length > 1;
   const [pwAccount, setPwAccount] = useState("");
   const [payInv, setPayInv] = useState<PayableInvoice | null>(null);
@@ -659,6 +661,12 @@ export function ClientHome({
                   </div>
                 ) : null}
               </div>
+              <ClientIdCard
+                customer={data.customer ?? null}
+                accounts={fullAccounts}
+                providerName={appName}
+                logoUrl={logoUrl}
+              />
               {isolirSubs.length > 0 || unpaidInvoices.length > 0 ? (
                 <div
                   className="panel-card p-4"

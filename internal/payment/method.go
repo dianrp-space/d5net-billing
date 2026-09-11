@@ -17,7 +17,7 @@ func MethodFromProvider(provider string) string {
 		return ""
 	case ProviderManual, MethodTunai, "cash", "kasir":
 		return MethodTunai
-	case ProviderDRP, MethodQRIS, "qr":
+	case MethodQRIS, "qr":
 		return MethodQRIS
 	case ProviderDuitku, "duitku_pop", "duitkupop":
 		return ProviderDuitku

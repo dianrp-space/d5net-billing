@@ -1,14 +1,14 @@
 [Unit]
-Description=drp-billing API Server
+Description=d5net-billing API Server
 After=network.target postgresql.service
 Wants=postgresql.service
 
 [Service]
 Type=simple
 User=dianrp
-WorkingDirectory=/www/wwwroot/billing.dianrp.com
-EnvironmentFile=/www/wwwroot/billing.dianrp.com/.env
-ExecStart=/www/wwwroot/billing.dianrp.com/bin/drp-api
+WorkingDirectory=/www/wwwroot/delimanet.dianrp.com
+EnvironmentFile=/www/wwwroot/delimanet.dianrp.com/.env
+ExecStart=/www/wwwroot/delimanet.dianrp.com/bin/d5net-billing-api
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
@@ -16,7 +16,7 @@ LimitNOFILE=65535
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/www/wwwroot/billing.dianrp.com/data
+ReadWritePaths=/www/wwwroot/delimanet.dianrp.com/data
 PrivateTmp=true
 
 [Install]

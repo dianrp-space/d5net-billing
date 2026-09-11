@@ -19,11 +19,6 @@ export type PayMethodDef = {
 
 export const PORTAL_PAY_METHODS: PayMethodDef[] = [
   {
-    id: PAY_METHOD_QRIS,
-    label: "QRIS",
-    description: "Scan QR dengan e-wallet atau m-banking",
-  },
-  {
     id: PAY_METHOD_DUITKU,
     label: "Duitku Payment Gateway",
     description: "Popup pembayaran Duitku (VA, e-wallet, retail, QRIS)",
@@ -64,7 +59,9 @@ export function providerToPayMethod(provider?: string | null): PayMethodId | nul
 }
 
 export function payMethodToProvider(method: PayMethodId): string {
-  if (method === PAY_METHOD_QRIS) return "drp";
+  // QRIS khusus (gateway lama) sudah dihapus — fallback ke Duitku agar tidak
+  // ada request provider "drp" yang tidak dikenal backend.
+  if (method === PAY_METHOD_QRIS) return PAY_METHOD_DUITKU;
   return method;
 }
 
@@ -89,7 +86,7 @@ export function paymentMethodLabel(method?: string | null) {
   if (!key) return "—";
   const fromCatalog = PORTAL_PAY_METHODS.find((m) => m.id === key);
   if (fromCatalog) return fromCatalog.label;
-  if (key === "drp" || key === "qr") return "QRIS";
+  if (key === "drp" || key === "qr" || key === PAY_METHOD_QRIS) return "QRIS";
   if (key === "duitku_pop" || key === "duitkupop" || key === "pop") return "Duitku Payment Gateway";
   if (key === PAY_METHOD_TUNAI || key === "cash" || key === "kasir" || key === "manual") return "Tunai";
   if (key === PAY_METHOD_TRANSFER || key === "bank" || key === "va") return "Transfer";
@@ -103,7 +100,7 @@ export function getSavedPayMethod(slug?: string): PayMethodId {
   } catch {
     /* private mode */
   }
-  return PAY_METHOD_QRIS;
+  return PAY_METHOD_DUITKU;
 }
 
 export function setSavedPayMethod(id: PayMethodId, slug?: string) {

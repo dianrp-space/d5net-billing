@@ -12,10 +12,10 @@ deps:
 build: api worker migrate drpctl
 
 api:
-	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/drp-api ./cmd/api
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/d5net-billing-api ./cmd/api
 
 worker:
-	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/drp-worker ./cmd/worker
+	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/d5net-billing-worker ./cmd/worker
 
 migrate:
 	CGO_ENABLED=0 go build $(GOFLAGS) -o bin/drp-migrate ./cmd/migrate
@@ -36,12 +36,12 @@ clean:
 	rm -rf bin/ web/dist/
 
 release: build web
-	mkdir -p dist/drp-billing-$(VERSION)
-	cp bin/drp-api bin/drp-worker dist/drp-billing-$(VERSION)/
-	cp -r migrations dist/drp-billing-$(VERSION)/
-	cp -r web/dist dist/drp-billing-$(VERSION)/web-dist
-	cp deploy/scripts/*.sh dist/drp-billing-$(VERSION)/
-	cp .env.example dist/drp-billing-$(VERSION)/
+	mkdir -p dist/d5net-billing-$(VERSION)
+	cp bin/d5net-billing-api bin/d5net-billing-worker dist/d5net-billing-$(VERSION)/
+	cp -r migrations dist/d5net-billing-$(VERSION)/
+	cp -r web/dist dist/d5net-billing-$(VERSION)/web-dist
+	cp deploy/scripts/*.sh dist/d5net-billing-$(VERSION)/
+	cp .env.example dist/d5net-billing-$(VERSION)/
 
 dev:
 	@chmod +x scripts/dev.sh

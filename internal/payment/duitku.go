@@ -19,14 +19,15 @@ const (
 	DuitkuSandboxBaseURL    = "https://api-sandbox.duitku.com"
 	DuitkuProductionBaseURL = "https://api-prod.duitku.com"
 	DefaultDuitkuExpiryMin  = 60
+	MaxDuitkuExpiryMinutes  = 1440
 )
 
 func ClampDuitkuExpiryMinutes(n int) int {
 	if n < 1 {
 		return DefaultDuitkuExpiryMin
 	}
-	if n > MaxQRISExpiresMinutes {
-		return MaxQRISExpiresMinutes
+	if n > MaxDuitkuExpiryMinutes {
+		return MaxDuitkuExpiryMinutes
 	}
 	return n
 }

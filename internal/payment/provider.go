@@ -13,7 +13,6 @@ import (
 	"github.com/dianrp/drp-billing/internal/xid"
 )
 
-const ProviderDRP = "drp"
 const ProviderManual = "manual"
 
 type IntentRequest struct {
@@ -91,25 +90,12 @@ type Registry struct {
 	providers map[string]Provider
 }
 
-// NewRegistry always registers Manual. DRP Payment is registered when apiKey is non-empty.
-func NewRegistry(drpAPIKey, drpWebhookSecret, drpBaseURL string) *Registry {
-	return NewRegistryWithTTL(drpAPIKey, drpWebhookSecret, drpBaseURL, DefaultQRISExpiresMinutes)
-}
-
-func NewRegistryWithTTL(drpAPIKey, drpWebhookSecret, drpBaseURL string, expiresInMinutes int) *Registry {
+// NewRegistry registers the manual provider. Online gateways (Duitku) are
+// resolved per provider from the tenant's integration settings at call time.
+func NewRegistry() *Registry {
 	r := &Registry{providers: make(map[string]Provider)}
 	r.Register(&ManualProvider{})
-	if strings.TrimSpace(drpAPIKey) != "" {
-		p := NewDRPProvider(drpBaseURL, drpAPIKey, drpWebhookSecret)
-		p.ExpiresInMinutes = ClampQRISExpiresMinutes(expiresInMinutes)
-		r.Register(p)
-	}
 	return r
-}
-
-// NewRegistryFromEnv is an alias for NewRegistry using gateway keys from config/env.
-func NewRegistryFromEnv(drpAPIKey, drpWebhookSecret, drpBaseURL string) *Registry {
-	return NewRegistry(drpAPIKey, drpWebhookSecret, drpBaseURL)
 }
 
 func (r *Registry) Register(p Provider) {
@@ -186,4 +172,13 @@ func bearerToken(headers map[string]string) string {
 		return strings.TrimSpace(raw[7:])
 	}
 	return raw
+}
+
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
 }

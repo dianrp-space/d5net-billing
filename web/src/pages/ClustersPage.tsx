@@ -210,7 +210,7 @@ export function ClustersPage() {
       }
     >
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Satu tenant bisa punya banyak POP/cluster. Isi lat/long agar muncul di peta, dan radius coverage (km) untuk
+        Bisa punya banyak POP/cluster. Isi lat/long agar muncul di peta, dan radius coverage (km) untuk
         cek jangkauan sales di menu Coverage.
         Placeholder kode: <code className="text-xs">{"{prefix}"}</code>, <code className="text-xs">{"{yyyymm}"}</code>,{" "}
         <code className="text-xs">{"{seq}"}</code>.

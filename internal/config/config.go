@@ -10,7 +10,7 @@ import (
 
 type Config struct {
 	AppEnv                     string        `env:"APP_ENV" envDefault:"development"`
-	HTTPAddr                   string        `env:"HTTP_ADDR" envDefault:"0.0.0.0:8087"`
+	HTTPAddr                   string        `env:"HTTP_ADDR" envDefault:"0.0.0.0:8088"`
 	DatabaseURL                string        `env:"DATABASE_URL,required"`
 	JWTSecret                  string        `env:"JWT_SECRET,required"`
 	JWTAccessTTL               time.Duration `env:"JWT_ACCESS_TTL" envDefault:"15m"`
@@ -21,10 +21,6 @@ type Config struct {
 	RouterBackupDir            string        `env:"ROUTER_BACKUP_DIR" envDefault:"./data/router-backups"`
 	DBBackupDir                string        `env:"DB_BACKUP_DIR" envDefault:"./data/db-backups"`
 	WorkerEnabled              bool          `env:"WORKER_ENABLED" envDefault:"true"`
-	DRPPaymentBaseURL          string        `env:"DRP_PAYMENT_BASE_URL" envDefault:"https://payment.dianrp.com"`
-	DRPPaymentAPIKey           string        `env:"DRP_PAYMENT_API_KEY"`
-	DRPPaymentWebhookSecret    string        `env:"DRP_PAYMENT_WEBHOOK_SECRET"`
-	DRPPaymentExpiresInMinutes int           `env:"DRP_PAYMENT_EXPIRES_IN_MINUTES" envDefault:"15"`
 }
 
 func Load() (*Config, error) {

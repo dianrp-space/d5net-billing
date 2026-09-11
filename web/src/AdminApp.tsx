@@ -248,15 +248,14 @@ export function AdminApp({
   onLogout: () => void;
 }) {
   const branding = useQuery({
-    queryKey: ["public-tenant-branding", tenantSlug],
+    queryKey: ["public-branding"],
     queryFn: () =>
       api<{
         app_name?: string;
         logo_url?: string | null;
         favicon_url?: string | null;
         name?: string;
-      }>(`/api/public/tenants/${encodeURIComponent(tenantSlug || "")}`),
-    enabled: Boolean(tenantSlug),
+      }>("/api/public/branding"),
     retry: false,
   });
   const meQ = useQuery({
@@ -296,7 +295,7 @@ export function AdminApp({
     }
   }, [meQ.data, page, onNavigate]);
 
-  const appName = (branding.data?.name || branding.data?.app_name || tenantSlug || "drp-billing").trim();
+  const appName = (branding.data?.name || branding.data?.app_name || "drp-billing").trim();
   const logoUrl = branding.data?.logo_url;
   const faviconUrl = branding.data?.favicon_url;
   const [sidebarOpen, setSidebarOpenState] = useState(() => getSidebarOpen());
@@ -541,7 +540,7 @@ export function AdminApp({
               {page === "resellers" && <ResellersPage />}
               {page === "general" && <GeneralSettingsPage />}
               {page === "invoice-format" && <InvoiceSettingsPage />}
-              {page === "isolir-template" && <IsolirTemplatePage tenantSlug={tenantSlug} />}
+              {page === "isolir-template" && <IsolirTemplatePage />}
               {page === "jobs" && <JobsSettingsPage />}
               {page === "notifications" && <NotificationsPage />}
               {page === "roles" && <RolesSettingsPage />}

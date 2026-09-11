@@ -77,13 +77,11 @@ export function initTheme() {
   applyTheme(getStoredTheme());
 }
 
-/** Loads tenant primary color for login / admin / portal / isolir. */
-export function TenantAccent({ slug }: { slug: string }) {
+/** Loads provider primary color for login / admin / portal / isolir. */
+export function TenantAccent() {
   const q = useQuery({
-    queryKey: ["public-tenant-branding", slug],
-    queryFn: () =>
-      api<{ primary_color?: string | null }>(`/api/public/tenants/${encodeURIComponent(slug)}`),
-    enabled: Boolean(slug),
+    queryKey: ["public-branding"],
+    queryFn: () => api<{ primary_color?: string | null }>("/api/public/branding"),
     retry: false,
   });
 

@@ -17,9 +17,9 @@ id "${APP_USER}" &>/dev/null || useradd --system --home "${APP_ROOT}" --shell /u
 mkdir -p "${RELEASE_DIR}" "${APP_ROOT}" /var/lib/drp-billing/{uploads,exports,router-backups} /var/log/drp-billing /etc/drp-billing
 chown -R "${APP_USER}:${APP_USER}" "${APP_ROOT}" /var/lib/drp-billing /var/log/drp-billing
 
-cp drp-api drp-worker "${RELEASE_DIR}/"
+cp d5net-billing-api d5net-billing-worker "${RELEASE_DIR}/"
 cp -r migrations "${RELEASE_DIR}/"
-chmod +x "${RELEASE_DIR}/drp-api" "${RELEASE_DIR}/drp-worker"
+chmod +x "${RELEASE_DIR}/d5net-billing-api" "${RELEASE_DIR}/d5net-billing-worker"
 chown -R "${APP_USER}:${APP_USER}" "${RELEASE_DIR}"
 
 ln -sfn "${RELEASE_DIR}" "${APP_ROOT}/current"
@@ -38,16 +38,16 @@ fi
 echo "==> Running migrations"
 sudo -u "${APP_USER}" env $(grep -v '^#' "${ENV_FILE}" | xargs) \
   MIGRATIONS_DIR="${RELEASE_DIR}/migrations" \
-  "${RELEASE_DIR}/drp-api" --help 2>/dev/null || true
+  "${RELEASE_DIR}/d5net-billing-api" --help 2>/dev/null || true
 
 export DATABASE_URL
 DATABASE_URL=$(grep DATABASE_URL "${ENV_FILE}" | cut -d= -f2-)
 MIGRATIONS_DIR="${RELEASE_DIR}/migrations" go run ./cmd/migrate up 2>/dev/null || \
   echo "Run migrations manually: MIGRATIONS_DIR=${RELEASE_DIR}/migrations DATABASE_URL=... ./drp-migrate up"
 
-cp deploy/systemd/drp-api.service deploy/systemd/drp-worker.service /etc/systemd/system/
+cp deploy/systemd/d5net-billing-api.service deploy/systemd/d5net-billing-worker.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable drp-api drp-worker
-systemctl restart drp-api drp-worker
+systemctl enable d5net-billing-api d5net-billing-worker
+systemctl restart d5net-billing-api d5net-billing-worker
 
 echo "==> Install complete. Configure Nginx via aaPanel using deploy/nginx/drp-billing.conf"

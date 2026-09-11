@@ -218,7 +218,7 @@ export function JobsSettingsPage() {
     const ok = await confirm({
       title: "Jalankan worker sekarang?",
       description:
-        "Tagihan jatuh tempo, auto isolir, pengingat, dan antrian notifikasi tenant ini akan diproses segera — tidak menunggu interval.",
+        "Tagihan jatuh tempo, auto isolir, pengingat, dan antrian notifikasi akan diproses segera — tidak menunggu interval.",
       confirmLabel: "Jalankan",
     });
     if (!ok) return;

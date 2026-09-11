@@ -446,7 +446,7 @@ export function AccountingPage() {
 
         <TabsContent value="coa" className="space-y-4">
           <p className="text-sm text-[var(--muted)]">
-            Chart of accounts tenant. Digunakan untuk jurnal pembayaran (kas &amp; pendapatan).
+            Chart of accounts. Digunakan untuk jurnal pembayaran (kas &amp; pendapatan).
           </p>
           <Table
             columns={["Kode", "Nama", "Tipe"]}

@@ -62,7 +62,7 @@ func main() {
 
 	billingEngine := billing.New(st)
 	notifySvc := notify.NewService(st).WithDecryptor(encryptor.DecryptString)
-	payments := payment.NewRegistryWithTTL(cfg.DRPPaymentAPIKey, cfg.DRPPaymentWebhookSecret, cfg.DRPPaymentBaseURL, cfg.DRPPaymentExpiresInMinutes)
+	payments := payment.NewRegistry()
 	provReg := provisioner.NewRegistry(st, encryptor)
 	jobsWorker := job.NewWorker(st, billingEngine, notifySvc, monitor.NewPoller(st, encryptor, 0).WithNotify(notifySvc), provReg)
 

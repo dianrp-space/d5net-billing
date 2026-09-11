@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, getPlatformToken, getToken } from "./api";
+import { api, getToken } from "./api";
 import { useAppDialog } from "./confirm";
 import { IconDownload, IconTrash, IconUpload } from "./icons";
 import { toastError, toastSuccess } from "./swal";
@@ -19,8 +19,8 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-async function downloadBackup(url: string, filename: string, platform: boolean) {
-  const token = platform ? getPlatformToken() : getToken();
+async function downloadBackup(url: string, filename: string) {
+  const token = getToken();
   const res = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     credentials: "include",
@@ -37,8 +37,8 @@ async function downloadBackup(url: string, filename: string, platform: boolean) 
   URL.revokeObjectURL(a.href);
 }
 
-async function uploadRestore(url: string, file: File, platform: boolean) {
-  const token = platform ? getPlatformToken() : getToken();
+async function uploadRestore(url: string, file: File) {
+  const token = getToken();
   const body = new FormData();
   body.append("file", file);
   body.append("confirm", "true");
@@ -60,22 +60,22 @@ async function uploadRestore(url: string, file: File, platform: boolean) {
   }
 }
 
-export function BackupRestorePage({ platform = false }: { platform?: boolean }) {
+export function BackupRestorePage() {
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
-  const base = platform ? "/api/platform/db-backups" : "/api/db-backups";
-  const qKey = platform ? ["platform-db-backups"] : ["tenant-db-backups"];
+  const base = "/api/db-backups";
+  const qKey = ["tenant-db-backups"];
 
   const list = useQuery({
     queryKey: qKey,
-    queryFn: () => api<BackupFile[]>(base, {}, { platform }),
+    queryFn: () => api<BackupFile[]>(base),
   });
 
   const create = useMutation({
-    mutationFn: () => api<BackupFile>(base, { method: "POST", body: "{}" }, { platform }),
+    mutationFn: () => api<BackupFile>(base, { method: "POST", body: "{}" }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qKey });
       void toastSuccess("Backup dibuat");
@@ -84,7 +84,7 @@ export function BackupRestorePage({ platform = false }: { platform?: boolean }) 
   });
 
   const remove = useMutation({
-    mutationFn: (name: string) => api(`${base}/${encodeURIComponent(name)}`, { method: "DELETE" }, { platform }),
+    mutationFn: (name: string) => api(`${base}/${encodeURIComponent(name)}`, { method: "DELETE" }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qKey });
       void toastSuccess("Backup dihapus");
@@ -97,7 +97,7 @@ export function BackupRestorePage({ platform = false }: { platform?: boolean }) 
       api(`${base}/restore`, {
         method: "POST",
         body: JSON.stringify({ name, confirm: true }),
-      }, { platform }),
+      }),
     onSuccess: () => void toastSuccess("Restore selesai"),
     onError: (e: Error) => void toastError(e.message),
   });
@@ -110,7 +110,7 @@ export function BackupRestorePage({ platform = false }: { platform?: boolean }) 
       <IconButton
         label="Unduh"
         onClick={() => {
-          void downloadBackup(`${base}/${encodeURIComponent(f.name)}/download`, f.name, platform).catch((e: Error) =>
+          void downloadBackup(`${base}/${encodeURIComponent(f.name)}/download`, f.name).catch((e: Error) =>
             toastError(e.message),
           );
         }}
@@ -121,10 +121,8 @@ export function BackupRestorePage({ platform = false }: { platform?: boolean }) 
         label="Restore"
         onClick={async () => {
           const ok = await confirm({
-            title: "Restore database?",
-            description: platform
-              ? `Ini akan menimpa SELURUH database dari ${f.name}. Tidak bisa dibatalkan.`
-              : `Ini akan menimpa data tenant dari ${f.name}. Tidak bisa dibatalkan.`,
+            title: "Restore data?",
+            description: `Ini akan menimpa data dari ${f.name}. Tidak bisa dibatalkan.`,
             confirmLabel: "Restore",
             danger: true,
           });
@@ -154,11 +152,9 @@ export function BackupRestorePage({ platform = false }: { platform?: boolean }) 
   ]);
 
   return (
-    <Section title={platform ? "Backup / Restore Database" : "Backup / Restore Data Tenant"}>
+    <Section title="Backup / Restore Data">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        {platform
-          ? "Backup penuh via pg_dump (.sql.gz). Restore memakai psql dan menimpa seluruh database."
-          : "Export JSON data tenant (tabel ber-tenant_id). Restore menimpa data tenant ini saja."}
+        Export JSON data aplikasi. Restore menimpa data yang ada.
       </p>
       <div className="mb-4 flex flex-wrap gap-2">
         <button type="button" className="btn" disabled={create.isPending} onClick={() => create.mutate()}>
@@ -176,23 +172,21 @@ export function BackupRestorePage({ platform = false }: { platform?: boolean }) 
           ref={fileRef}
           type="file"
           className="hidden"
-          accept={platform ? ".sql,.gz,.sql.gz" : ".json,.gz,.json.gz"}
+          accept=".json,.gz,.json.gz"
           onChange={async (e) => {
             const file = e.target.files?.[0];
             e.target.value = "";
             if (!file) return;
             const ok = await confirm({
               title: "Restore dari file?",
-              description: platform
-                ? `File ${file.name} akan menimpa seluruh database.`
-                : `File ${file.name} akan menimpa data tenant.`,
+              description: `File ${file.name} akan menimpa data aplikasi.`,
               confirmLabel: "Restore",
               danger: true,
             });
             if (!ok) return;
             setBusy(true);
             try {
-              await uploadRestore(`${base}/restore-upload`, file, platform);
+              await uploadRestore(`${base}/restore-upload`, file);
               void qc.invalidateQueries({ queryKey: qKey });
               void toastSuccess("Restore selesai");
             } catch (err) {

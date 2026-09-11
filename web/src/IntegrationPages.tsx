@@ -17,21 +17,6 @@ type OutboundWebhook = {
   is_active: boolean;
 };
 
-type PaymentIntegration = {
-  configured: boolean;
-  enabled: boolean;
-  base_url: string;
-  method: string;
-  provider: string;
-  env_fallback: boolean;
-  api_key?: string;
-  webhook_secret?: string;
-  expires_in_minutes: number;
-  webhook_path: string;
-  webhook_url: string;
-  webhook_base_hint: string;
-};
-
 type DuitkuIntegration = {
   configured: boolean;
   enabled: boolean;
@@ -63,7 +48,7 @@ const TTL_PRESETS = [
   { minutes: 1440, label: "24 jam" },
 ];
 
-function paymentWebhookDisplayURL(path?: string, fallback = "/api/webhooks/payment/drp") {
+function paymentWebhookDisplayURL(path?: string, fallback = "/api/webhooks/payment/duitku") {
   const raw = path || fallback;
   if (/^https?:\/\//i.test(raw)) return raw;
   const normalized = raw.startsWith("/") ? raw : `/${raw}`;
@@ -169,7 +154,7 @@ export function WebhooksIntegrationPage() {
         }
       >
         <p className="mb-3 text-sm text-[var(--muted)]">
-          Kirim event tenant ke URL eksternal (mis. otomasi n8n / Zapier). Secret opsional untuk HMAC.
+          Kirim event ke URL eksternal (mis. otomasi n8n / Zapier). Secret opsional untuk HMAC.
         </p>
         {list.isLoading ? (
           <p className="text-[var(--muted)]">Memuat...</p>
@@ -225,20 +210,9 @@ export function WebhooksIntegrationPage() {
 
 export function PaymentGWPage() {
   const qc = useQueryClient();
-  const q = useQuery({
-    queryKey: ["integration-payment"],
-    queryFn: () => api<PaymentIntegration>("/api/integrations/payment"),
-  });
   const duitkuQ = useQuery({
     queryKey: ["integration-duitku"],
     queryFn: () => api<DuitkuIntegration>("/api/integrations/duitku"),
-  });
-  const [form, setForm] = useState({
-    enabled: false,
-    base_url: "",
-    api_key: "",
-    webhook_secret: "",
-    expires_in_minutes: 15,
   });
   const [duitkuForm, setDuitkuForm] = useState({
     enabled: false,
@@ -247,17 +221,6 @@ export function PaymentGWPage() {
     api_key: "",
     expires_in_minutes: 60,
   });
-
-  useEffect(() => {
-    if (!q.data) return;
-    setForm({
-      enabled: q.data.enabled,
-      base_url: q.data.base_url || "",
-      api_key: q.data.api_key || "",
-      webhook_secret: q.data.webhook_secret || "",
-      expires_in_minutes: q.data.expires_in_minutes || 15,
-    });
-  }, [q.data]);
 
   useEffect(() => {
     if (!duitkuQ.data) return;
@@ -269,33 +232,6 @@ export function PaymentGWPage() {
       expires_in_minutes: duitkuQ.data.expires_in_minutes || 60,
     });
   }, [duitkuQ.data]);
-
-  const save = useMutation({
-    mutationFn: () =>
-      api<PaymentIntegration>("/api/integrations/payment", {
-        method: "PUT",
-        body: JSON.stringify({
-          enabled: form.enabled,
-          base_url: form.base_url.trim(),
-          api_key: form.api_key.trim() || undefined,
-          webhook_secret: form.webhook_secret.trim() || undefined,
-          expires_in_minutes: Math.min(1440, Math.max(1, form.expires_in_minutes || 15)),
-        }),
-      }),
-    onSuccess: (data) => {
-      qc.setQueryData(["integration-payment"], data);
-      setForm({
-        enabled: data.enabled,
-        base_url: data.base_url || "",
-        api_key: data.api_key || form.api_key,
-        webhook_secret: data.webhook_secret || form.webhook_secret,
-        expires_in_minutes: data.expires_in_minutes || form.expires_in_minutes,
-      });
-      void qc.invalidateQueries({ queryKey: ["integration-payment"] });
-      void toastSuccess("DRP Payment disimpan");
-    },
-    onError: (e: Error) => void toastError(e.message),
-  });
 
   const saveDuitku = useMutation({
     mutationFn: () =>
@@ -324,7 +260,6 @@ export function PaymentGWPage() {
     onError: (e: Error) => void toastError(e.message),
   });
 
-  const webhookURL = paymentWebhookDisplayURL(q.data?.webhook_url || q.data?.webhook_path);
   const duitkuWebhookURL = paymentWebhookDisplayURL(
     duitkuQ.data?.webhook_url || duitkuQ.data?.webhook_path,
     "/api/webhooks/payment/duitku",
@@ -339,115 +274,18 @@ export function PaymentGWPage() {
     }
   }
 
-  const loading = q.isLoading || duitkuQ.isLoading;
+  const loading = duitkuQ.isLoading;
 
   return (
     <Section title="Payment Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Aktifkan gateway per tenant. <strong>DRP Payment</strong> untuk QRIS di aplikasi,{" "}
-        <strong>Duitku</strong> untuk redirect ke halaman bayar Duitku. Kredensial disimpan terenkripsi.
+        Aktifkan <strong>Duitku</strong> untuk pembayaran online (VA, e-wallet, retail, QRIS).
+        Kredensial disimpan terenkripsi.
       </p>
       {loading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
       ) : (
         <Accordion type="multiple" className="grid max-w-xl gap-3">
-          <ProviderAccordionItem
-            value="drp"
-            title="DRP Payment · QRIS"
-            enabled={form.enabled}
-            configured={Boolean(q.data?.configured)}
-            onToggle={(v) => setForm({ ...form, enabled: v })}
-          >
-            <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-              Setiap QRIS mendapat <strong>kode unik 3 digit</strong> yang ditambahkan ke nominal tagihan. Pelanggan harus
-              bayar <strong>tepat</strong> jumlah itu supaya konfirmasi otomatis (webhook) bisa mencocokkan pembayaran.
-            </p>
-            <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-              Gunakan <strong>kredensial DRP milik tenant ini</strong> (API key &amp; webhook secret sendiri). Kredensial
-              platform/env tidak dipakai untuk tenant.
-            </p>
-            {q.data?.env_fallback ? (
-              <p className="text-[11px] text-[var(--muted)]">Kunci platform (env) aktif. Isi field di bawah untuk override per tenant.</p>
-            ) : null}
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">API base URL</span>
-              <input
-                className="input"
-                placeholder="https://payment.dianrp.com"
-                value={form.base_url}
-                onChange={(e) => setForm({ ...form, base_url: e.target.value })}
-              />
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">API key</span>
-              <SecretInput
-                name="drp-payment-api-key"
-                placeholder="API key (drp_live_…)"
-                value={form.api_key}
-                onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-                autoComplete="new-password"
-              />
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Webhook secret</span>
-              <SecretInput
-                name="drp-payment-webhook-secret"
-                placeholder="Webhook secret"
-                value={form.webhook_secret}
-                onChange={(e) => setForm({ ...form, webhook_secret: e.target.value })}
-                autoComplete="new-password"
-              />
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Masa berlaku QRIS (TTL)</span>
-              <input
-                className="input"
-                type="number"
-                min={1}
-                max={1440}
-                step={1}
-                value={form.expires_in_minutes}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    expires_in_minutes: Number(e.target.value) || 15,
-                  })
-                }
-              />
-              <div className="flex flex-wrap gap-1">
-                {TTL_PRESETS.map((p) => (
-                  <button
-                    key={p.minutes}
-                    type="button"
-                    className="btn-ghost px-2 py-1 text-[11px]"
-                    onClick={() => setForm({ ...form, expires_in_minutes: p.minutes })}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-              <span className="text-[11px] text-[var(--muted)]">
-                QR baru berlaku {ttlHint(form.expires_in_minutes)} (1–1440 menit). QR yang sudah terbit tetap dipakai
-                sampai waktu kadaluwarsanya sendiri.
-              </span>
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Webhook URL DRP · /api/webhooks/payment/drp?tenant=…</span>
-              <div className="flex gap-2">
-                <input className="input min-w-0 flex-1 font-mono text-xs" readOnly value={webhookURL} />
-                <IconButton label="Salin webhook URL" onClick={() => void copyWebhook(webhookURL)}>
-                  <IconCopy />
-                </IconButton>
-              </div>
-              <span className="text-[11px] text-[var(--muted)]">
-                Khusus DRP Payment / QRIS, terpisah dari Duitku. Tempel di dashboard merchant. Domain harus publik.
-              </span>
-            </label>
-            <button type="button" className="btn w-fit" disabled={save.isPending} onClick={() => save.mutate()}>
-              {save.isPending ? "Menyimpan..." : "Simpan"}
-            </button>
-          </ProviderAccordionItem>
-
           <ProviderAccordionItem
             value="duitku"
             title="Duitku"
@@ -520,7 +358,7 @@ export function PaymentGWPage() {
               </span>
             </label>
             <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Callback URL Duitku · /api/webhooks/payment/duitku?tenant=…</span>
+              <span className="text-[var(--muted)]">Callback URL Duitku · /api/webhooks/payment/duitku</span>
               <div className="flex gap-2">
                 <input className="input min-w-0 flex-1 font-mono text-xs" readOnly value={duitkuWebhookURL} />
                 <IconButton label="Salin callback URL" onClick={() => void copyWebhook(duitkuWebhookURL)}>
@@ -528,7 +366,7 @@ export function PaymentGWPage() {
                 </IconButton>
               </div>
               <span className="text-[11px] text-[var(--muted)]">
-                Khusus Duitku, terpisah dari QRIS. Tempel di dashboard Duitku. Domain harus publik; callback berupa form POST.
+                Tempel di dashboard Duitku. Domain harus publik; callback berupa form POST.
               </span>
             </label>
             <button type="button" className="btn w-fit" disabled={saveDuitku.isPending} onClick={() => saveDuitku.mutate()}>
@@ -765,7 +603,7 @@ function WhatsAppTab() {
   return (
     <Section title="WhatsApp (gateway eksternal)">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Kirim WhatsApp lewat gateway GOWA (go-whatsapp-web-multidevice) milik tenant. Bisa lebih dari satu nomor
+        Kirim WhatsApp lewat gateway GOWA (go-whatsapp-web-multidevice) sendiri. Bisa lebih dari satu nomor
         (device) pada base URL yang sama; pengiriman mencoba nomor berikutnya bila yang pertama gagal (redundan).
         Login/scan QR di dashboard gateway.
       </p>
@@ -1043,7 +881,7 @@ function TelegramTab() {
           <div className="rounded-xl border border-[var(--border)] p-3">
             <div className="mb-3 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">Bot + chat tenant</p>
+                <p className="text-sm font-medium">Bot + chat</p>
                 <p className="text-[10px] text-[var(--muted)]">
                   {q.data?.telegram_configured ? "token tersimpan" : "butuh token + chat ID"}
                 </p>
@@ -1168,7 +1006,7 @@ function SmtpTab() {
         from_name: data.from_name || "",
       });
       void qc.invalidateQueries({ queryKey: ["integration-smtp"] });
-      void toastSuccess("SMTP tenant disimpan");
+      void toastSuccess("SMTP disimpan");
     },
     onError: (e: Error) => void toastError(e.message),
   });
@@ -1181,11 +1019,11 @@ function SmtpTab() {
   });
 
   return (
-    <Section title="Email (SMTP tenant)">
+    <Section title="Email (SMTP)">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Server SMTP milik tenant untuk notifikasi email (laporan bulanan, broadcast, dunning). Port 587 memakai
+        Server SMTP untuk notifikasi email (laporan bulanan, broadcast, dunning). Port 587 memakai
         STARTTLS; port 465 memakai TLS langsung. Password kosong saat simpan = tetap memakai yang tersimpan. Jika
-        nonaktif, sistem memakai SMTP platform (env) bila ada.
+        nonaktif, sistem memakai SMTP dari env bila ada.
       </p>
       {q.isLoading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
@@ -1199,7 +1037,7 @@ function SmtpTab() {
                   {q.data?.configured
                     ? "host + From tersimpan"
                     : q.data?.env_fallback
-                      ? "belum diisi · fallback SMTP platform"
+                      ? "belum diisi · fallback SMTP env"
                       : "belum dikonfigurasi"}
                 </p>
               </div>

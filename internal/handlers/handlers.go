@@ -54,9 +54,7 @@ type JobRunner interface {
 func RegisterAll(api huma.API, d *Deps) {
 	httpx.RegisterHealth(api)
 	registerAuth(api, d)
-	registerPublicTenant(api, d)
-	registerPlatform(api, d)
-	registerPlatformBranding(api, d)
+	registerPublicBranding(api, d)
 	registerSettings(api, d)
 	registerIsolirSettings(api, d)
 	registerJobsSettings(api, d)
@@ -146,9 +144,6 @@ func registerAuth(api huma.API, d *Deps) {
 				return nil, httpx.Unauthorized("invalid TOTP code")
 			}
 		}
-		if user.IsPlatformAdmin {
-			return nil, httpx.Unauthorized("use /api/auth/platform/login for platform admin")
-		}
 		tenants, err := d.Store.ListUserTenants(ctx, user.ID)
 		if err != nil || len(tenants) == 0 {
 			return nil, httpx.Unauthorized("no tenant access")
@@ -156,8 +151,8 @@ func registerAuth(api huma.API, d *Deps) {
 		slug := strings.ToLower(strings.TrimSpace(body.TenantSlug))
 		tid := tenants[0].TenantID
 		role := tenants[0].RoleSlug
-		matched := false
 		if slug != "" {
+			matched := false
 			for _, t := range tenants {
 				if strings.EqualFold(t.TenantSlug, slug) {
 					tid = t.TenantID
@@ -170,6 +165,7 @@ func registerAuth(api huma.API, d *Deps) {
 				return nil, httpx.Unauthorized("no access to this tenant")
 			}
 		} else if !xid.IsNil(body.TenantID) {
+			matched := false
 			for _, t := range tenants {
 				if t.TenantID == body.TenantID {
 					tid = t.TenantID
@@ -181,8 +177,6 @@ func registerAuth(api huma.API, d *Deps) {
 			if !matched {
 				return nil, httpx.Unauthorized("no access to this tenant")
 			}
-		} else {
-			return nil, httpx.BadRequest("tenant_slug is required")
 		}
 		ten, err := d.Store.GetTenant(ctx, tid)
 		if err != nil || !ten.IsActive {
@@ -252,39 +246,34 @@ func registerAuth(api huma.API, d *Deps) {
 		}
 
 		var tid xid.ID
-		role := "platform"
-		if user.IsPlatformAdmin {
-			tid = xid.Nil()
-		} else {
-			tenants, err := d.Store.ListUserTenants(ctx, user.ID)
-			if err != nil {
-				return nil, httpx.Internal(err)
-			}
-			if len(tenants) == 0 {
-				return nil, httpx.Unauthorized("no tenant access")
-			}
-			slug := strings.ToLower(strings.TrimSpace(input.Body.TenantSlug))
+		role := ""
+		tenants, err := d.Store.ListUserTenants(ctx, user.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if len(tenants) == 0 {
+			return nil, httpx.Unauthorized("no tenant access")
+		}
+		slug := strings.ToLower(strings.TrimSpace(input.Body.TenantSlug))
+		tid = tenants[0].TenantID
+		role = tenants[0].RoleSlug
+		if slug != "" {
 			matched := false
-			if slug != "" {
-				for _, t := range tenants {
-					if strings.EqualFold(t.TenantSlug, slug) {
-						tid = t.TenantID
-						role = t.RoleSlug
-						matched = true
-						break
-					}
+			for _, t := range tenants {
+				if strings.EqualFold(t.TenantSlug, slug) {
+					tid = t.TenantID
+					role = t.RoleSlug
+					matched = true
+					break
 				}
-				if !matched {
-					return nil, httpx.Unauthorized("no access to this tenant")
-				}
-			} else {
-				tid = tenants[0].TenantID
-				role = tenants[0].RoleSlug
 			}
-			ten, err := d.Store.GetTenant(ctx, tid)
-			if err != nil || !ten.IsActive {
-				return nil, httpx.Unauthorized("tenant inactive")
+			if !matched {
+				return nil, httpx.Unauthorized("no access to this tenant")
 			}
+		}
+		ten, err := d.Store.GetTenant(ctx, tid)
+		if err != nil || !ten.IsActive {
+			return nil, httpx.Unauthorized("tenant inactive")
 		}
 
 		access, exp, err := d.Tokens.CreateAccessToken(user.ID, tid, user.Email, role)
@@ -304,10 +293,7 @@ func registerAuth(api huma.API, d *Deps) {
 		user.PasswordHash = ""
 		user.TOTPSecret = nil
 		out.Body.User = *user
-		if !user.IsPlatformAdmin {
-			tenants, _ := d.Store.ListUserTenants(ctx, user.ID)
-			out.Body.Tenants = tenants
-		}
+		out.Body.Tenants = tenants
 		out.SetCookie = http.Cookie{
 			Name: "refresh_token", Value: refresh, Path: "/api/auth",
 			HttpOnly: true, Secure: d.Config.AppEnv == "production",
@@ -4888,11 +4874,10 @@ func registerPortal(api huma.API, d *Deps) {
 		}
 		if providerName == "" {
 			opts := listEnabledPayOptions(ctx, d, ten.ID)
-			if len(opts) == 1 {
-				providerName = opts[0].Provider
-			} else {
-				providerName = payment.ProviderDRP
+			if len(opts) == 0 {
+				return nil, httpx.BadRequest("belum ada metode pembayaran online yang aktif")
 			}
+			providerName = opts[0].Provider
 		}
 		origin := appPublicOrigin(ctx, d, ten.ID, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)
 		if returnURL == "" {
@@ -5519,7 +5504,11 @@ func authenticatePortalCustomers(ctx context.Context, d *Deps, tenantSlug string
 			return nil, nil, httpx.Unauthorized("invalid credentials")
 		}
 	} else {
-		return nil, nil, httpx.BadRequest("tenant_slug is required")
+		ten, err = singleTenant(ctx, d)
+		if err != nil || ten == nil {
+			return nil, nil, httpx.Unauthorized("invalid credentials")
+		}
+		tid = ten.ID
 	}
 	if !ten.IsActive {
 		return nil, nil, httpx.Unauthorized("tenant inactive")
@@ -5612,7 +5601,6 @@ type paymentWebhookInput struct {
 	XSignature         string `header:"X-Signature"`
 	XCallbackToken     string `header:"X-CALLBACK-TOKEN"`
 	XCallbackSignature string `header:"X-Callback-Signature"`
-	XDRPToken          string `header:"X-DRP-Token"`
 	XEventType         string `header:"X-Event-Type"`
 	Authorization      string `header:"Authorization"`
 	UserAgent          string `header:"User-Agent"`
@@ -5666,7 +5654,6 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		"event_status", parsed.Status,
 		"amount", parsed.Amount,
 		"has_signature", strings.TrimSpace(input.XSignature) != "",
-		"has_drp_token", strings.TrimSpace(input.XDRPToken) != "",
 		"has_callback_token", strings.TrimSpace(input.XCallbackToken) != "",
 		"event_type", input.XEventType,
 		"user_agent", input.UserAgent,
@@ -5677,7 +5664,7 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		slog.Warn("payment webhook ignored", "provider", providerName, "reason", "manual provider has no webhook")
 		return webhookAck("ignored", "manual provider has no webhook"), nil
 	}
-	if providerName != payment.ProviderDRP && providerName != payment.ProviderDuitku {
+	if providerName != payment.ProviderDuitku {
 		slog.Warn("payment webhook ignored", "provider", providerName, "reason", "unknown provider")
 		return webhookAck("received", "unknown provider"), nil
 	}
@@ -5687,7 +5674,6 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		"X-Signature":          input.XSignature,
 		"X-CALLBACK-TOKEN":     input.XCallbackToken,
 		"X-Callback-Signature": input.XCallbackSignature,
-		"X-DRP-Token":          input.XDRPToken,
 		"X-Event-Type":         input.XEventType,
 		"Authorization":        input.Authorization,
 	}
@@ -5788,9 +5774,7 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 }
 
 func registerWebhooks(api huma.API, d *Deps) {
-	for _, name := range []string{payment.ProviderDRP, payment.ProviderDuitku} {
-		registerPaymentWebhookRoute(api, d, name)
-	}
+	registerPaymentWebhookRoute(api, d, payment.ProviderDuitku)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "whatsapp-webhook", Method: http.MethodPost, Path: "/api/webhooks/whatsapp",

@@ -5,7 +5,7 @@ import {
   isInvoiceUnpaid,
   isIsolirStatus,
   isPayMethodId,
-  PAY_METHOD_QRIS,
+  PAY_METHOD_DUITKU,
   paymentMethodLabel,
   setSavedPayMethod,
 } from "./payMethod";
@@ -15,12 +15,12 @@ describe("payMethod", () => {
     localStorage.clear();
   });
 
-  it("persists last method per tenant", () => {
-    expect(getSavedPayMethod("acme")).toBe(PAY_METHOD_QRIS);
-    setSavedPayMethod(PAY_METHOD_QRIS, "acme");
-    expect(getSavedPayMethod("acme")).toBe("qris");
-    expect(isPayMethodId("qris")).toBe(true);
+  it("persists last method", () => {
+    expect(getSavedPayMethod("acme")).toBe(PAY_METHOD_DUITKU);
+    setSavedPayMethod(PAY_METHOD_DUITKU, "acme");
+    expect(getSavedPayMethod("acme")).toBe("duitku");
     expect(isPayMethodId("duitku")).toBe(true);
+    expect(isPayMethodId("qris")).toBe(false);
     expect(isPayMethodId("va")).toBe(false);
   });
 

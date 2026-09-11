@@ -1,6 +1,4 @@
 const ADMIN_TOKEN = "drp_admin_token";
-const ADMIN_SLUG = "drp_admin_slug";
-const PLATFORM_TOKEN = "drp_platform_token";
 const CLIENT_SESSION = "drp_client_session";
 
 export function getToken(): string | null {
@@ -13,27 +11,6 @@ export function setToken(token: string) {
 
 export function clearToken() {
   localStorage.removeItem(ADMIN_TOKEN);
-  localStorage.removeItem(ADMIN_SLUG);
-}
-
-export function getAdminSlug(): string | null {
-  return localStorage.getItem(ADMIN_SLUG);
-}
-
-export function setAdminSlug(slug: string) {
-  localStorage.setItem(ADMIN_SLUG, slug);
-}
-
-export function getPlatformToken(): string | null {
-  return localStorage.getItem(PLATFORM_TOKEN);
-}
-
-export function setPlatformToken(token: string) {
-  localStorage.setItem(PLATFORM_TOKEN, token);
-}
-
-export function clearPlatformToken() {
-  localStorage.removeItem(PLATFORM_TOKEN);
 }
 
 export function getClientSession<T = unknown>(): T | null {
@@ -59,22 +36,20 @@ export const AUTH_EXPIRED_EVENT = "drp:auth-expired";
 
 let refreshInFlight: Promise<boolean> | null = null;
 
-async function refreshAccessToken(platform: boolean): Promise<boolean> {
+async function refreshAccessToken(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     try {
-      const body = platform ? {} : { tenant_slug: getAdminSlug() || undefined };
       const res = await fetch("/api/auth/refresh", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({}),
       });
       if (!res.ok) return false;
       const data = (await res.json()) as { access_token?: string };
       if (!data.access_token) return false;
-      if (platform) setPlatformToken(data.access_token);
-      else setToken(data.access_token);
+      setToken(data.access_token);
       return true;
     } catch {
       return false;
@@ -96,15 +71,13 @@ function shouldAttemptRefresh(path: string, skip?: boolean): boolean {
 export async function api<T>(
   path: string,
   init: RequestInit = {},
-  opts?: { platform?: boolean; skipAuthRefresh?: boolean },
+  opts?: { skipAuthRefresh?: boolean },
 ): Promise<T> {
-  const platform = Boolean(opts?.platform);
-
   const doFetch = async () => {
     const headers = new Headers(init.headers);
     if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
     if (!headers.has("Authorization")) {
-      const token = platform ? getPlatformToken() : getToken();
+      const token = getToken();
       if (token) headers.set("Authorization", `Bearer ${token}`);
     }
     return fetch(path, { ...init, headers, credentials: "include" });
@@ -113,16 +86,12 @@ export async function api<T>(
   let res = await doFetch();
 
   if (res.status === 401 && shouldAttemptRefresh(path, opts?.skipAuthRefresh)) {
-    const refreshed = await refreshAccessToken(platform);
+    const refreshed = await refreshAccessToken();
     if (refreshed) {
       res = await doFetch();
     } else {
-      if (platform) {
-        clearPlatformToken();
-      } else {
-        localStorage.removeItem(ADMIN_TOKEN);
-      }
-      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { platform } }));
+      localStorage.removeItem(ADMIN_TOKEN);
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
     }
   }
 
@@ -153,9 +122,8 @@ export async function api<T>(
 export async function apiUpload<T>(
   path: string,
   file: File,
-  opts?: { platform?: boolean; fieldName?: string; onProgress?: (percent: number) => void },
+  opts?: { fieldName?: string; onProgress?: (percent: number) => void },
 ): Promise<T> {
-  const platform = Boolean(opts?.platform);
   const field = opts?.fieldName || "file";
   const onProgress = opts?.onProgress;
 
@@ -177,17 +145,16 @@ export async function apiUpload<T>(
       xhr.send(body);
     });
 
-  let token = platform ? getPlatformToken() : getToken();
+  let token = getToken();
   let res = await uploadOnce(token);
   if (res.status === 401 && shouldAttemptRefresh(path, false)) {
-    const refreshed = await refreshAccessToken(platform);
+    const refreshed = await refreshAccessToken();
     if (refreshed) {
-      token = platform ? getPlatformToken() : getToken();
+      token = getToken();
       res = await uploadOnce(token);
     } else {
-      if (platform) clearPlatformToken();
-      else localStorage.removeItem(ADMIN_TOKEN);
-      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { platform } }));
+      localStorage.removeItem(ADMIN_TOKEN);
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
     }
   }
   if (!res.ok) {
@@ -208,15 +175,14 @@ export async function apiUpload<T>(
 export async function apiDownload(
   path: string,
   filename: string,
-  opts?: { platform?: boolean; token?: string },
+  opts?: { token?: string },
 ): Promise<void> {
-  const platform = Boolean(opts?.platform);
   // When an explicit token is provided (e.g. portal session) use it directly and
-  // skip admin/platform refresh logic.
+  // skip admin refresh logic.
   const explicitToken = opts?.token?.trim();
   const doFetch = async () => {
     const headers = new Headers();
-    const token = explicitToken || (platform ? getPlatformToken() : getToken());
+    const token = explicitToken || getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
     return fetch(path, { headers, credentials: "include" });
   };
@@ -242,12 +208,11 @@ export async function apiDownload(
   }
   let res = await doFetch();
   if (res.status === 401 && shouldAttemptRefresh(path, false)) {
-    const refreshed = await refreshAccessToken(platform);
+    const refreshed = await refreshAccessToken();
     if (refreshed) res = await doFetch();
     else {
-      if (platform) clearPlatformToken();
-      else localStorage.removeItem(ADMIN_TOKEN);
-      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { platform } }));
+      localStorage.removeItem(ADMIN_TOKEN);
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
     }
   }
   if (!res.ok) {

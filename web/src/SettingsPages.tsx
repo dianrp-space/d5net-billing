@@ -171,7 +171,7 @@ export function GeneralSettingsPage() {
       setTenantPrimaryColor(parsed && parsed !== DEFAULT_PRIMARY ? parsed : null);
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
       void qc.invalidateQueries({ queryKey: ["settings-invoice"] });
-      void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
+      void qc.invalidateQueries({ queryKey: ["public-branding"] });
       void qc.invalidateQueries({ queryKey: ["jobs-settings"] });
       void toastSuccess("Pengaturan umum disimpan");
       setErr("");
@@ -191,8 +191,8 @@ export function GeneralSettingsPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
       void qc.invalidateQueries({ queryKey: ["settings-invoice"] });
-      void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
-      void toastSuccess("Mengikuti branding owner");
+      void qc.invalidateQueries({ queryKey: ["public-branding"] });
+      void toastSuccess("Mengikuti bawaan");
     },
     onError: (e: Error) => void toastError(e.message),
   });
@@ -203,7 +203,7 @@ export function GeneralSettingsPage() {
       await apiUpload<{ url: string }>(`/api/settings/branding/${kind}`, file);
       void qc.invalidateQueries({ queryKey: ["settings-branding"] });
       void qc.invalidateQueries({ queryKey: ["settings-invoice"] });
-      void qc.invalidateQueries({ queryKey: ["public-tenant-branding"] });
+      void qc.invalidateQueries({ queryKey: ["public-branding"] });
       void toastSuccess(
         kind === "logo" ? "Logo diunggah" : kind === "favicon" ? "Favicon diunggah" : "Icon peta diunggah",
       );
@@ -232,7 +232,7 @@ export function GeneralSettingsPage() {
         <div className="grid gap-6">
           <div className="panel-card grid gap-4 p-4 sm:grid-cols-2">
             <label className="grid gap-1 text-sm">
-              <span className="font-medium">Nama tenant</span>
+              <span className="font-medium">Nama provider</span>
               <input
                 className="input"
                 value={tenantName}
@@ -253,7 +253,7 @@ export function GeneralSettingsPage() {
                 ))}
               </select>
               <span className="text-xs text-[var(--muted)]">
-                Dipakai untuk jadwal worker / referensi waktu lokal tenant (server tetap memakai zona proses).
+                Dipakai untuk jadwal worker / referensi waktu lokal (server tetap memakai zona proses).
               </span>
             </label>
 
@@ -510,7 +510,7 @@ export function InvoiceSettingsPage() {
                 placeholder={defaultCompany || "Nama ISP / perusahaan"}
               />
               <span className="text-xs text-[var(--muted)]">
-                Kosongkan untuk memakai nama tenant{defaultCompany ? ` (${defaultCompany})` : ""}. Logo
+                Kosongkan untuk memakai nama provider{defaultCompany ? ` (${defaultCompany})` : ""}. Logo
                 memakai unggahan di Pengaturan → Umum.
               </span>
             </label>
@@ -1212,7 +1212,7 @@ export function UsersSettingsPage() {
     mutationFn: (id: string) => api(`/api/settings/users/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       refreshUsers();
-      void toastSuccess("User dihapus dari tenant");
+      void toastSuccess("User dihapus");
     },
     onError: (e: Error) => void toastError(e.message),
   });
@@ -1256,12 +1256,12 @@ export function UsersSettingsPage() {
         <IconPencil />
       </IconButton>
       <IconButton
-        label="Hapus dari tenant"
+        label="Hapus user"
         danger
         onClick={async () => {
           const ok = await confirm({
             title: "Hapus user",
-            description: `Hapus ${u.email} dari tenant ini?`,
+            description: `Hapus ${u.email} dari aplikasi ini?`,
             confirmLabel: "Hapus",
           });
           if (ok) removeUser.mutate(u.user_id);

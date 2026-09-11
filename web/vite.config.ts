@@ -16,9 +16,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api": { target: "http://127.0.0.1:8087", changeOrigin: true },
-      "/uploads": { target: "http://127.0.0.1:8087", changeOrigin: true },
-      "/events": { target: "http://127.0.0.1:8087", changeOrigin: true },
+      "/api": { target: "http://127.0.0.1:8088", changeOrigin: true },
+      "/uploads": { target: "http://127.0.0.1:8088", changeOrigin: true },
+      "/events": { target: "http://127.0.0.1:8088", changeOrigin: true },
     },
   },
   test: {

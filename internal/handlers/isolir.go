@@ -209,14 +209,12 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 
 func registerPublicIsolir(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
-		OperationID: "public-isolir-page", Method: http.MethodGet, Path: "/api/public/tenants/{slug}/isolir",
+		OperationID: "public-isolir-page", Method: http.MethodGet, Path: "/api/public/isolir",
 		Tags: []string{"Public"},
-	}, func(ctx context.Context, input *struct {
-		Slug string `path:"slug"`
-	}) (*huma.StreamResponse, error) {
-		ten, err := d.Store.GetTenantBySlug(ctx, input.Slug)
+	}, func(ctx context.Context, _ *struct{}) (*huma.StreamResponse, error) {
+		ten, err := singleTenant(ctx, d)
 		if err != nil {
-			return nil, httpx.NotFound("tenant not found")
+			return nil, err
 		}
 		net, _ := d.Store.GetIsolirNetworkSettings(ctx, ten.ID)
 		custom, _ := d.Store.GetIsolirHTML(ctx, ten.ID)

@@ -38,13 +38,13 @@ const emptyNetwork: IsolirNetwork = {
 };
 
 function buildDocsHint(isolirURL: string, poolLabel: string) {
-  const url = isolirURL || "{portal_base_url}/{tenantSlug}/client";
+  const url = isolirURL || "{portal_base_url}/login";
   return `URL isolir (portal pelanggan):
 ${url}
 
 Pool: ${poolLabel || "(pilih IP pool isolir)"}
 
-Redirect Web Proxy ke /{slug}/client.
+Redirect Web Proxy ke /login.
 IP → Web Proxy: enable proxy 8080, allow host billing, redirect HTTP ke URL isolir
 (RouterOS 7: action=redirect + action-data; v6: deny + redirect-to),
 NAT tcp/80 → 8080, allow DNS + HTTPS portal (address-list FQDN, bukan IP publik).`;
@@ -78,7 +78,7 @@ function fillPlaceholders(raw: string, vars: Record<string, string>) {
   return out;
 }
 
-export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string }) {
+export function IsolirTemplatePage() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["settings-isolir"],
@@ -98,12 +98,9 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
     staleTime: 60_000,
   });
   const brandingQ = useQuery({
-    queryKey: ["public-tenant-branding", tenantSlug],
+    queryKey: ["public-branding"],
     queryFn: () =>
-      api<{ app_name?: string; logo_url?: string | null; name?: string }>(
-        `/api/public/tenants/${encodeURIComponent(tenantSlug)}`,
-      ),
-    enabled: Boolean(tenantSlug),
+      api<{ app_name?: string; logo_url?: string | null; name?: string }>("/api/public/branding"),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -146,11 +143,11 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
     [poolsQ.data, network.ip_pool_id],
   );
 
-  const appName = brandingQ.data?.name || brandingQ.data?.app_name || tenantSlug || "ISP";
+  const appName = brandingQ.data?.name || brandingQ.data?.app_name || "ISP";
   const logoURL = brandingQ.data?.logo_url || DEFAULT_BRAND_LOGO;
   const loginURL = network.portal_base_url
-    ? `${network.portal_base_url.replace(/\/$/, "")}/${tenantSlug || "slug"}/client`
-    : `/${tenantSlug || "slug"}/client`;
+    ? `${network.portal_base_url.replace(/\/$/, "")}/login`
+    : "/login";
 
   const poolLabel = selectedPool
     ? `${selectedPool.name} · ${selectedPool.network}${selectedPool.router_name ? ` · ${selectedPool.router_name}` : ""}`
@@ -164,12 +161,12 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
       app_name: appName,
       logo_url: logoURL,
       login_url: loginURL,
-      tenant_slug: tenantSlug || "slug",
+      tenant_slug: "",
     };
     const custom = deferredHtml.trim();
     if (!custom) return defaultPreviewHTML(appName, logoURL, loginURL);
     return fillPlaceholders(custom, vars);
-  }, [deferredHtml, appName, logoURL, loginURL, tenantSlug]);
+  }, [deferredHtml, appName, logoURL, loginURL]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -249,7 +246,7 @@ export function IsolirTemplatePage({ tenantSlug = "" }: { tenantSlug?: string })
                 onChange={(e) => setNetwork({ ...network, portal_base_url: e.target.value })}
               />
               <span className="text-xs text-[var(--muted)]">
-                Redirect isolir ke <code>{"{base}"}/{tenantSlug || "slug"}/client</code>
+                Redirect isolir ke <code>{"{base}"}/login</code>
               </span>
             </label>
 

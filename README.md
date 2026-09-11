@@ -2,9 +2,10 @@
   <img src="web/public/DRP-Gobill-logo.png" alt="DRP GoBill" width="360" />
 </p>
 
-# drp-billing
+# d5net-billing
 
-Aplikasi billing ISP fullstack untuk jaringan MikroTik (PPPoE/Hotspot).
+Aplikasi billing ISP fullstack untuk jaringan MikroTik (PPPoE/Hotspot), single-provider
+(tanpa multi-tenant / platform owner).
 
 - Backend: Go (chi + huma + pgx)
 - Frontend: React 19 + Vite + Tailwind + ECharts
@@ -22,32 +23,31 @@ make run-api
 cd web && npm install && npm run dev
 ```
 
-Vite listen di `0.0.0.0:5173`. PC lain di Wi‑Fi `192.168.100.0/24` bisa buka `http://<IP-laptop>:5173` (contoh `http://192.168.100.67:5173`). API default `0.0.0.0:8087`; frontend mem-proxy `/api`, `/uploads`, `/events`.
+Vite listen di `0.0.0.0:5173`. PC lain di Wi‑Fi `192.168.100.0/24` bisa buka `http://<IP-laptop>:5173` (contoh `http://192.168.100.67:5173`). API default `0.0.0.0:8088`; frontend mem-proxy `/api`, `/uploads`, `/events`.
 
-Pastikan firewall mengizinkan port **5173** (dan **8087** jika API dipanggil langsung):
+Pastikan firewall mengizinkan port **5173** (dan **8088** jika API dipanggil langsung):
 
 ```bash
 sudo ufw allow from 192.168.100.0/24 to any port 5173 proto tcp
-sudo ufw allow from 192.168.100.0/24 to any port 8087 proto tcp
+sudo ufw allow from 192.168.100.0/24 to any port 8088 proto tcp
 ```
 
-Buat superadmin platform + tenant pertama:
+Buat provider + admin pertama:
 
 ```bash
-go run ./cmd/drpctl create-platform-admin --email super@demo.local --password rahasia123 --full-name "Platform Admin"
-go run ./cmd/drpctl create-tenant --slug demo --name "ISP Demo" --email admin@demo.local --password rahasia123 --full-name Admin
+go run ./cmd/drpctl create-tenant --slug delimanet --name "Delima Net" --email admin@delimanet.id --password rahasia123 --full-name Admin
 ```
 
 | Path | Fungsi |
 |------|--------|
-| `/` | Landing |
-| `/login` | Superadmin (kelola tenant) |
-| `/<slug>/login` | Login admin tenant |
-| `/<slug>/client/login` | Portal pelanggan tenant |
+| `/` | Landing + info pembayaran tagihan |
+| `/login` | Login pelanggan (portal) |
+| `/client/dashboard` | Portal pelanggan |
+| `/admin/login` | Login admin (akses manual via URL) |
+| `/admin/dashboard` | Panel admin |
+| `/isolir` | Portal isolir (login bayar tagihan) |
 
-Contoh: `/demo/login`, `/demo/client/login`
-
-Go **tidak hot-reload**. Setelah ubah kode backend, restart proses API/worker (di produksi: `systemctl restart drp-api drp-worker`).
+Go **tidak hot-reload**. Setelah ubah kode backend, restart proses API/worker (di produksi: `systemctl restart d5net-billing-api d5net-billing-worker`).
 
 ## Produksi (aaPanel + systemd)
 
@@ -61,13 +61,13 @@ Yang tetap di luar webroot hanya unit systemd (`/etc/systemd/system/`) — syste
 
 | Path | Isi |
 |------|-----|
-| `/www/wwwroot/billing.dianrp.com` | Clone git (working dir proses) |
+| `/www/wwwroot/delimanet.dianrp.com` | Clone git (working dir proses) |
 | `web/dist/` | Root situs aaPanel / Nginx (`index.html`) |
-| `bin/` | `drp-api`, `drp-worker`, `drp-migrate`, `drpctl` |
+| `bin/` | `d5net-billing-api`, `d5net-billing-worker`, `drp-migrate`, `drpctl` |
 | `.env` | Secret produksi (chmod 600, gitignored) |
-| `data/` | Upload, backup router, sesi WhatsApp, backup DB |
-| `/etc/systemd/system/drp-api.service` | Unit API — [`deploy/systemd/drp-api.service`](deploy/systemd/drp-api.service) |
-| `/etc/systemd/system/drp-worker.service` | Unit worker — [`deploy/systemd/drp-worker.service`](deploy/systemd/drp-worker.service) |
+| `data/` | Upload, backup router, backup DB |
+| `/etc/systemd/system/d5net-billing-api.service` | Unit API — [`deploy/systemd/d5net-billing-api.service`](deploy/systemd/d5net-billing-api.service) |
+| `/etc/systemd/system/d5net-billing-worker.service` | Unit worker — [`deploy/systemd/d5net-billing-worker.service`](deploy/systemd/d5net-billing-worker.service) |
 
 Unit systemd memakai `ProtectSystem=strict` dan hanya boleh tulis ke `data/`. Log proses lewat `journalctl` (bukan `/var/log/drp-billing`).
 
@@ -98,10 +98,10 @@ postgres://USER:PASSWORD@127.0.0.1:5432/drp_billing?sslmode=disable
 
 ```bash
 sudo mkdir -p /www/wwwroot
-sudo git clone git@github.com:dianrp-space/drp-billing.git /www/wwwroot/billing.dianrp.com
+sudo git clone git@github.com:dianrp-space/d5net-billing.git /www/wwwroot/delimanet.dianrp.com
 # atau HTTPS:
-# sudo git clone https://github.com/dianrp-space/drp-billing.git /www/wwwroot/billing.dianrp.com
-sudo chown -R dianrp:dianrp /www/wwwroot/billing.dianrp.com
+# sudo git clone https://github.com/dianrp-space/d5net-billing.git /www/wwwroot/delimanet.dianrp.com
+sudo chown -R dianrp:dianrp /www/wwwroot/delimanet.dianrp.com
 ```
 
 User **`dianrp`** yang punya akses git (SSH key / credential). `update.sh` memakai `sudo` hanya untuk systemd; `git pull` dijalankan sebagai `dianrp`.
@@ -109,7 +109,7 @@ User **`dianrp`** yang punya akses git (SSH key / credential). `update.sh` memak
 Kalau skrip lama masih `git pull` sebagai root, tarik dulu tanpa sudo:
 
 ```bash
-cd /www/wwwroot/billing.dianrp.com
+cd /www/wwwroot/delimanet.dianrp.com
 git pull
 sudo bash deploy/scripts/update.sh
 ```
@@ -117,35 +117,35 @@ sudo bash deploy/scripts/update.sh
 ### 3. File env
 
 ```bash
-sudo -u dianrp cp /www/wwwroot/billing.dianrp.com/.env.example /www/wwwroot/billing.dianrp.com/.env
-sudo chmod 600 /www/wwwroot/billing.dianrp.com/.env
-sudo nano /www/wwwroot/billing.dianrp.com/.env
+sudo -u dianrp cp /www/wwwroot/delimanet.dianrp.com/.env.example /www/wwwroot/delimanet.dianrp.com/.env
+sudo chmod 600 /www/wwwroot/delimanet.dianrp.com/.env
+sudo nano /www/wwwroot/delimanet.dianrp.com/.env
 ```
 
 Isi minimal (sesuaikan). Path data relatif ke folder repo:
 
 ```bash
 APP_ENV=production
-HTTP_ADDR=127.0.0.1:8087
+HTTP_ADDR=127.0.0.1:8088
 DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/drp_billing?sslmode=disable
 JWT_SECRET='<acak panjang, openssl rand -hex 32>'
 ENCRYPTION_KEY='<tepat 32 karakter, openssl rand -base64 24 | cut -c1-32>'
-CORS_ORIGINS=https://billing.dianrp.com
+CORS_ORIGINS=https://delimanet.dianrp.com
 UPLOAD_DIR=./data/uploads
 ROUTER_BACKUP_DIR=./data/router-backups
 DB_BACKUP_DIR=./data/db-backups
 WORKER_ENABLED=true
 ```
 
-`ENCRYPTION_KEY` wajib **32 byte** (32 karakter). Ganti `JWT_SECRET` dari contoh. Setelah ubah env: `sudo systemctl restart drp-api drp-worker`.
+`ENCRYPTION_KEY` wajib **32 byte** (32 karakter). Ganti `JWT_SECRET` dari contoh. Setelah ubah env: `sudo systemctl restart d5net-billing-api d5net-billing-worker`.
 
 ### 4. systemd
 
 ```bash
-sudo cp /www/wwwroot/billing.dianrp.com/deploy/systemd/drp-api.service /etc/systemd/system/
-sudo cp /www/wwwroot/billing.dianrp.com/deploy/systemd/drp-worker.service /etc/systemd/system/
+sudo cp /www/wwwroot/delimanet.dianrp.com/deploy/systemd/d5net-billing-api.service /etc/systemd/system/
+sudo cp /www/wwwroot/delimanet.dianrp.com/deploy/systemd/d5net-billing-worker.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable drp-api drp-worker
+sudo systemctl enable d5net-billing-api d5net-billing-worker
 ```
 
 Jangan `start` dulu sebelum binary ada (langkah 5). Kalau unit lama masih memakai `/opt` + `/etc/drp-billing`, timpa dengan file di atas lalu `daemon-reload`.
@@ -153,7 +153,7 @@ Jangan `start` dulu sebelum binary ada (langkah 5). Kalau unit lama masih memaka
 ### 5. Build, migrate, start
 
 ```bash
-sudo bash /www/wwwroot/billing.dianrp.com/deploy/scripts/update.sh
+sudo bash /www/wwwroot/delimanet.dianrp.com/deploy/scripts/update.sh
 ```
 
 Skrip ini aman diulang: `git pull` sebagai `dianrp`, **skip `npm ci`** jika `package-lock.json` tidak berubah, skip Vite/Go build jika sumber tidak berubah, `migrate up`, restart systemd hanya jika binary/frontend berubah. Paksa: `FORCE_NPM=1 FORCE_WEB=1 FORCE_GO=1 FORCE_RESTART=1`.
@@ -161,20 +161,20 @@ Skrip ini aman diulang: `git pull` sebagai `dianrp`, **skip `npm ci`** jika `pac
 Cek:
 
 ```bash
-curl -sf http://127.0.0.1:8087/api/health
-sudo systemctl status drp-api drp-worker --no-pager
+curl -sf http://127.0.0.1:8088/api/health
+sudo systemctl status d5net-billing-api d5net-billing-worker --no-pager
 ```
 
 ### 6. Situs Nginx (aaPanel)
 
-1. Buat website `billing.dianrp.com`, aktifkan SSL Let's Encrypt.
-2. Set **website root** ke `/www/wwwroot/billing.dianrp.com/web/dist` (bukan folder git).
-3. Gabungkan reverse proxy dari template [`deploy/nginx/drp-billing.conf`](deploy/nginx/drp-billing.conf) (lokasi `/api/`, `/uploads/`, `/events/`, `try_files` SPA, proxy ke **8087**). Reload Nginx.
+1. Buat website `delimanet.dianrp.com`, aktifkan SSL Let's Encrypt.
+2. Set **website root** ke `/www/wwwroot/delimanet.dianrp.com/web/dist` (bukan folder git).
+3. Gabungkan reverse proxy dari template [`deploy/nginx/drp-billing.conf`](deploy/nginx/drp-billing.conf) (lokasi `/api/`, `/uploads/`, `/events/`, `try_files` SPA, proxy ke **8088**). Reload Nginx.
 
 | Lokasi | Peran |
 |--------|--------|
-| `/` | Static SPA; fallback `index.html` untuk `/<slug>/...` |
-| `/api/` | Proxy ke `127.0.0.1:8087` |
+| `/` | Static SPA; fallback `index.html` untuk `/admin/*`, `/client/*`, `/login`, `/isolir` |
+| `/api/` | Proxy ke `127.0.0.1:8088` |
 | `/uploads/` | Proxy file branding |
 | `/events/` | SSE (buffering off) |
 
@@ -182,31 +182,31 @@ Jangan expose `.git`. Template sudah `deny` path itu.
 
 ### 7. Akun pertama
 
-`drpctl` ada di `bin/` setelah `update.sh`. Load env lalu buat platform admin + tenant:
+`drpctl` ada di `bin/` setelah `update.sh`. Load env lalu buat provider + admin:
 
 ```bash
 sudo -u dianrp bash -c '
   set -a
-  source /www/wwwroot/billing.dianrp.com/.env
+  source /www/wwwroot/delimanet.dianrp.com/.env
   set +a
-  cd /www/wwwroot/billing.dianrp.com
-  ./bin/drpctl create-platform-admin \
-    --email super@dianrp.com --password "GANTI" --full-name "Platform Admin"
+  cd /www/wwwroot/delimanet.dianrp.com
   ./bin/drpctl create-tenant \
-    --slug demo --name "ISP Demo" --email admin@demo.local --password "GANTI" --full-name Admin
+    --slug delimanet --name "Delima Net" --email admin@delimanet.id --password "GANTI" --full-name Admin
 '
 ```
 
 | URL | Fungsi |
 |-----|--------|
-| `https://billing.dianrp.com/login` | Superadmin |
-| `https://billing.dianrp.com/<slug>/login` | Admin tenant |
-| `https://billing.dianrp.com/<slug>/client/login` | Portal pelanggan |
+| `https://delimanet.dianrp.com/` | Landing + info pembayaran |
+| `https://delimanet.dianrp.com/login` | Login pelanggan |
+| `https://delimanet.dianrp.com/client/dashboard` | Portal pelanggan |
+| `https://delimanet.dianrp.com/admin/login` | Login admin (akses manual via URL) |
+| `https://delimanet.dianrp.com/admin/dashboard` | Panel admin |
 
 ### 8. Update berikutnya
 
 ```bash
-sudo bash /www/wwwroot/billing.dianrp.com/deploy/scripts/update.sh
+sudo bash /www/wwwroot/delimanet.dianrp.com/deploy/scripts/update.sh
 ```
 
 Override jika perlu: `APP_DIR=... WEB_ROOT=... BRANCH=main sudo -E bash .../update.sh`.
@@ -216,10 +216,10 @@ Rollback: `git checkout` commit sebelumnya lalu jalankan `update.sh` lagi.
 ### 9. Log
 
 ```bash
-sudo journalctl -u drp-api -u drp-worker -f
+sudo journalctl -u d5net-billing-api -u d5net-billing-worker -f
 ```
 
-Log Nginx: `/www/wwwlogs/billing.dianrp.com.*.log` (sesuai template).
+Log Nginx: `/www/wwwlogs/delimanet.dianrp.com.*.log` (sesuai template).
 
 ### MikroTik
 
@@ -230,7 +230,7 @@ Enable API: `/ip service enable api` — port **8728** (TLS **8729**). Isi alama
 Template penuh: [`deploy/nginx/drp-billing.conf`](deploy/nginx/drp-billing.conf).
 
 ```nginx
-root /www/wwwroot/billing.dianrp.com/web/dist;
+root /www/wwwroot/delimanet.dianrp.com/web/dist;
 index index.html;
 client_max_body_size 20m;
 
@@ -239,7 +239,7 @@ location / {
 }
 
 location /api/ {
-    proxy_pass http://127.0.0.1:8087;
+    proxy_pass http://127.0.0.1:8088;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -249,7 +249,7 @@ location /api/ {
 }
 
 location /uploads/ {
-    proxy_pass http://127.0.0.1:8087;
+    proxy_pass http://127.0.0.1:8088;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -258,7 +258,7 @@ location /uploads/ {
 }
 
 location /events/ {
-    proxy_pass http://127.0.0.1:8087;
+    proxy_pass http://127.0.0.1:8088;
     proxy_http_version 1.1;
     proxy_set_header Connection '';
     proxy_buffering off;
@@ -267,17 +267,17 @@ location /events/ {
 }
 ```
 
-## Integrasi (admin tenant)
+## Integrasi (menu admin)
 
 Di menu **Integrasi**:
 
-- **Payment Gateway** — DRP Payment (QRIS), kredensial per tenant atau env `DRP_PAYMENT_*`
-- **Messaging Gateway** — tab **WhatsApp** (gateway eksternal GOWA: base URL + Basic Auth per tenant, multi-nomor) dan tab **Telegram** (bot token + chat ID **ops tenant** saja)
-- **Backup / Restore** — tenant: export/import JSON data tenant; platform/owner: `pg_dump` / `psql` penuh (dir `DB_BACKUP_DIR`)
+- **Payment Gateway** — Duitku (VA, e-wallet, retail, QRIS); pembayaran manual/tunai/transfer tetap tersedia
+- **Messaging Gateway** — tab **WhatsApp** (gateway eksternal GOWA: base URL + Basic Auth, multi-nomor) dan tab **Telegram** (bot token + chat ID ops)
+- **Backup / Restore** — export/import JSON data aplikasi (dir `DB_BACKUP_DIR`)
 
 WhatsApp tidak lagi memakai sesi in-process: arahkan tab WhatsApp di Integrasi ke gateway [go-whatsapp-web-multidevice](https://github.com/aldinokemal/go-whatsapp-web-multidevice) (login/scan QR di dashboard gateway), lalu isi base URL + Basic Auth.
 
-**Multi-nomor (redundansi):** pada satu gateway/base URL yang sama, tenant bisa mendaftarkan lebih dari satu device (nomor). Tombol **Muat device dari gateway** mengisi daftar dari `GET /app/devices`; tiap device dipilih lewat header `X-Device-Id`. Saat mengirim, sistem mencoba nomor secara berurutan dan lanjut ke nomor berikutnya bila gagal (failover). **Cek koneksi** menampilkan status per nomor. Bila daftar dikosongkan, dipakai device default gateway.
+**Multi-nomor (redundansi):** pada satu gateway/base URL yang sama, bisa didaftarkan lebih dari satu device (nomor). Tombol **Muat device dari gateway** mengisi daftar dari `GET /app/devices`; tiap device dipilih lewat header `X-Device-Id`. Saat mengirim, sistem mencoba nomor secara berurutan dan lanjut ke nomor berikutnya bila gagal (failover). **Cek koneksi** menampilkan status per nomor. Bila daftar dikosongkan, dipakai device default gateway.
 
 ## Fitur
 

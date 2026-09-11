@@ -1,12 +1,26 @@
 import { useEffect, useState } from "react";
-import { api, setAdminSlug, setClientSession, setToken } from "./api";
+import { api, setClientSession, setToken } from "./api";
 import { applyBrandingMeta } from "./branding";
 import { LoginShell, SecretInput } from "./ui";
 import { AuthThemeCorner } from "./ThemeToggle";
 
+export type PortalCustomer = {
+  id?: string;
+  full_name: string;
+  phone: string;
+  customer_code: string;
+  email?: string | null;
+  address?: string | null;
+  identity_type?: string | null;
+  identity_number?: string | null;
+  cluster_name?: string | null;
+  service_status?: string;
+  is_active?: boolean;
+};
+
 export type ClientPortalData = {
-  customer?: { id?: string; full_name: string; phone: string; customer_code: string };
-  customers?: { id: string; full_name: string; phone: string; customer_code: string }[];
+  customer?: PortalCustomer;
+  customers?: PortalCustomer[];
   subscriptions?: {
     id?: string;
     username: string;
@@ -44,10 +58,8 @@ export type ClientPortalData = {
   portal_token?: string;
 };
 
-type PublicTenant = {
-  slug: string;
-  name: string;
-  is_active: boolean;
+type PublicBranding = {
+  name?: string;
   app_name?: string;
   logo_url?: string | null;
   favicon_url?: string | null;
@@ -56,12 +68,10 @@ type PublicTenant = {
 type LoginMode = "admin" | "client";
 
 export function TenantLogin({
-  slug,
   mode,
   onAdminSuccess,
   onClientSuccess,
 }: {
-  slug: string;
   mode: LoginMode;
   onAdminSuccess: () => void;
   onClientSuccess: (data: ClientPortalData) => void;
@@ -70,7 +80,7 @@ export function TenantLogin({
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [tenant, setTenant] = useState<PublicTenant | null>(null);
+  const [tenant, setTenant] = useState<PublicBranding | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -78,16 +88,16 @@ export function TenantLogin({
     let cancelled = false;
     (async () => {
       try {
-        const t = await api<PublicTenant>(`/api/public/tenants/${encodeURIComponent(slug)}`);
+        const t = await api<PublicBranding>("/api/public/branding");
         if (!cancelled) setTenant(t);
       } catch {
-        if (!cancelled) setErr("Tenant tidak ditemukan atau nonaktif.");
+        if (!cancelled) setErr("Provider tidak aktif.");
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, []);
 
   useEffect(() => {
     if (!tenant) return;
@@ -107,7 +117,7 @@ export function TenantLogin({
       if (isAdmin) {
         const data = await api<{ access_token?: string; requires_totp?: boolean }>("/api/auth/login", {
           method: "POST",
-          body: JSON.stringify({ email, password, tenant_slug: slug }),
+          body: JSON.stringify({ email, password }),
         });
         if (data.requires_totp) {
           setErr("Akun ini memakai 2FA. Masukkan kode TOTP di versi berikutnya.");
@@ -115,7 +125,6 @@ export function TenantLogin({
         }
         if (data.access_token) {
           setToken(data.access_token);
-          setAdminSlug(slug);
           onAdminSuccess();
         } else {
           setErr("Login gagal");
@@ -123,7 +132,7 @@ export function TenantLogin({
       } else {
         const data = await api<ClientPortalData>("/api/portal/login", {
           method: "POST",
-          body: JSON.stringify({ phone, password, tenant_slug: slug }),
+          body: JSON.stringify({ phone, password }),
         });
         setClientSession(data);
         onClientSuccess(data);
@@ -135,7 +144,7 @@ export function TenantLogin({
     }
   }
 
-  const brand = tenant?.name || tenant?.app_name || slug;
+  const brand = tenant?.name || tenant?.app_name || "ISP";
 
   return (
     <AuthThemeCorner>
@@ -143,7 +152,7 @@ export function TenantLogin({
         brand={brand}
         logoUrl={tenant?.logo_url}
         title={isAdmin ? "Masuk admin" : "Login Portal Pelanggan"}
-        subtitle={isAdmin ? `Panel tenant /${slug}` : "Cek paket & tagihan · password default = nomor HP"}
+        subtitle={isAdmin ? "Panel administrator" : "Cek paket & tagihan · password default = nomor HP"}
       >
         {isAdmin ? (
           <form className="flex flex-col gap-3" onSubmit={onSubmit}>
