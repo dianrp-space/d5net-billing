@@ -786,7 +786,7 @@ input, select, textarea, button { font: inherit; }
 
 .landing {
   position: relative;
-  overflow: hidden;
+  overflow: clip;
   background: var(--bg);
   color: var(--text);
 }

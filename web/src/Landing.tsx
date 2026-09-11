@@ -81,7 +81,7 @@ export function Landing({ onGoLogin }: { onGoLogin: () => void }) {
     <div className="landing min-h-full">
       <ChatwootWidget />
       <div className="landing-bg" aria-hidden />
-      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 py-5 md:px-10">
+      <header className="sticky top-3 z-50 mx-auto mt-3 flex max-w-6xl items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel)]/85 px-4 py-3 shadow-[var(--shadow-sm)] backdrop-blur-md md:px-6">
         <span className="flex items-center gap-3">
           <img src={logo} alt={name} className="h-9 w-auto" />
           <span className="landing-brand text-xl">{name}</span>
