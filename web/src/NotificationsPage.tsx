@@ -101,14 +101,38 @@ export function NotificationsPage() {
           .map((s) => s.trim())
           .filter(Boolean);
       }
-      return api<{ queued: number }>("/api/notifications/broadcast", {
+      return api<{ queued: number; batch_id: string }>("/api/notifications/broadcast", {
         method: "POST",
         body: JSON.stringify(body),
       });
     },
-    onSuccess: (r) => void toastSuccess(`${r.queued} pesan diantrekan (delay ${bcast.delay_seconds}s)`),
+    onSuccess: (r) => {
+      setBatchId(r.batch_id);
+      void toastSuccess(`${r.queued} pesan diantrekan — memantau pengiriman…`);
+    },
     onError: (e: Error) => void toastError(e.message),
   });
+
+  const [batchId, setBatchId] = useState("");
+  type BroadcastProgress = {
+    total: number;
+    pending: number;
+    sent: number;
+    failed: number;
+    failures: { recipient: string; error: string }[];
+  };
+  const progressQ = useQuery({
+    queryKey: ["broadcast-progress", batchId],
+    queryFn: () => api<BroadcastProgress>(`/api/notifications/broadcast/${batchId}`),
+    enabled: Boolean(batchId),
+    refetchInterval: (query) => {
+      const d = query.state.data as BroadcastProgress | undefined;
+      return d && d.pending === 0 ? false : 2000;
+    },
+  });
+  const progress = progressQ.data;
+  const progressDone = progress ? progress.pending === 0 : false;
+  const progressPct = progress && progress.total > 0 ? Math.round(((progress.sent + progress.failed) / progress.total) * 100) : 0;
 
   const catalog = catalogQ.data ?? [];
   const templates = templatesQ.data ?? [];
@@ -223,6 +247,61 @@ export function NotificationsPage() {
           <Button type="button" onClick={() => sendBcast.mutate()} disabled={sendBcast.isPending}>
             {sendBcast.isPending ? "Mengantre…" : "Kirim broadcast"}
           </Button>
+          {batchId && progress ? (
+            <div className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel)] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">
+                  {progressDone ? "Pengiriman selesai" : "Mengirim…"} ({progress.sent + progress.failed}/{progress.total})
+                </h3>
+                <Button type="button" variant="outline" size="sm" onClick={() => setBatchId("")}>
+                  Tutup
+                </Button>
+              </div>
+              <div
+                className="h-2.5 overflow-hidden rounded-full bg-[var(--panel-muted)]"
+                role="progressbar"
+                aria-valuenow={progressPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className="h-full rounded-full bg-[var(--accent)] transition-all"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full border border-[var(--border)] px-2 py-0.5">
+                  ⏳ Menunggu: {progress.pending}
+                </span>
+                <span className="rounded-full border border-[var(--border)] px-2 py-0.5">
+                  ✅ Terkirim: {progress.sent}
+                </span>
+                {progress.failed > 0 ? (
+                  <span className="rounded-full border border-[var(--danger)] px-2 py-0.5 text-[var(--danger)]">
+                    ❌ Gagal: {progress.failed}
+                  </span>
+                ) : null}
+              </div>
+              {!progressDone ? (
+                <p className="text-xs text-[var(--muted)]">Memantau otomatis tiap 2 detik. Worker mengirim tiap ~15 detik.</p>
+              ) : progress.failed === 0 ? (
+                <p className="text-xs text-[var(--muted)]">Semua pesan terkirim.</p>
+              ) : null}
+              {progress.failures.length > 0 ? (
+                <ul className="grid gap-1 text-xs">
+                  {progress.failures.map((f) => (
+                    <li
+                      key={f.recipient}
+                      className="rounded-md border border-[var(--danger)]/40 px-2 py-1.5"
+                    >
+                      <span className="font-semibold">{f.recipient}</span>
+                      <span className="block text-[var(--muted)]">{f.error || "gagal tanpa keterangan"}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
           </div>
         </TabsContent>
         <TabsContent value="templates">

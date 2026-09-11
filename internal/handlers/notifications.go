@@ -98,7 +98,8 @@ func registerNotifications(api huma.API, d *Deps) {
 		}
 	}) (*struct {
 		Body struct {
-			Queued int `json:"queued"`
+			Queued  int    `json:"queued"`
+			BatchID string `json:"batch_id"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -141,16 +142,64 @@ func registerNotifications(api huma.API, d *Deps) {
 		if len(recipients) == 0 {
 			return nil, httpx.BadRequest("tidak ada penerima")
 		}
-		n, err := d.Notify.QueueBroadcast(ctx, tid, ch, input.Body.Subject, body, recipients, input.Body.DelaySeconds)
+		n, batch, err := d.Notify.QueueBroadcast(ctx, tid, ch, input.Body.Subject, body, recipients, input.Body.DelaySeconds)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
 		out := &struct {
 			Body struct {
-				Queued int `json:"queued"`
+				Queued  int    `json:"queued"`
+				BatchID string `json:"batch_id"`
 			}
 		}{}
 		out.Body.Queued = n
+		out.Body.BatchID = batch.String()
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "broadcast-progress", Method: http.MethodGet, Path: "/api/notifications/broadcast/{batch}",
+		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Batch string `path:"batch"`
+	}) (*struct {
+		Body struct {
+			Total    int64                     `json:"total"`
+			Pending  int64                     `json:"pending"`
+			Sent     int64                     `json:"sent"`
+			Failed   int64                     `json:"failed"`
+			Failures []notify.BroadcastFailure `json:"failures"`
+		}
+	}, error) {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		batchID, err := xid.Parse(strings.TrimSpace(input.Batch))
+		if err != nil {
+			return nil, httpx.BadRequest("batch tidak valid")
+		}
+		total, pending, sent, failed, failures, err := d.Notify.BroadcastProgress(ctx, tid, batchID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if failures == nil {
+			failures = []notify.BroadcastFailure{}
+		}
+		out := &struct {
+			Body struct {
+				Total    int64                     `json:"total"`
+				Pending  int64                     `json:"pending"`
+				Sent     int64                     `json:"sent"`
+				Failed   int64                     `json:"failed"`
+				Failures []notify.BroadcastFailure `json:"failures"`
+			}
+		}{}
+		out.Body.Total = total
+		out.Body.Pending = pending
+		out.Body.Sent = sent
+		out.Body.Failed = failed
+		out.Body.Failures = failures
 		return out, nil
 	})
 }

@@ -20,6 +20,7 @@ type Message struct {
 	Subject     string
 	Body        string
 	ScheduledAt *time.Time
+	BatchID     xid.ID
 }
 
 type Notifier interface {
@@ -50,28 +51,34 @@ func (s *Service) Register(n Notifier) {
 }
 
 func (s *Service) Queue(ctx context.Context, msg Message) error {
+	var batch any
+	if !xid.IsNil(msg.BatchID) {
+		batch = msg.BatchID
+	}
 	if msg.ScheduledAt != nil {
 		_, err := s.store.Pool.Exec(ctx, `
-			INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body, scheduled_at)
-			VALUES ($1,$2,$3,$4,$5,$6)
-		`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body, *msg.ScheduledAt)
+			INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body, scheduled_at, batch_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body, *msg.ScheduledAt, batch)
 		return err
 	}
 	_, err := s.store.Pool.Exec(ctx, `
-		INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body)
-		VALUES ($1,$2,$3,$4,$5)
-	`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body)
+		INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body, batch_id)
+		VALUES ($1,$2,$3,$4,$5,$6)
+	`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body, batch)
 	return err
 }
 
 // QueueBroadcast enqueues many messages with staggered scheduled_at (rate limit).
-func (s *Service) QueueBroadcast(ctx context.Context, tenantID xid.ID, channel, subject, body string, recipients []string, delaySeconds int) (int, error) {
+// Returns queued count + batch ID for progress tracking.
+func (s *Service) QueueBroadcast(ctx context.Context, tenantID xid.ID, channel, subject, body string, recipients []string, delaySeconds int) (int, xid.ID, error) {
 	if delaySeconds < 1 {
 		delaySeconds = 2
 	}
 	if delaySeconds > 60 {
 		delaySeconds = 60
 	}
+	batch := xid.New()
 	n := 0
 	base := time.Now()
 	for i, r := range recipients {
@@ -81,13 +88,49 @@ func (s *Service) QueueBroadcast(ctx context.Context, tenantID xid.ID, channel, 
 		}
 		at := base.Add(time.Duration(i*delaySeconds) * time.Second)
 		if err := s.Queue(ctx, Message{
-			TenantID: tenantID, Channel: channel, Recipient: r, Subject: subject, Body: body, ScheduledAt: &at,
+			TenantID: tenantID, Channel: channel, Recipient: r, Subject: subject, Body: body, ScheduledAt: &at, BatchID: batch,
 		}); err != nil {
-			return n, err
+			return n, batch, err
 		}
 		n++
 	}
-	return n, nil
+	return n, batch, nil
+}
+
+// BroadcastProgress aggregates queue rows of one batch for live progress UI.
+func (s *Service) BroadcastProgress(ctx context.Context, tenantID, batchID xid.ID) (total, pending, sent, failed int64, failures []BroadcastFailure, err error) {
+	err = s.store.Pool.QueryRow(ctx, `
+		SELECT COUNT(*),
+		       COUNT(*) FILTER (WHERE status = 'pending'),
+		       COUNT(*) FILTER (WHERE status = 'sent'),
+		       COUNT(*) FILTER (WHERE status = 'failed')
+		FROM notification_queue WHERE tenant_id = $1 AND batch_id = $2
+	`, tenantID, batchID).Scan(&total, &pending, &sent, &failed)
+	if err != nil {
+		return 0, 0, 0, 0, nil, err
+	}
+	rows, err := s.store.Pool.Query(ctx, `
+		SELECT recipient, COALESCE(error, '') FROM notification_queue
+		WHERE tenant_id = $1 AND batch_id = $2 AND status = 'failed'
+		ORDER BY created_at LIMIT 20
+	`, tenantID, batchID)
+	if err != nil {
+		return total, pending, sent, failed, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var f BroadcastFailure
+		if err := rows.Scan(&f.Recipient, &f.Error); err != nil {
+			continue
+		}
+		failures = append(failures, f)
+	}
+	return total, pending, sent, failed, failures, rows.Err()
+}
+
+type BroadcastFailure struct {
+	Recipient string `json:"recipient"`
+	Error     string `json:"error"`
 }
 
 func (s *Service) ProcessPending(ctx context.Context, limit int) (int, error) {
