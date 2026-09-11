@@ -103,6 +103,9 @@ type whatsappIntegrationView struct {
 	Devices    []waDeviceView `json:"devices"`
 	BotEnabled bool           `json:"bot_enabled"`
 	BotDevice  string         `json:"bot_device_id,omitempty"`
+	// BotName is the reference name of the customer payment bot (wabot),
+	// to tell it apart from future bots (e.g. a CS bot).
+	BotName string `json:"bot_name"`
 }
 
 type whatsappIntegrationPut struct {
@@ -703,6 +706,7 @@ func whatsappView(d *Deps, s messagingIntegrationStored) whatsappIntegrationView
 		Devices:    devices,
 		BotEnabled: s.WhatsAppBotEnabled,
 		BotDevice:  strings.TrimSpace(s.WhatsAppBotDeviceID),
+		BotName:    BotName,
 	}
 }
 

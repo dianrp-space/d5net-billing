@@ -5804,22 +5804,21 @@ func registerWebhooks(api huma.API, d *Deps) {
 			if terr != nil || ten == nil {
 				return empty, nil
 			}
-			handleWhatsAppBotMessage(ctx, d, ten.ID, ten, in)
+			handleWhatsAppBotMessage(ctx, d, ten.ID, in)
 			return empty, nil
 		}
 		if strings.TrimSpace(b.Message) == "" {
 			return empty, nil
 		}
 		tid := b.TenantID
-		ten, terr := d.Store.GetTenant(ctx, tid)
-		if terr != nil || ten == nil {
+		if _, terr := d.Store.GetTenant(ctx, tid); terr != nil {
 			fallback, ferr := singleTenant(ctx, d)
 			if ferr != nil || fallback == nil {
 				return empty, nil
 			}
-			tid, ten = fallback.ID, fallback
+			tid = fallback.ID
 		}
-		handleWhatsAppBotMessage(ctx, d, tid, ten, waBotIncoming{
+		handleWhatsAppBotMessage(ctx, d, tid, waBotIncoming{
 			From: b.Phone, ChatID: b.Phone, Body: b.Message,
 		})
 		return empty, nil

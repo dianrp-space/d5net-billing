@@ -279,7 +279,7 @@ WhatsApp tidak lagi memakai sesi in-process: arahkan tab WhatsApp di Integrasi k
 
 **Multi-nomor (redundansi):** pada satu gateway/base URL yang sama, bisa didaftarkan lebih dari satu device (nomor). Tombol **Muat device dari gateway** mengisi daftar dari `GET /app/devices`; tiap device dipilih lewat header `X-Device-Id`. Saat mengirim, sistem mencoba nomor secara berurutan dan lanjut ke nomor berikutnya bila gagal (failover). **Cek koneksi** menampilkan status per nomor. Bila daftar dikosongkan, dipakai device default gateway.
 
-### Bot WhatsApp pelanggan
+### Bot WhatsApp pelanggan (`wabot`)
 
 Di **Integrasi → Messaging Gateway → WhatsApp**, aktifkan **Bot WhatsApp pelanggan** dan pilih **nomor bot** (device ID). Bot hanya membalas bila pengirim adalah pelanggan aktif dan perintahnya cocok:
 

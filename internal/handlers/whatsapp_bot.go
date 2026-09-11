@@ -22,6 +22,11 @@ import (
 // All replies are pushed straight from the configured bot number; the webhook
 // itself always answers with an empty reply.
 
+// BotName identifies this customer payment bot, for reference in settings,
+// logs, and UI. If more bots are added later (e.g. a CS bot), each gets its
+// own name and handler instead of sharing this one.
+const BotName = "wabot"
+
 type waBotIncoming struct {
 	// DeviceJID is the GOWA top-level device_id (receiving number JID).
 	DeviceJID string
@@ -242,7 +247,7 @@ func botSettings(ctx context.Context, d *Deps, tid xid.ID) (enabled bool, botDev
 	return cfg.WhatsAppBotEnabled, strings.TrimSpace(cfg.WhatsAppBotDeviceID)
 }
 
-func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, ten *store.Tenant, in waBotIncoming) {
+func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBotIncoming) {
 	if in.FromMe || strings.TrimSpace(in.From) == "" || strings.TrimSpace(in.Body) == "" {
 		return
 	}
@@ -267,19 +272,19 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, ten *sto
 	default:
 		return // selain command itu bot tidak membalas
 	}
+	slog.Info("wabot command", "bot", BotName, "tenant_id", tid, "cmd", cmd)
 
 	client, err := botClientForTenant(ctx, d, tid)
 	if err != nil {
-		slog.Warn("wa bot: gateway tidak siap", "tenant_id", tid, "err", err)
+		slog.Warn("wabot: gateway tidak siap", "bot", BotName, "tenant_id", tid, "err", err)
 		return
 	}
 	phone := in.From
-	appName := ten.Name
 
+	// Bot hanya melayani nomor yang sudah terdaftar sebagai pelanggan aktif.
+	// Nomor tak dikenal tidak dibalas sama sekali.
 	custs := matchBotCustomers(ctx, d, tid, phone)
 	if len(custs) == 0 {
-		_ = client.SendText(ctx, phone,
-			"Halo, nomor WhatsApp ini belum terdaftar sebagai pelanggan "+appName+".\nHubungi admin untuk pendaftaran.")
 		return
 	}
 	name := strings.TrimSpace(custs[0].FullName)
@@ -310,7 +315,7 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, ten *sto
 	case "/tagihan":
 		inv, items, err := d.Store.GetInvoice(ctx, tid, target.ID)
 		if err != nil {
-			slog.Warn("wa bot: get invoice", "tenant_id", tid, "err", err)
+			slog.Warn("wabot: get invoice", "bot", BotName, "tenant_id", tid, "err", err)
 			return
 		}
 		pdf := renderInvoicePDF(ctx, d, tid, inv, items)
@@ -321,7 +326,7 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, ten *sto
 		caption := fmt.Sprintf("Tagihan %s\n%s • jatuh tempo %s%s",
 			inv.InvoiceNumber, formatRupiahID(remaining), due, extra)
 		if err := client.SendFile(ctx, phone, caption, inv.InvoiceNumber+".pdf", "application/pdf", pdf); err != nil {
-			slog.Warn("wa bot: kirim PDF", "tenant_id", tid, "err", err)
+			slog.Warn("wabot: kirim PDF", "bot", BotName, "tenant_id", tid, "err", err)
 		}
 	case "/link", "/qris":
 		opts := listEnabledPayOptions(ctx, d, tid)
@@ -347,7 +352,7 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, ten *sto
 				if serr := client.SendImage(ctx, phone, caption, png); serr == nil {
 					return
 				} else {
-					slog.Warn("wa bot: kirim QRIS", "tenant_id", tid, "err", serr)
+					slog.Warn("wabot: kirim QRIS", "bot", BotName, "tenant_id", tid, "err", serr)
 				}
 			}
 		}

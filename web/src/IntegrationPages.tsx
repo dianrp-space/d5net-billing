@@ -470,6 +470,7 @@ type WhatsAppIntegration = {
   devices: WADevice[];
   bot_enabled: boolean;
   bot_device_id?: string;
+  bot_name?: string;
 };
 type WACheckRow = {
   device_id: string;
@@ -768,7 +769,9 @@ function WhatsAppTab() {
           <div className="rounded-xl border border-[var(--border)] p-3">
             <div className="mb-2 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">Bot WhatsApp pelanggan</p>
+                <p className="text-sm font-medium">
+                  Bot WhatsApp pelanggan <code className="rounded bg-[var(--panel-muted)] px-1.5 py-0.5 font-mono text-[11px]">{q.data?.bot_name || "wabot"}</code>
+                </p>
                 <p className="text-[10px] text-[var(--muted)]">
                   Jawab <code>/tagihan</code> · <code>/link</code> · <code>/qris</code> bila ada tagihan berjalan
                 </p>
