@@ -30,7 +30,10 @@ type Cluster struct {
 	CreatedAt           time.Time `json:"created_at"`
 }
 
-const defaultCustomerCodePattern = "{prefix}-{yyyymm}-{seq}"
+const defaultCustomerCodePattern = "{prefix}-{yyyymm}{seq}"
+
+// DefaultCustomerCodePrefix dipakai saat prefix kosong (mis. kode tenant tanpa cluster).
+const DefaultCustomerCodePrefix = "BTC"
 
 func NormalizeClusterCode(s string) string {
 	var b strings.Builder
@@ -45,6 +48,9 @@ func NormalizeClusterCode(s string) string {
 func FormatCustomerCode(pattern, prefix string, seqWidth int, now time.Time, seq int) string {
 	if strings.TrimSpace(pattern) == "" {
 		pattern = defaultCustomerCodePattern
+	}
+	if strings.TrimSpace(prefix) == "" {
+		prefix = DefaultCustomerCodePrefix
 	}
 	if seqWidth <= 0 {
 		seqWidth = 4
@@ -199,7 +205,26 @@ func (s *Store) DeleteCluster(ctx context.Context, tenantID, id xid.ID) error {
 }
 
 // NextCustomerCodeForCluster allocates the next code for a cluster (atomic per period).
+// It skips codes already used by other clusters/tenant-level codes so the
+// tenant-wide unique constraint on customer_code is never violated.
 func (s *Store) NextCustomerCodeForCluster(ctx context.Context, tenantID, clusterID xid.ID) (string, error) {
+	for i := 0; i < 100; i++ {
+		code, err := s.allocClusterCode(ctx, tenantID, clusterID)
+		if err != nil {
+			return "", err
+		}
+		taken, err := s.customerCodeTaken(ctx, tenantID, code)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return code, nil
+		}
+	}
+	return "", fmt.Errorf("gagal membuat kode pelanggan unik")
+}
+
+func (s *Store) allocClusterCode(ctx context.Context, tenantID, clusterID xid.ID) (string, error) {
 	var code string
 	err := s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var c Cluster

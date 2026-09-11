@@ -13,6 +13,8 @@ import (
 
 const invoiceNumberMaxLen = 50
 
+const invoiceNumberSuffixLen = 6
+
 const invoiceNumberAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 func randomInvoiceSuffix(n int) string {
@@ -33,66 +35,36 @@ func randomInvoiceSuffix(n int) string {
 	return string(b)
 }
 
-// FormatInvoiceNumber builds INV-<tenant_slug>-<customer_code>-<mmyyyy>-<5 char>.
-func FormatInvoiceNumber(tenantSlug, customerCode string, at time.Time) string {
+// FormatInvoiceNumber builds INV-<customer_code>-<mmyyyy>-<6 char>.
+func FormatInvoiceNumber(customerCode string, at time.Time) string {
 	if at.IsZero() {
 		at = time.Now()
 	}
-	return formatInvoiceNumber(tenantSlug, customerCode, at, randomInvoiceSuffix(5))
+	return formatInvoiceNumber(customerCode, at, randomInvoiceSuffix(invoiceNumberSuffixLen))
 }
 
-func formatInvoiceNumber(tenantSlug, customerCode string, at time.Time, suffix string) string {
+func formatInvoiceNumber(customerCode string, at time.Time, suffix string) string {
 	suffix = sanitizeInvoiceToken(suffix)
 	if suffix == "" {
-		suffix = randomInvoiceSuffix(5)
+		suffix = randomInvoiceSuffix(invoiceNumberSuffixLen)
 	}
-	if len(suffix) > 5 {
-		suffix = suffix[:5]
+	if len(suffix) > invoiceNumberSuffixLen {
+		suffix = suffix[:invoiceNumberSuffixLen]
 	}
-	for len(suffix) < 5 {
+	for len(suffix) < invoiceNumberSuffixLen {
 		suffix += "X"
 	}
 	period := at.Format("012006") // mmyyyy
-	slug := sanitizeInvoiceToken(tenantSlug)
 	code := sanitizeInvoiceToken(customerCode)
-	if slug == "" {
-		slug = "tenant"
-	}
 	if code == "" {
 		code = "cust"
 	}
-	budget := invoiceNumberMaxLen - (4 + 1 + 1 + 6 + 1 + 5)
-	slug, code = fitInvoiceParts(slug, code, budget)
-	return "INV-" + slug + "-" + code + "-" + period + "-" + suffix
-}
-
-func fitInvoiceParts(slug, code string, budget int) (string, string) {
-	if budget < 2 {
-		return "t", "c"
+	// "INV-" + code + "-" + mmyyyy + "-" + suffix
+	budget := invoiceNumberMaxLen - (4 + 1 + 6 + 1 + invoiceNumberSuffixLen)
+	if len(code) > budget {
+		code = code[:budget]
 	}
-	if len(slug)+len(code) <= budget {
-		return slug, code
-	}
-	slugMax := budget / 2
-	if slugMax < 1 {
-		slugMax = 1
-	}
-	codeMax := budget - slugMax
-	if len(slug) < slugMax {
-		codeMax = budget - len(slug)
-		slugMax = len(slug)
-	}
-	if len(code) < codeMax {
-		slugMax = budget - len(code)
-		codeMax = len(code)
-	}
-	if len(slug) > slugMax {
-		slug = slug[:slugMax]
-	}
-	if len(code) > codeMax {
-		code = code[:codeMax]
-	}
-	return slug, code
+	return "INV-" + code + "-" + period + "-" + suffix
 }
 
 func sanitizeInvoiceToken(s string) string {
@@ -120,12 +92,8 @@ func (s *Store) NextInvoiceNumber(ctx context.Context, tenantID xid.ID, customer
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return "", err
 	}
-	slug := ""
-	if ten, err := s.GetTenant(ctx, tenantID); err == nil && ten != nil {
-		slug = ten.Slug
-	}
 	for i := 0; i < 12; i++ {
-		num := FormatInvoiceNumber(slug, customerCode, time.Now())
+		num := FormatInvoiceNumber(customerCode, time.Now())
 		var exists bool
 		if err := s.Pool.QueryRow(ctx, `
 			SELECT EXISTS(SELECT 1 FROM invoices WHERE tenant_id=$1 AND invoice_number=$2)

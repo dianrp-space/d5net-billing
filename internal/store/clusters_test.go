@@ -7,8 +7,8 @@ import (
 
 func TestFormatCustomerCode(t *testing.T) {
 	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
-	got := FormatCustomerCode("{prefix}-{yyyymm}-{seq}", "DLMA", 4, now, 1)
-	want := "DLMA-202609-0001"
+	got := FormatCustomerCode("{prefix}-{yyyymm}{seq}", "BTC", 4, now, 1)
+	want := "BTC-2026090001"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

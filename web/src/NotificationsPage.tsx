@@ -28,7 +28,7 @@ type TemplateEvent = {
 const PREVIEW_SAMPLES: Record<string, string> = {
   customer_name: "Budi Santoso",
   plan_name: "Home 20 Mbps",
-  invoice_number: "INV-demo-CUST-001-092026-A3F9K",
+  invoice_number: "INV-BTC-2026090001-092026-A3F9K2",
   amount: "150000",
   due_date: "10/09/2026",
   message: "(isi pesan broadcast)",

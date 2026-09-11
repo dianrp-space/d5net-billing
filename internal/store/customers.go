@@ -365,12 +365,31 @@ func (s *Store) ListCustomersByPhone(ctx context.Context, tenantID xid.ID, phone
 }
 
 func (s *Store) NextCustomerCode(ctx context.Context, tenantID xid.ID) (string, error) {
-	var count int64
-	err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM customers WHERE tenant_id = $1`, tenantID).Scan(&count)
-	if err != nil {
-		return "", err
+	now := time.Now()
+	for i := 0; i < 100; i++ {
+		var count int64
+		err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM customers WHERE tenant_id = $1`, tenantID).Scan(&count)
+		if err != nil {
+			return "", err
+		}
+		code := fmt.Sprintf("%s-%s%04d", DefaultCustomerCodePrefix, now.Format("200601"), count+1+int64(i))
+		taken, err := s.customerCodeTaken(ctx, tenantID, code)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return code, nil
+		}
 	}
-	return fmt.Sprintf("CUST-%05d", count+1), nil
+	return "", fmt.Errorf("gagal membuat kode pelanggan unik")
+}
+
+func (s *Store) customerCodeTaken(ctx context.Context, tenantID xid.ID, code string) (bool, error) {
+	var exists bool
+	err := s.Pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM customers WHERE tenant_id = $1 AND customer_code = $2)
+	`, tenantID, code).Scan(&exists)
+	return exists, err
 }
 
 // ListCustomersWithCoords returns customers that have map coordinates (for FTTH map).

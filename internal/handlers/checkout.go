@@ -86,7 +86,7 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	}
 	req.MerchantOrderID = strings.TrimSpace(inv.InvoiceNumber)
 	if req.MerchantOrderID == "" {
-		req.MerchantOrderID = store.FormatInvoiceNumber("", "", time.Now())
+		req.MerchantOrderID = store.FormatInvoiceNumber("", time.Now())
 	}
 	if req.CustomerName == "" {
 		req.CustomerName = strings.TrimSpace(inv.CustomerName)

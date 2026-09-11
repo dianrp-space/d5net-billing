@@ -41,7 +41,7 @@ export function ClustersPage() {
     name: "",
     code: "",
     customer_code_prefix: "",
-    customer_code_pattern: "{prefix}-{yyyymm}-{seq}",
+    customer_code_pattern: "{prefix}-{yyyymm}{seq}",
     seq_width: 4,
     address: "",
     latitude: "",
@@ -155,7 +155,7 @@ export function ClustersPage() {
       name: c.name,
       code: c.code,
       customer_code_prefix: c.customer_code_prefix,
-      customer_code_pattern: c.customer_code_pattern || "{prefix}-{yyyymm}-{seq}",
+      customer_code_pattern: c.customer_code_pattern || "{prefix}-{yyyymm}{seq}",
       seq_width: c.seq_width || 4,
       address: c.address || "",
       latitude: c.latitude != null ? String(c.latitude) : "",
@@ -181,9 +181,9 @@ export function ClustersPage() {
   );
   const saving = create.isPending || update.isPending;
   const dialogOpen = createOpen || Boolean(editId);
-  const examplePrefix = (form.customer_code_prefix || form.code || "DLMA").toUpperCase().replace(/[^A-Z0-9]/g, "") || "DLMA";
+  const examplePrefix = (form.customer_code_prefix || form.code || "BTC").toUpperCase().replace(/[^A-Z0-9]/g, "") || "BTC";
   const yyyymm = new Date().toISOString().slice(0, 7).replace("-", "");
-  const exampleCode = (form.customer_code_pattern || "{prefix}-{yyyymm}-{seq}")
+  const exampleCode = (form.customer_code_pattern || "{prefix}-{yyyymm}{seq}")
     .replace("{prefix}", examplePrefix)
     .replace("{yyyymm}", yyyymm)
     .replace("{yyyy}", yyyymm.slice(0, 4))
@@ -305,7 +305,7 @@ export function ClustersPage() {
           />
           <input
             className="input sm:col-span-2"
-            placeholder="Pola kode ({prefix}-{yyyymm}-{seq})"
+            placeholder="Pola kode ({prefix}-{yyyymm}{seq})"
             value={form.customer_code_pattern}
             onChange={(e) => setForm({ ...form, customer_code_pattern: e.target.value })}
           />
