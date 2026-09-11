@@ -3080,29 +3080,37 @@ func registerRouters(api huma.API, d *Deps) {
 	})
 }
 
+// Tipe bernama untuk create-manual-invoice: huma menamai struct anonim dari
+// nama field ("Items" → "Item") sehingga bentrok dengan endpoint lain.
+type manualInvoiceItemInput struct {
+	Description string `json:"description"`
+	Quantity    int    `json:"quantity"`
+	UnitPrice   int64  `json:"unit_price"`
+}
+
+type manualInvoiceInput struct {
+	CustomerID     string                   `json:"customer_id"`
+	DueDate        string                   `json:"due_date,omitempty"`
+	DiscountAmount int64                    `json:"discount_amount,omitempty"`
+	TaxPercent     float64                  `json:"tax_percent,omitempty"`
+	Items          []manualInvoiceItemInput `json:"items"`
+}
+
+type manualInvoiceOutput struct {
+	ID            xid.ID `json:"id"`
+	InvoiceNumber string  `json:"invoice_number"`
+	TotalAmount   int64   `json:"total_amount"`
+	DueDate       string  `json:"due_date"`
+}
+
 func registerInvoices(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "create-manual-invoice", Method: http.MethodPost, Path: "/api/invoices",
 		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		Body struct {
-			CustomerID     string  `json:"customer_id"`
-			DueDate        string  `json:"due_date,omitempty"`
-			DiscountAmount int64   `json:"discount_amount,omitempty"`
-			TaxPercent     float64 `json:"tax_percent,omitempty"`
-			Items          []struct {
-				Description string `json:"description"`
-				Quantity    int    `json:"quantity"`
-				UnitPrice   int64  `json:"unit_price"`
-			} `json:"items"`
-		}
+		Body manualInvoiceInput
 	}) (*struct {
-		Body struct {
-			ID            xid.ID `json:"id"`
-			InvoiceNumber string  `json:"invoice_number"`
-			TotalAmount   int64   `json:"total_amount"`
-			DueDate       string  `json:"due_date"`
-		}
+		Body manualInvoiceOutput
 	}, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
@@ -3186,12 +3194,7 @@ func registerInvoices(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		out := &struct {
-			Body struct {
-				ID            xid.ID `json:"id"`
-				InvoiceNumber string  `json:"invoice_number"`
-				TotalAmount   int64   `json:"total_amount"`
-				DueDate       string  `json:"due_date"`
-			}
+			Body manualInvoiceOutput
 		}{}
 		out.Body.ID = inv.ID
 		out.Body.InvoiceNumber = invNum
