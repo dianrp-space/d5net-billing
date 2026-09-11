@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 
@@ -75,6 +75,42 @@ export function toggleTheme(): Theme {
 /** Call once before React paint (also duplicated inline in index.html). */
 export function initTheme() {
   applyTheme(getStoredTheme());
+}
+
+export type ChartColors = {
+  bar: string;
+  axis: string;
+  grid: string;
+  text: string;
+  panel: string;
+  border: string;
+};
+
+function readChartColors(): ChartColors {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (key: string, fallback: string) => cs.getPropertyValue(key).trim() || fallback;
+  return {
+    bar: v("--chart-bar", "#5a5a40"),
+    axis: v("--chart-axis", "#6b6962"),
+    grid: v("--chart-grid", "#f1f0ea"),
+    text: v("--text", "#1a1a1a"),
+    panel: v("--panel", "#ffffff"),
+    border: v("--border", "#e5e2d8"),
+  };
+}
+
+/**
+ * Warna chart yang di-resolve dari CSS vars (ECharts tidak memahami `var(--…)`).
+ * Otomatis ikut berubah saat tema light/dark atau accent tenant berubah.
+ */
+export function useChartColors(): ChartColors {
+  const [colors, setColors] = useState<ChartColors>(readChartColors);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setColors(readChartColors()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
+    return () => obs.disconnect();
+  }, []);
+  return colors;
 }
 
 /** Loads provider primary color for login / admin / portal / isolir. */

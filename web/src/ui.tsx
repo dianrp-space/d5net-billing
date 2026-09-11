@@ -28,9 +28,25 @@ export { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger,
 export { SearchableSelect, type SearchableOption } from "./SearchableSelect";
 
 /** Stat card for dashboard — keeps NeedMCP layout class. */
-export function Card({ title, value, hint }: { title: string; value: string | number; hint?: string }) {
+export function Card({ title, value, hint, onClick }: { title: string; value: string | number; hint?: string; onClick?: () => void }) {
   return (
-    <div className="stat-card" title={hint}>
+    <div
+      className={`stat-card${onClick ? " cursor-pointer transition-colors hover:border-[var(--accent)]" : ""}`}
+      title={hint}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+    >
       <div className="stat-card-label">{title}</div>
       <div className="stat-card-value">{value}</div>
       {hint ? <p className="mt-1 text-[10px] leading-snug text-[var(--muted)]">{hint}</p> : null}

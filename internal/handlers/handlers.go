@@ -3082,6 +3082,124 @@ func registerRouters(api huma.API, d *Deps) {
 
 func registerInvoices(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
+		OperationID: "create-manual-invoice", Method: http.MethodPost, Path: "/api/invoices",
+		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			CustomerID     string  `json:"customer_id"`
+			DueDate        string  `json:"due_date,omitempty"`
+			DiscountAmount int64   `json:"discount_amount,omitempty"`
+			TaxPercent     float64 `json:"tax_percent,omitempty"`
+			Items          []struct {
+				Description string `json:"description"`
+				Quantity    int    `json:"quantity"`
+				UnitPrice   int64  `json:"unit_price"`
+			} `json:"items"`
+		}
+	}) (*struct {
+		Body struct {
+			ID            xid.ID `json:"id"`
+			InvoiceNumber string  `json:"invoice_number"`
+			TotalAmount   int64   `json:"total_amount"`
+			DueDate       string  `json:"due_date"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cid, err := xid.Parse(strings.TrimSpace(input.Body.CustomerID))
+		if err != nil {
+			return nil, httpx.BadRequest("customer_id tidak valid")
+		}
+		cust, err := d.Store.GetCustomer(ctx, tid, cid)
+		if err != nil {
+			return nil, httpx.NotFound("pelanggan tidak ditemukan")
+		}
+		if cust.ServiceStatus == "dismantled" {
+			return nil, httpx.BadRequest("pelanggan sudah dismantle")
+		}
+		if len(input.Body.Items) == 0 {
+			return nil, httpx.BadRequest("minimal satu item tagihan")
+		}
+		var subtotal int64
+		items := make([]store.InvoiceItem, 0, len(input.Body.Items))
+		for _, it := range input.Body.Items {
+			desc := strings.TrimSpace(it.Description)
+			if desc == "" {
+				return nil, httpx.BadRequest("deskripsi item tidak boleh kosong")
+			}
+			if it.Quantity < 1 {
+				return nil, httpx.BadRequest("qty item minimal 1")
+			}
+			if it.UnitPrice < 0 {
+				return nil, httpx.BadRequest("harga item tidak boleh negatif")
+			}
+			amount := int64(it.Quantity) * it.UnitPrice
+			subtotal += amount
+			items = append(items, store.InvoiceItem{
+				Description: desc,
+				Quantity:    it.Quantity,
+				UnitPrice:   it.UnitPrice,
+				Amount:      amount,
+			})
+		}
+		discount := input.Body.DiscountAmount
+		if discount < 0 || discount > subtotal {
+			return nil, httpx.BadRequest("diskon tidak valid")
+		}
+		taxPct := input.Body.TaxPercent
+		if taxPct < 0 || taxPct > 100 {
+			return nil, httpx.BadRequest("pajak tidak valid")
+		}
+		taxable := subtotal - discount
+		tax := int64(math.Round(float64(taxable) * taxPct / 100))
+		total := taxable + tax
+		if total <= 0 {
+			return nil, httpx.BadRequest("total tagihan harus lebih dari 0")
+		}
+		var dueDate time.Time
+		if s := strings.TrimSpace(input.Body.DueDate); s != "" {
+			dueDate, err = time.Parse("2006-01-02", s)
+			if err != nil {
+				return nil, httpx.BadRequest("due_date harus format YYYY-MM-DD")
+			}
+		} else {
+			dueDate = billing.NextDueDate(time.Now(), d.Store.InvoiceDueDay(ctx, tid))
+		}
+		invNum, err := d.Store.NextInvoiceNumber(ctx, tid, cust.CustomerCode)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		inv := &store.Invoice{
+			TenantID:       tid,
+			CustomerID:     cid,
+			InvoiceNumber:  invNum,
+			Subtotal:       subtotal,
+			TaxAmount:      tax,
+			DiscountAmount: discount,
+			TotalAmount:    total,
+			Status:         "issued",
+			DueDate:        dueDate,
+		}
+		if err := d.Store.CreateInvoice(ctx, inv, items); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := &struct {
+			Body struct {
+				ID            xid.ID `json:"id"`
+				InvoiceNumber string  `json:"invoice_number"`
+				TotalAmount   int64   `json:"total_amount"`
+				DueDate       string  `json:"due_date"`
+			}
+		}{}
+		out.Body.ID = inv.ID
+		out.Body.InvoiceNumber = invNum
+		out.Body.TotalAmount = total
+		out.Body.DueDate = dueDate.Format("2006-01-02")
+		return out, nil
+	})
+	huma.Register(api, huma.Operation{
 		OperationID: "list-invoices", Method: http.MethodGet, Path: "/api/invoices",
 		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {

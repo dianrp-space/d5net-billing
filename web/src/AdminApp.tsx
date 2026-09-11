@@ -66,6 +66,7 @@ const ClustersPage = lazy(() =>
   import("./pages/ClustersPage").then((m) => ({ default: m.ClustersPage })),
 );
 const PlansPage = lazy(() => import("./pages/PlansPage").then((m) => ({ default: m.PlansPage })));
+const OffersPage = lazy(() => import("./pages/OffersPage").then((m) => ({ default: m.OffersPage })));
 const DiscountsPage = lazy(() =>
   import("./pages/DiscountsPage").then((m) => ({ default: m.DiscountsPage })),
 );
@@ -146,6 +147,7 @@ const navGroups: NavGroup[] = [
     label: "Finance",
     items: [
       { id: "plans", label: "Paket", icon: <IconBox /> },
+      { id: "offers", label: "Paket per Cluster", icon: <IconMapPin /> },
       { id: "invoices", label: "Tagihan", icon: <IconChart /> },
       { id: "payments", label: "Pembayaran", icon: <IconBanknote /> },
       { id: "accounting", label: "Akunting", icon: <IconBanknote /> },
@@ -517,6 +519,7 @@ export function AdminApp({
               ) : null}
               {page === "clusters" && <ClustersPage />}
               {page === "plans" && <PlansPage onNavigate={(p) => onNavigate(p)} />}
+              {page === "offers" && <OffersPage onNavigate={(p) => onNavigate(p)} />}
               {page === "discounts" && <DiscountsPage />}
               {page === "invoices" && <InvoicesPage />}
               {page === "payments" && <PaymentsPage />}

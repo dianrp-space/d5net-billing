@@ -1,11 +1,21 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
 import { useAppDialog } from "../confirm";
-import { toastError } from "../swal";
-import { formatRp, Section, Table, Button, invoiceStatusLabel } from "../ui";
+import { toastError, toastSuccess } from "../swal";
+import { formatRp, FormDialog, Input, SearchableSelect, Section, Table, Button, invoiceStatusLabel } from "../ui";
+import { Label } from "@/components/ui/label";
 import { InvoiceActions } from "../AdminExtra";
+
+type CustomerLookup = {
+  id: string;
+  customer_code: string;
+  full_name: string;
+  phone: string;
+};
+
+type IssueItem = { description: string; quantity: number; unit_price: number };
 
 export function InvoicesPage() {
   const qc = useQueryClient();
@@ -47,6 +57,72 @@ export function InvoicesPage() {
   const total = q.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / limit));
 
+  const [issueOpen, setIssueOpen] = useState(false);
+  const [issueErr, setIssueErr] = useState("");
+  const [customerId, setCustomerId] = useState("");
+  const [items, setItems] = useState<IssueItem[]>([{ description: "", quantity: 1, unit_price: 0 }]);
+  const [discount, setDiscount] = useState(0);
+  const [taxPct, setTaxPct] = useState(0);
+  const [dueDate, setDueDate] = useState("");
+
+  const customersQ = useQuery({
+    queryKey: ["customers-lookup"],
+    queryFn: () => api<{ data: CustomerLookup[] }>("/api/customers?limit=300"),
+    enabled: issueOpen,
+  });
+  const customerOpts = (customersQ.data?.data ?? []).map((c) => ({
+    value: c.id,
+    label: `${c.full_name} (${c.customer_code})`,
+    keywords: `${c.full_name} ${c.customer_code} ${c.phone}`,
+  }));
+
+  const subtotal = items.reduce((s, it) => s + Math.max(0, Math.floor(Number(it.quantity) || 0)) * Math.max(0, Math.floor(Number(it.unit_price) || 0)), 0);
+  const discountClamped = Math.max(0, Math.min(subtotal, Math.floor(Number(discount) || 0)));
+  const tax = Math.round((subtotal - discountClamped) * Math.max(0, Number(taxPct) || 0) / 100);
+  const grandTotal = subtotal - discountClamped + tax;
+
+  function openIssue() {
+    setIssueErr("");
+    setCustomerId("");
+    setItems([{ description: "", quantity: 1, unit_price: 0 }]);
+    setDiscount(0);
+    setTaxPct(0);
+    setDueDate("");
+    setIssueOpen(true);
+  }
+
+  function closeIssue() {
+    setIssueOpen(false);
+    setIssueErr("");
+  }
+
+  const issueInvoice = useMutation({
+    mutationFn: () =>
+      api<{ invoice_number: string; total_amount: number }>("/api/invoices", {
+        method: "POST",
+        body: JSON.stringify({
+          customer_id: customerId,
+          due_date: dueDate || undefined,
+          discount_amount: discountClamped || undefined,
+          tax_percent: taxPct || undefined,
+          items: items.map((it) => ({
+            description: it.description.trim(),
+            quantity: Math.max(1, Math.floor(Number(it.quantity) || 1)),
+            unit_price: Math.max(0, Math.floor(Number(it.unit_price) || 0)),
+          })),
+        }),
+      }),
+    onSuccess: (res) => {
+      closeIssue();
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      void toastSuccess(`Tagihan ${res.invoice_number} diterbitkan (${formatRp(res.total_amount)})`);
+    },
+    onError: (e: Error) => {
+      setIssueErr(e.message);
+      void toastError(e.message);
+    },
+  });
+
   async function exportCsv() {
     const ok = await confirm({
       title: "Export tagihan",
@@ -66,7 +142,14 @@ export function InvoicesPage() {
   }
 
   return (
-    <Section title="Tagihan">
+    <Section
+      title="Tagihan"
+      actions={
+        <button type="button" className="btn" onClick={openIssue}>
+          + Terbitkan tagihan
+        </button>
+      }
+    >
       <p className="mb-3 text-sm text-[var(--muted)]">
         {status === "trashed"
           ? "Tagihan di sampah. Pulihkan jika terhapus karena kesalahan. Portal pelanggan tidak menampilkan item ini."
@@ -126,6 +209,140 @@ export function InvoicesPage() {
           />,
         ])}
       />
+
+      <FormDialog open={issueOpen} wide title="Terbitkan tagihan manual" onClose={closeIssue}>
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            issueInvoice.mutate();
+          }}
+        >
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <Label htmlFor="issue-customer">Pelanggan</Label>
+            <SearchableSelect
+              id="issue-customer"
+              required
+              placeholder="— Pilih pelanggan —"
+              searchPlaceholder="Cari nama, kode, atau HP…"
+              emptyText={customersQ.isLoading ? "Memuat…" : "Tidak ada hasil"}
+              value={customerId}
+              onValueChange={setCustomerId}
+              options={customerOpts}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label>Item tagihan</Label>
+            {items.map((it, idx) => (
+              <div key={idx} className="grid grid-cols-[1fr_72px_130px_auto] items-center gap-2">
+                <Input
+                  placeholder={`Item ${idx + 1} (mis. Biaya instalasi)`}
+                  value={it.description}
+                  onChange={(e) => setItems(items.map((x, i) => (i === idx ? { ...x, description: e.target.value } : x)))}
+                  required
+                />
+                <Input
+                  type="number"
+                  min={1}
+                  title="Qty"
+                  placeholder="Qty"
+                  value={it.quantity}
+                  onChange={(e) => setItems(items.map((x, i) => (i === idx ? { ...x, quantity: Number(e.target.value) } : x)))}
+                  required
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  title="Harga satuan (Rp)"
+                  placeholder="Harga (Rp)"
+                  value={it.unit_price}
+                  onChange={(e) => setItems(items.map((x, i) => (i === idx ? { ...x, unit_price: Number(e.target.value) } : x)))}
+                  required
+                />
+                <button
+                  type="button"
+                  className="btn-ghost px-2"
+                  title="Hapus item"
+                  disabled={items.length <= 1}
+                  onClick={() => setItems(items.filter((_, i) => i !== idx))}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn-ghost self-start"
+              onClick={() => setItems([...items, { description: "", quantity: 1, unit_price: 0 }])}
+            >
+              + Tambah item
+            </button>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <Label htmlFor="issue-discount">Diskon (Rp)</Label>
+              <Input
+                id="issue-discount"
+                type="number"
+                min={0}
+                value={discount}
+                onChange={(e) => setDiscount(Number(e.target.value))}
+              />
+            </div>
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <Label htmlFor="issue-tax">Pajak (%)</Label>
+              <Input
+                id="issue-tax"
+                type="number"
+                min={0}
+                max={100}
+                value={taxPct}
+                onChange={(e) => setTaxPct(Number(e.target.value))}
+              />
+            </div>
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <Label htmlFor="issue-due">Jatuh tempo</Label>
+              <Input id="issue-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+              <p className="text-xs text-[var(--muted)]">Kosong = ikut pengaturan umum.</p>
+            </div>
+          </div>
+
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel-muted)]/40 px-3 py-2 text-sm">
+            <div className="flex justify-between text-[var(--muted)]">
+              <span>Subtotal</span>
+              <span>{formatRp(subtotal)}</span>
+            </div>
+            {discountClamped > 0 && (
+              <div className="flex justify-between text-[var(--muted)]">
+                <span>Diskon</span>
+                <span>−{formatRp(discountClamped)}</span>
+              </div>
+            )}
+            {tax > 0 && (
+              <div className="flex justify-between text-[var(--muted)]">
+                <span>Pajak</span>
+                <span>{formatRp(tax)}</span>
+              </div>
+            )}
+            <div className="mt-1 flex justify-between border-t border-[var(--border)] pt-1 font-bold">
+              <span>Total</span>
+              <span>{formatRp(grandTotal)}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={issueInvoice.isPending || !customerId || grandTotal <= 0}>
+              {issueInvoice.isPending ? "Menerbitkan…" : "Terbitkan"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={closeIssue}>
+              Batal
+            </Button>
+          </div>
+          {issueErr && <p className="text-sm text-[var(--danger)]">{issueErr}</p>}
+        </form>
+      </FormDialog>
     </Section>
   );
 }

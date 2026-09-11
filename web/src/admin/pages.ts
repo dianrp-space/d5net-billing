@@ -4,6 +4,7 @@ export type AdminPage =
   | "discounts"
   | "clusters"
   | "plans"
+  | "offers"
   | "subscriptions"
   | "invoices"
   | "payments"
@@ -36,6 +37,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   "discounts",
   "clusters",
   "plans",
+  "offers",
   "subscriptions",
   "invoices",
   "payments",
@@ -79,6 +81,7 @@ export const pageTitles: Record<AdminPage, string> = {
   discounts: "Diskon",
   clusters: "Cluster / POP",
   plans: "Paket",
+  offers: "Paket per Cluster",
   subscriptions: "Secrets",
   invoices: "Tagihan",
   payments: "Pembayaran",
