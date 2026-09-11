@@ -58,6 +58,46 @@ func TestDuitkuViewReturnsDecryptedKeyAndCallbackURL(t *testing.T) {
 	}
 }
 
+func TestDokuViewReturnsDecryptedSecretsAndCallbackURL(t *testing.T) {
+	enc, err := auth.NewEncryptor("01234567890123456789012345678901")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := enc.EncryptString("SK-test-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, err := enc.EncryptString("-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := dokuView(context.Background(), &Deps{Encryptor: enc}, xid.Nil(), dokuIntegrationStored{
+		ClientID:   "BRN-TEST-1",
+		SecretKey:  secret,
+		PrivateKey: priv,
+		MerchantID: "MALL-1",
+		TerminalID: "T001",
+		PostalCode: "28111",
+		Enabled:    true,
+	}, "http://localhost:5173", "", "", "", "127.0.0.1:8080")
+	if view.SecretKey != "SK-test-secret" {
+		t.Fatalf("secret = %q", view.SecretKey)
+	}
+	if !view.Configured || !view.Enabled || !view.HasPrivateKey || !view.QREnabled {
+		t.Fatal("expected configured+enabled+private+qr")
+	}
+	wantURL := "http://localhost:5173/api/webhooks/payment/doku"
+	if view.WebhookURL != wantURL {
+		t.Fatalf("webhook_url = %q, want %q", view.WebhookURL, wantURL)
+	}
+	if normalizePaymentProviderName("doku") != "doku" {
+		t.Fatal("normalize doku")
+	}
+	if paymentWebhookPathFor("doku") != "/api/webhooks/payment/doku" {
+		t.Fatalf("doku path = %q", paymentWebhookPathFor("doku"))
+	}
+}
+
 func TestSMTPViewReturnsDecryptedPasswordAndDefaultPort(t *testing.T) {
 	enc, err := auth.NewEncryptor("01234567890123456789012345678901")
 	if err != nil {

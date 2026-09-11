@@ -5602,6 +5602,15 @@ type paymentWebhookInput struct {
 	XCallbackToken     string `header:"X-CALLBACK-TOKEN"`
 	XCallbackSignature string `header:"X-Callback-Signature"`
 	XEventType         string `header:"X-Event-Type"`
+	ClientID           string `header:"Client-Id"`
+	RequestID          string `header:"Request-Id"`
+	RequestTimestamp   string `header:"Request-Timestamp"`
+	Signature          string `header:"Signature"`
+	XPartnerID         string `header:"X-PARTNER-ID"`
+	XExternalID        string `header:"X-EXTERNAL-ID"`
+	XTimestamp         string `header:"X-TIMESTAMP"`
+	XSnapSignature     string `header:"X-SIGNATURE"`
+	ChannelID          string `header:"CHANNEL-ID"`
 	Authorization      string `header:"Authorization"`
 	UserAgent          string `header:"User-Agent"`
 	Tenant             string `query:"tenant"`
@@ -5664,7 +5673,7 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		slog.Warn("payment webhook ignored", "provider", providerName, "reason", "manual provider has no webhook")
 		return webhookAck("ignored", "manual provider has no webhook"), nil
 	}
-	if providerName != payment.ProviderDuitku {
+	if providerName != payment.ProviderDuitku && providerName != payment.ProviderDoku {
 		slog.Warn("payment webhook ignored", "provider", providerName, "reason", "unknown provider")
 		return webhookAck("received", "unknown provider"), nil
 	}
@@ -5676,6 +5685,15 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		"X-Callback-Signature": input.XCallbackSignature,
 		"X-Event-Type":         input.XEventType,
 		"Authorization":        input.Authorization,
+		"Client-Id":            input.ClientID,
+		"Request-Id":           input.RequestID,
+		"Request-Timestamp":    input.RequestTimestamp,
+		"Signature":            input.Signature,
+		"X-PARTNER-ID":         input.XPartnerID,
+		"X-EXTERNAL-ID":        input.XExternalID,
+		"X-TIMESTAMP":          input.XTimestamp,
+		"X-SIGNATURE":          input.XSnapSignature,
+		"CHANNEL-ID":           input.ChannelID,
 	}
 
 	var prov payment.Provider
@@ -5753,7 +5771,6 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 			}
 			event.ExternalID = pi.ExternalID
 		}
-		_ = d.Store.UpdatePaymentIntentStatus(ctx, event.ExternalID, event.Status)
 	}
 
 	if payment.WebhookIsPaid(event.Status) && event.ExternalID != "" {
@@ -5761,6 +5778,12 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 			slog.Error("complete paid webhook", "external_id", event.ExternalID, "err", err)
 			return nil, httpx.Internal(err)
 		}
+	}
+
+	// Sync the intent status after completion: completePaidWebhook relies on
+	// the pre-webhook status for idempotency, so this must run last.
+	if event.ExternalID != "" {
+		_ = d.Store.UpdatePaymentIntentStatus(ctx, event.ExternalID, event.Status)
 	}
 
 	slog.Info("payment webhook processed",
@@ -5775,6 +5798,7 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 
 func registerWebhooks(api huma.API, d *Deps) {
 	registerPaymentWebhookRoute(api, d, payment.ProviderDuitku)
+	registerPaymentWebhookRoute(api, d, payment.ProviderDoku)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "whatsapp-webhook", Method: http.MethodPost, Path: "/api/webhooks/whatsapp",

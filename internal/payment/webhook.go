@@ -69,6 +69,16 @@ func ParseWebhookEvent(provider string, body map[string]any) (*WebhookEvent, err
 		}
 	}
 
+	// Nested DOKU-style payload: { "order": { ... } }
+	if order, ok := body["order"].(map[string]any); ok {
+		if ev.ExternalID == "" {
+			ev.ExternalID = firstString(order, "invoice_number", "merchantOrderId", "merchant_order_id", "reference", "external_id", "order_id")
+		}
+		if ev.Amount == 0 {
+			ev.Amount = firstAmount(order, "amount", "total_amount", "gross_amount")
+		}
+	}
+
 	_ = provider
 	return ev, nil
 }

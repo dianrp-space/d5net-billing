@@ -29,6 +29,23 @@ type DuitkuIntegration = {
   webhook_base_hint: string;
 };
 
+type DokuIntegration = {
+  configured: boolean;
+  enabled: boolean;
+  sandbox: boolean;
+  client_id: string;
+  secret_key?: string;
+  has_private_key: boolean;
+  merchant_id: string;
+  terminal_id: string;
+  postal_code: string;
+  expires_in_minutes: number;
+  qr_enabled: boolean;
+  webhook_path: string;
+  webhook_url: string;
+  webhook_base_hint: string;
+};
+
 function ttlHint(minutes: number) {
   const n = Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
   if (n >= 1440) return "24 jam";
@@ -214,11 +231,26 @@ export function PaymentGWPage() {
     queryKey: ["integration-duitku"],
     queryFn: () => api<DuitkuIntegration>("/api/integrations/duitku"),
   });
+  const dokuQ = useQuery({
+    queryKey: ["integration-doku"],
+    queryFn: () => api<DokuIntegration>("/api/integrations/doku"),
+  });
   const [duitkuForm, setDuitkuForm] = useState({
     enabled: false,
     sandbox: true,
     merchant_code: "",
     api_key: "",
+    expires_in_minutes: 60,
+  });
+  const [dokuForm, setDokuForm] = useState({
+    enabled: false,
+    sandbox: true,
+    client_id: "",
+    secret_key: "",
+    private_key: "",
+    merchant_id: "",
+    terminal_id: "",
+    postal_code: "",
     expires_in_minutes: 60,
   });
 
@@ -232,6 +264,21 @@ export function PaymentGWPage() {
       expires_in_minutes: duitkuQ.data.expires_in_minutes || 60,
     });
   }, [duitkuQ.data]);
+
+  useEffect(() => {
+    if (!dokuQ.data) return;
+    setDokuForm({
+      enabled: dokuQ.data.enabled,
+      sandbox: dokuQ.data.configured ? dokuQ.data.sandbox : true,
+      client_id: dokuQ.data.client_id || "",
+      secret_key: dokuQ.data.secret_key || "",
+      private_key: "",
+      merchant_id: dokuQ.data.merchant_id || "",
+      terminal_id: dokuQ.data.terminal_id || "",
+      postal_code: dokuQ.data.postal_code || "",
+      expires_in_minutes: dokuQ.data.expires_in_minutes || 60,
+    });
+  }, [dokuQ.data]);
 
   const saveDuitku = useMutation({
     mutationFn: () =>
@@ -264,6 +311,10 @@ export function PaymentGWPage() {
     duitkuQ.data?.webhook_url || duitkuQ.data?.webhook_path,
     "/api/webhooks/payment/duitku",
   );
+  const dokuWebhookURL = paymentWebhookDisplayURL(
+    dokuQ.data?.webhook_url || dokuQ.data?.webhook_path,
+    "/api/webhooks/payment/doku",
+  );
 
   async function copyWebhook(url: string) {
     try {
@@ -274,13 +325,48 @@ export function PaymentGWPage() {
     }
   }
 
-  const loading = duitkuQ.isLoading;
+  const loading = duitkuQ.isLoading || dokuQ.isLoading;
+
+  const saveDoku = useMutation({
+    mutationFn: () =>
+      api<DokuIntegration>("/api/integrations/doku", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: dokuForm.enabled,
+          sandbox: dokuForm.sandbox,
+          client_id: dokuForm.client_id.trim(),
+          secret_key: dokuForm.secret_key.trim() || undefined,
+          private_key: dokuForm.private_key.trim() || undefined,
+          merchant_id: dokuForm.merchant_id.trim() || undefined,
+          terminal_id: dokuForm.terminal_id.trim() || undefined,
+          postal_code: dokuForm.postal_code.trim() || undefined,
+          expires_in_minutes: Math.min(1440, Math.max(1, dokuForm.expires_in_minutes || 60)),
+        }),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(["integration-doku"], data);
+      setDokuForm({
+        enabled: data.enabled,
+        sandbox: data.sandbox,
+        client_id: data.client_id || "",
+        secret_key: data.secret_key || dokuForm.secret_key,
+        private_key: "",
+        merchant_id: data.merchant_id || "",
+        terminal_id: data.terminal_id || "",
+        postal_code: data.postal_code || "",
+        expires_in_minutes: data.expires_in_minutes || dokuForm.expires_in_minutes,
+      });
+      void qc.invalidateQueries({ queryKey: ["integration-doku"] });
+      void toastSuccess("DOKU disimpan");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
 
   return (
     <Section title="Payment Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Aktifkan <strong>Duitku</strong> untuk pembayaran online (VA, e-wallet, retail, QRIS).
-        Kredensial disimpan terenkripsi.
+        Aktifkan <strong>Duitku</strong> untuk pembayaran online (VA, e-wallet, retail, QRIS) atau{" "}
+        <strong>DOKU</strong> (halaman bayar + QRIS langsung). Kredensial disimpan terenkripsi.
       </p>
       {loading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
@@ -371,6 +457,143 @@ export function PaymentGWPage() {
             </label>
             <button type="button" className="btn w-fit" disabled={saveDuitku.isPending} onClick={() => saveDuitku.mutate()}>
               {saveDuitku.isPending ? "Menyimpan..." : "Simpan"}
+            </button>
+          </ProviderAccordionItem>
+
+          <ProviderAccordionItem
+            value="doku"
+            title="DOKU"
+            enabled={dokuForm.enabled}
+            configured={Boolean(dokuQ.data?.configured)}
+            onToggle={(v) => setDokuForm({ ...dokuForm, enabled: v })}
+          >
+            <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+              Pelanggan membayar di <strong>halaman bayar DOKU</strong> (VA, kartu, e-wallet, QRIS, retail).
+              Untuk QRIS langsung (gambar QR di portal & bot WA), lengkapi juga private key + merchant ID +
+              terminal ID + kode pos.
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={dokuForm.sandbox}
+                onChange={(e) => setDokuForm({ ...dokuForm, sandbox: e.target.checked })}
+              />
+              Sandbox (api-sandbox.doku.com)
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Client ID</span>
+              <input
+                className="input"
+                placeholder="BRN-xxxx / MCH-xxxx"
+                value={dokuForm.client_id}
+                onChange={(e) => setDokuForm({ ...dokuForm, client_id: e.target.value })}
+                autoComplete="off"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Secret key</span>
+              <SecretInput
+                name="doku-secret-key"
+                placeholder="SK-…"
+                value={dokuForm.secret_key}
+                onChange={(e) => setDokuForm({ ...dokuForm, secret_key: e.target.value })}
+                autoComplete="new-password"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">RSA private key (PEM — untuk QRIS Direct)</span>
+              <textarea
+                className="input font-mono text-xs"
+                rows={3}
+                placeholder="-----BEGIN PRIVATE KEY-----"
+                value={dokuForm.private_key}
+                onChange={(e) => setDokuForm({ ...dokuForm, private_key: e.target.value })}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <span className="text-[11px] text-[var(--muted)]">
+                {dokuQ.data?.has_private_key ? "Private key tersimpan (kosongkan bila tidak diganti)." : "Wajib untuk QRIS langsung."}
+              </span>
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Merchant ID</span>
+                <input
+                  className="input"
+                  placeholder="mall ID QRIS"
+                  value={dokuForm.merchant_id}
+                  onChange={(e) => setDokuForm({ ...dokuForm, merchant_id: e.target.value })}
+                  autoComplete="off"
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Terminal ID</span>
+                <input
+                  className="input"
+                  placeholder="T001"
+                  value={dokuForm.terminal_id}
+                  onChange={(e) => setDokuForm({ ...dokuForm, terminal_id: e.target.value })}
+                  autoComplete="off"
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Kode pos</span>
+                <input
+                  className="input"
+                  placeholder="28111"
+                  value={dokuForm.postal_code}
+                  onChange={(e) => setDokuForm({ ...dokuForm, postal_code: e.target.value })}
+                  autoComplete="off"
+                />
+              </label>
+            </div>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={1440}
+                step={1}
+                value={dokuForm.expires_in_minutes}
+                onChange={(e) =>
+                  setDokuForm({
+                    ...dokuForm,
+                    expires_in_minutes: Number(e.target.value) || 60,
+                  })
+                }
+              />
+              <div className="flex flex-wrap gap-1">
+                {TTL_PRESETS.map((p) => (
+                  <button
+                    key={`doku-${p.minutes}`}
+                    type="button"
+                    className="btn-ghost px-2 py-1 text-[11px]"
+                    onClick={() => setDokuForm({ ...dokuForm, expires_in_minutes: p.minutes })}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-[var(--muted)]">
+                Invoice DOKU berlaku {ttlHint(dokuForm.expires_in_minutes)}.
+              </span>
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Callback URL DOKU · /api/webhooks/payment/doku</span>
+              <div className="flex gap-2">
+                <input className="input min-w-0 flex-1 font-mono text-xs" readOnly value={dokuWebhookURL} />
+                <IconButton label="Salin callback URL" onClick={() => void copyWebhook(dokuWebhookURL)}>
+                  <IconCopy />
+                </IconButton>
+              </div>
+              <span className="text-[11px] text-[var(--muted)]">
+                Daftarkan URL ini sebagai Notification URL di dashboard DOKU (per channel). Domain harus publik.
+                {dokuQ.data?.qr_enabled ? "" : " QRIS langsung butuh private key + merchant/terminal/kode pos."}
+              </span>
+            </label>
+            <button type="button" className="btn w-fit" disabled={saveDoku.isPending} onClick={() => saveDoku.mutate()}>
+              {saveDoku.isPending ? "Menyimpan..." : "Simpan"}
             </button>
           </ProviderAccordionItem>
         </Accordion>

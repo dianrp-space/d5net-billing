@@ -21,6 +21,8 @@ func MethodFromProvider(provider string) string {
 		return MethodQRIS
 	case ProviderDuitku, "duitku_pop", "duitkupop":
 		return ProviderDuitku
+	case ProviderDoku:
+		return ProviderDoku
 	case MethodTransfer, "bank", "va":
 		return MethodTransfer
 	default:

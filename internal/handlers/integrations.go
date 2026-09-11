@@ -20,6 +20,7 @@ import (
 
 const (
 	settingDuitku    = "integration.duitku"
+	settingDoku      = "integration.doku"
 	settingMessaging = "integration.messaging"
 	settingSMTP      = "integration.smtp"
 )
@@ -49,6 +50,47 @@ type duitkuIntegrationPut struct {
 	Sandbox          bool   `json:"sandbox"`
 	MerchantCode     string `json:"merchant_code"`
 	APIKey           string `json:"api_key,omitempty"`
+	ExpiresInMinutes int    `json:"expires_in_minutes,omitempty"`
+}
+
+type dokuIntegrationStored struct {
+	ClientID         string `json:"client_id"`
+	SecretKey        string `json:"secret_key"`
+	PrivateKey       string `json:"private_key"`
+	MerchantID       string `json:"merchant_id"`
+	TerminalID       string `json:"terminal_id"`
+	PostalCode       string `json:"postal_code"`
+	Sandbox          bool   `json:"sandbox"`
+	Enabled          bool   `json:"enabled"`
+	ExpiresInMinutes int    `json:"expires_in_minutes"`
+}
+
+type dokuIntegrationView struct {
+	Configured       bool   `json:"configured"`
+	Enabled          bool   `json:"enabled"`
+	Sandbox          bool   `json:"sandbox"`
+	ClientID         string `json:"client_id"`
+	SecretKey        string `json:"secret_key,omitempty"`
+	HasPrivateKey    bool   `json:"has_private_key"`
+	MerchantID       string `json:"merchant_id"`
+	TerminalID       string `json:"terminal_id"`
+	PostalCode       string `json:"postal_code"`
+	ExpiresInMinutes int    `json:"expires_in_minutes"`
+	QREnabled        bool   `json:"qr_enabled"`
+	WebhookPath      string `json:"webhook_path"`
+	WebhookURL       string `json:"webhook_url"`
+	WebhookBaseHint  string `json:"webhook_base_hint"`
+}
+
+type dokuIntegrationPut struct {
+	Enabled          bool   `json:"enabled"`
+	Sandbox          bool   `json:"sandbox"`
+	ClientID         string `json:"client_id"`
+	SecretKey        string `json:"secret_key,omitempty"`
+	PrivateKey       string `json:"private_key,omitempty"`
+	MerchantID       string `json:"merchant_id,omitempty"`
+	TerminalID       string `json:"terminal_id,omitempty"`
+	PostalCode       string `json:"postal_code,omitempty"`
 	ExpiresInMinutes int    `json:"expires_in_minutes,omitempty"`
 }
 
@@ -224,6 +266,91 @@ func registerIntegrations(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		return &struct{ Body duitkuIntegrationView }{Body: duitkuView(ctx, d, tid, cur, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-doku-integration", Method: http.MethodGet, Path: "/api/integrations/doku",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Host            string `header:"Host"`
+		Origin          string `header:"Origin"`
+		Referer         string `header:"Referer"`
+		XForwardedHost  string `header:"X-Forwarded-Host"`
+		XForwardedProto string `header:"X-Forwarded-Proto"`
+	}) (*struct{ Body dokuIntegrationView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := loadDokuIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body dokuIntegrationView }{Body: dokuView(ctx, d, tid, stored, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "put-doku-integration", Method: http.MethodPut, Path: "/api/integrations/doku",
+		Tags: []string{"Integrations"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Host            string `header:"Host"`
+		Origin          string `header:"Origin"`
+		Referer         string `header:"Referer"`
+		XForwardedHost  string `header:"X-Forwarded-Host"`
+		XForwardedProto string `header:"X-Forwarded-Proto"`
+		Body            dokuIntegrationPut
+	}) (*struct{ Body dokuIntegrationView }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cur, err := loadDokuIntegration(ctx, d, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		clientID := strings.TrimSpace(input.Body.ClientID)
+		if clientID == "" {
+			clientID = strings.TrimSpace(cur.ClientID)
+		}
+		if input.Body.Enabled && clientID == "" {
+			return nil, httpx.BadRequest("client ID DOKU wajib diisi")
+		}
+		if input.Body.Enabled && strings.TrimSpace(input.Body.SecretKey) == "" && cur.SecretKey == "" {
+			return nil, httpx.BadRequest("secret key DOKU wajib diisi")
+		}
+		cur.Enabled = input.Body.Enabled
+		cur.Sandbox = input.Body.Sandbox
+		cur.ClientID = clientID
+		if v := strings.TrimSpace(input.Body.SecretKey); v != "" {
+			enc, err := d.Encryptor.EncryptString(v)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			cur.SecretKey = enc
+		}
+		if v := strings.TrimSpace(input.Body.PrivateKey); v != "" {
+			enc, err := d.Encryptor.EncryptString(v)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			cur.PrivateKey = enc
+		}
+		if v := strings.TrimSpace(input.Body.MerchantID); v != "" {
+			cur.MerchantID = v
+		}
+		if v := strings.TrimSpace(input.Body.TerminalID); v != "" {
+			cur.TerminalID = v
+		}
+		if v := strings.TrimSpace(input.Body.PostalCode); v != "" {
+			cur.PostalCode = v
+		}
+		if input.Body.ExpiresInMinutes > 0 {
+			cur.ExpiresInMinutes = payment.ClampDokuExpiryMinutes(input.Body.ExpiresInMinutes)
+		}
+		if err := d.Store.UpsertSettingJSON(ctx, tid, settingDoku, cur); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body dokuIntegrationView }{Body: dokuView(ctx, d, tid, cur, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -662,6 +789,42 @@ func duitkuView(ctx context.Context, d *Deps, tid xid.ID, s duitkuIntegrationSto
 	}
 }
 
+func loadDokuIntegration(ctx context.Context, d *Deps, tid xid.ID) (dokuIntegrationStored, error) {
+	var s dokuIntegrationStored
+	err := d.Store.GetSettingJSON(ctx, tid, settingDoku, &s)
+	if errors.Is(err, store.ErrNotFound) {
+		return dokuIntegrationStored{}, nil
+	}
+	return s, err
+}
+
+func dokuQRReady(s dokuIntegrationStored, d *Deps) bool {
+	if strings.TrimSpace(s.ClientID) == "" || decryptSecret(d, s.PrivateKey) == "" {
+		return false
+	}
+	return strings.TrimSpace(s.MerchantID) != "" && strings.TrimSpace(s.TerminalID) != "" && strings.TrimSpace(s.PostalCode) != ""
+}
+
+func dokuView(ctx context.Context, d *Deps, tid xid.ID, s dokuIntegrationStored, origin, referer, proto, forwardedHost, host string) dokuIntegrationView {
+	webhookURL := paymentWebhookURLFor(ctx, d, tid, origin, referer, proto, forwardedHost, host, payment.ProviderDoku)
+	return dokuIntegrationView{
+		Configured:       strings.TrimSpace(s.ClientID) != "" && s.SecretKey != "",
+		Enabled:          s.Enabled,
+		Sandbox:          s.Sandbox,
+		ClientID:         strings.TrimSpace(s.ClientID),
+		SecretKey:        decryptSecret(d, s.SecretKey),
+		HasPrivateKey:    decryptSecret(d, s.PrivateKey) != "",
+		MerchantID:       strings.TrimSpace(s.MerchantID),
+		TerminalID:       strings.TrimSpace(s.TerminalID),
+		PostalCode:       strings.TrimSpace(s.PostalCode),
+		ExpiresInMinutes: payment.ClampDokuExpiryMinutes(s.ExpiresInMinutes),
+		QREnabled:        dokuQRReady(s, d),
+		WebhookPath:      paymentWebhookPathFor(payment.ProviderDoku),
+		WebhookURL:       webhookURL,
+		WebhookBaseHint:  webhookURL,
+	}
+}
+
 func messagingView(d *Deps, s messagingIntegrationStored) messagingIntegrationView {
 	return messagingIntegrationView{
 		TelegramConfigured: s.TelegramBotToken != "" && s.TelegramChatID != "",
@@ -748,19 +911,29 @@ func normalizePaymentProviderName(name string) string {
 	switch name {
 	case "", "duitku", "duitku_pop", "duitkupop", "pop":
 		return payment.ProviderDuitku
+	case "doku":
+		return payment.ProviderDoku
 	default:
 		return name
 	}
 }
 
 func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payOptionView {
-	out := make([]payOptionView, 0, 1)
+	out := make([]payOptionView, 0, 2)
 	if duitkuPaymentReady(ctx, d, tenantID) {
 		out = append(out, payOptionView{
 			Provider:    payment.ProviderDuitku,
 			Label:       "Duitku Payment Gateway",
 			Description: "Popup pembayaran Duitku (VA, e-wallet, retail, QRIS)",
 			Kind:        "popup",
+		})
+	}
+	if dokuPaymentReady(ctx, d, tenantID) {
+		out = append(out, payOptionView{
+			Provider:    payment.ProviderDoku,
+			Label:       "DOKU",
+			Description: "Halaman bayar DOKU (VA, kartu, e-wallet, QRIS, retail)",
+			Kind:        "redirect",
 		})
 	}
 	return out
@@ -774,6 +947,14 @@ func duitkuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
 	return strings.TrimSpace(cfg.MerchantCode) != "" && decryptSecret(d, cfg.APIKey) != ""
 }
 
+func dokuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
+	cfg, _ := loadDokuIntegration(ctx, d, tenantID)
+	if !cfg.Enabled {
+		return false
+	}
+	return strings.TrimSpace(cfg.ClientID) != "" && decryptSecret(d, cfg.SecretKey) != ""
+}
+
 // resolvePaymentProvider resolves the gateway for the provider from the
 // tenant's own integration credentials.
 func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name string) (payment.Provider, error) {
@@ -781,16 +962,32 @@ func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name 
 	if name == payment.ProviderManual {
 		return d.Payments.Get(payment.ProviderManual)
 	}
-	if name != payment.ProviderDuitku {
+	if name == payment.ProviderDuitku {
+		cfg, _ := loadDuitkuIntegration(ctx, d, tenantID)
+		if !cfg.Enabled {
+			return nil, httpx.BadRequest("Duitku POP belum diaktifkan di Integrasi")
+		}
+		apiKey := decryptSecret(d, cfg.APIKey)
+		if strings.TrimSpace(cfg.MerchantCode) == "" || apiKey == "" {
+			return nil, httpx.BadRequest("Duitku POP belum dikonfigurasi")
+		}
+		return payment.NewDuitkuProvider(cfg.MerchantCode, apiKey, cfg.Sandbox, cfg.ExpiresInMinutes), nil
+	}
+	if name != payment.ProviderDoku {
 		return nil, httpx.BadRequest("payment gateway tidak dikenali")
 	}
-	cfg, _ := loadDuitkuIntegration(ctx, d, tenantID)
+	cfg, _ := loadDokuIntegration(ctx, d, tenantID)
 	if !cfg.Enabled {
-		return nil, httpx.BadRequest("Duitku POP belum diaktifkan di Integrasi")
+		return nil, httpx.BadRequest("DOKU belum diaktifkan di Integrasi")
 	}
-	apiKey := decryptSecret(d, cfg.APIKey)
-	if strings.TrimSpace(cfg.MerchantCode) == "" || apiKey == "" {
-		return nil, httpx.BadRequest("Duitku POP belum dikonfigurasi")
+	if strings.TrimSpace(cfg.ClientID) == "" || decryptSecret(d, cfg.SecretKey) == "" {
+		return nil, httpx.BadRequest("DOKU belum dikonfigurasi (client ID & secret key)")
 	}
-	return payment.NewDuitkuProvider(cfg.MerchantCode, apiKey, cfg.Sandbox, cfg.ExpiresInMinutes), nil
+	return payment.NewDokuProvider(
+		cfg.ClientID,
+		decryptSecret(d, cfg.SecretKey),
+		decryptSecret(d, cfg.PrivateKey),
+		cfg.MerchantID, cfg.TerminalID, cfg.PostalCode,
+		cfg.Sandbox, cfg.ExpiresInMinutes,
+	), nil
 }

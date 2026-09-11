@@ -7,6 +7,7 @@ import {
   getSavedPayMethod,
   hasSavedPayMethod,
   invoiceRemaining,
+  PAY_METHOD_DOKU,
   PAY_METHOD_DUITKU,
   PAY_METHOD_QRIS,
   payMethodToProvider,
@@ -24,6 +25,7 @@ import { formatRp, FormDialog } from "./ui";
 function methodIcon(id: PayMethodId) {
   switch (id) {
     case PAY_METHOD_DUITKU:
+    case PAY_METHOD_DOKU:
       return <IconExternalLink />;
     case PAY_METHOD_QRIS:
     default:

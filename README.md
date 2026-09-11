@@ -271,7 +271,24 @@ location /events/ {
 
 Di menu **Integrasi**:
 
-- **Payment Gateway** — Duitku (VA, e-wallet, retail, QRIS); pembayaran manual/tunai/transfer tetap tersedia
+- **Payment Gateway** — Duitku (VA, e-wallet, retail, QRIS) dan DOKU (halaman bayar + QRIS langsung via Direct API); pembayaran manual/tunai/transfer tetap tersedia
+
+### DOKU (Checkout + QRIS Direct)
+
+Di **Integrasi → Payment Gateway → DOKU** isi:
+
+- **Client ID** & **Secret Key** — dari DOKU Back Office (wajib, untuk link bayar/checkout)
+- **RSA private key (PEM)** — generate sendiri (`openssl genrsa -out private.key 2048`), upload public key-nya ke dashboard DOKU (wajib untuk QRIS langsung)
+- **Merchant ID, Terminal ID, Kode pos** — ID QRIS dari DOKU setelah registrasi QRIS disetujui (wajib untuk QRIS langsung)
+- **Sandbox** — aktifkan saat uji coba (`api-sandbox.doku.com`)
+
+Alur: portal & bot `/link` memakai halaman bayar DOKU; bot `/qris` memakai QRIS Direct (gambar QR dikirim via WA). Daftarkan Notification URL ini di dashboard DOKU (per channel):
+
+```
+https://delimanet.dianrp.com/api/webhooks/payment/doku
+```
+
+Notifikasi QRIS diverifikasi dengan konfirmasi status aktif ke DOKU sebelum tagihan dilunasi.
 - **Messaging Gateway** — tab **WhatsApp** (gateway eksternal GOWA: base URL + Basic Auth, multi-nomor) dan tab **Telegram** (bot token + chat ID ops)
 - **Backup / Restore** — export/import JSON data aplikasi (dir `DB_BACKUP_DIR`)
 

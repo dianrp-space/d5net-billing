@@ -165,15 +165,6 @@ func hmacSHA256(key string, data []byte) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-func bearerToken(headers map[string]string) string {
-	raw := headerGet(headers, "Authorization")
-	raw = strings.TrimSpace(raw)
-	if strings.HasPrefix(strings.ToLower(raw), "bearer ") {
-		return strings.TrimSpace(raw[7:])
-	}
-	return raw
-}
-
 func firstNonEmpty(ss ...string) string {
 	for _, s := range ss {
 		if strings.TrimSpace(s) != "" {

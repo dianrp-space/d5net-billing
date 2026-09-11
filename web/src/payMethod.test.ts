@@ -20,6 +20,7 @@ describe("payMethod", () => {
     setSavedPayMethod(PAY_METHOD_DUITKU, "acme");
     expect(getSavedPayMethod("acme")).toBe("duitku");
     expect(isPayMethodId("duitku")).toBe(true);
+    expect(isPayMethodId("doku")).toBe(true);
     expect(isPayMethodId("qris")).toBe(false);
     expect(isPayMethodId("va")).toBe(false);
   });
@@ -34,6 +35,7 @@ describe("payMethod", () => {
     expect(paymentMethodLabel("qris")).toBe("QRIS");
     expect(paymentMethodLabel("drp")).toBe("QRIS");
     expect(paymentMethodLabel("duitku")).toBe("Duitku Payment Gateway");
+    expect(paymentMethodLabel("doku")).toBe("DOKU");
     expect(paymentMethodLabel("")).toBe("—");
     expect(paymentMethodLabel("midtrans")).toBe("midtrans");
   });

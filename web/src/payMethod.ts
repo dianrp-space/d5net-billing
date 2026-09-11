@@ -2,12 +2,14 @@
 
 export const PAY_METHOD_QRIS = "qris" as const;
 export const PAY_METHOD_DUITKU = "duitku" as const;
+export const PAY_METHOD_DOKU = "doku" as const;
 export const PAY_METHOD_TUNAI = "tunai" as const;
 export const PAY_METHOD_TRANSFER = "transfer" as const;
 
 export type PayMethodId =
   | typeof PAY_METHOD_QRIS
   | typeof PAY_METHOD_DUITKU
+  | typeof PAY_METHOD_DOKU
   | typeof PAY_METHOD_TUNAI
   | typeof PAY_METHOD_TRANSFER;
 
@@ -22,6 +24,11 @@ export const PORTAL_PAY_METHODS: PayMethodDef[] = [
     id: PAY_METHOD_DUITKU,
     label: "Duitku Payment Gateway",
     description: "Popup pembayaran Duitku (VA, e-wallet, retail, QRIS)",
+  },
+  {
+    id: PAY_METHOD_DOKU,
+    label: "DOKU",
+    description: "Halaman bayar DOKU (VA, kartu, e-wallet, QRIS, retail)",
   },
 ];
 
@@ -54,6 +61,7 @@ export function providerToPayMethod(provider?: string | null): PayMethodId | nul
   if (!key) return null;
   if (key === "drp" || key === "qris" || key === "qr") return PAY_METHOD_QRIS;
   if (key === "duitku" || key === "duitku_pop" || key === "pop") return PAY_METHOD_DUITKU;
+  if (key === "doku") return PAY_METHOD_DOKU;
   if (isPayMethodId(key)) return key;
   return null;
 }
@@ -88,6 +96,7 @@ export function paymentMethodLabel(method?: string | null) {
   if (fromCatalog) return fromCatalog.label;
   if (key === "drp" || key === "qr" || key === PAY_METHOD_QRIS) return "QRIS";
   if (key === "duitku_pop" || key === "duitkupop" || key === "pop") return "Duitku Payment Gateway";
+  if (key === PAY_METHOD_DOKU) return "DOKU";
   if (key === PAY_METHOD_TUNAI || key === "cash" || key === "kasir" || key === "manual") return "Tunai";
   if (key === PAY_METHOD_TRANSFER || key === "bank" || key === "va") return "Transfer";
   return String(method).trim();

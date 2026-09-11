@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/skip2/go-qrcode"
+	"github.com/dianrp/drp-billing/internal/payment"
 	"github.com/dianrp/drp-billing/internal/store"
 	"github.com/dianrp/drp-billing/internal/wa"
 	"github.com/dianrp/drp-billing/internal/xid"
@@ -329,6 +330,9 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 			slog.Warn("wabot: kirim PDF", "bot", BotName, "tenant_id", tid, "err", err)
 		}
 	case "/link", "/qris":
+		if cmd == "/qris" && sendDokuQRIS(ctx, d, tid, phone, &target, remaining, extra) {
+			return
+		}
 		opts := listEnabledPayOptions(ctx, d, tid)
 		if len(opts) == 0 {
 			_ = client.SendText(ctx, phone, "Pembayaran online belum aktif. Hubungi admin.")
@@ -344,18 +348,6 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 			_ = client.SendText(ctx, phone, msg)
 			return
 		}
-		if cmd == "/qris" && strings.TrimSpace(pi.QRString) != "" {
-			png, err := qrcode.Encode(strings.TrimSpace(pi.QRString), qrcode.Medium, 512)
-			if err == nil && len(png) > 0 {
-				caption := fmt.Sprintf("Scan QRIS untuk membayar %s (%s).%s",
-					target.InvoiceNumber, formatRupiahID(remaining), extra)
-				if serr := client.SendImage(ctx, phone, caption, png); serr == nil {
-					return
-				} else {
-					slog.Warn("wabot: kirim QRIS", "bot", BotName, "tenant_id", tid, "err", serr)
-				}
-			}
-		}
 		if strings.TrimSpace(pi.CheckoutURL) == "" {
 			_ = client.SendText(ctx, phone, "Link bayar belum tersedia. Hubungi admin.")
 			return
@@ -370,6 +362,55 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 		}
 		_ = client.SendText(ctx, phone, text)
 	}
+}
+
+// sendDokuQRIS mints a Direct-QRIS code via DOKU, records the payment intent,
+// and sends the QR as an image. Returns false when QRIS is unavailable so the
+// caller falls back to the checkout link.
+func sendDokuQRIS(ctx context.Context, d *Deps, tid xid.ID, phone string, inv *store.Invoice, remaining int64, extra string) bool {
+	prov, err := resolvePaymentProvider(ctx, d, tid, payment.ProviderDoku)
+	if err != nil {
+		return false
+	}
+	gen, ok := prov.(payment.DokuQRGenerator)
+	if !ok {
+		return false
+	}
+	orderRef := strings.TrimSpace(inv.InvoiceNumber)
+	qr, err := gen.GenerateQR(ctx, orderRef, remaining)
+	if err != nil {
+		slog.Warn("wabot: doku QR", "bot", BotName, "tenant_id", tid, "err", err)
+		return false
+	}
+	png, err := qrcode.Encode(qr.Content, qrcode.Medium, 512)
+	if err != nil || len(png) == 0 {
+		return false
+	}
+	client, err := botClientForTenant(ctx, d, tid)
+	if err != nil {
+		return false
+	}
+	pi := &store.PaymentIntent{
+		TenantID: tid, CustomerID: inv.CustomerID, InvoiceID: &inv.ID,
+		Provider: payment.ProviderDoku, ExternalID: orderRef,
+		Amount: remaining, Status: "pending", ExpiresAt: qr.ExpiresAt,
+		QRString: qr.Content, PayableAmount: remaining,
+		Metadata: map[string]any{"doku_kind": "qr"},
+	}
+	if qr.Reference != "" {
+		pi.Metadata["transaction_id"] = qr.Reference
+	}
+	if _, err := d.Store.InsertPaymentIntent(ctx, pi); err != nil {
+		slog.Warn("wabot: simpan intent QR", "bot", BotName, "tenant_id", tid, "err", err)
+		return false
+	}
+	caption := fmt.Sprintf("Scan QRIS untuk membayar %s (%s).%s",
+		orderRef, formatRupiahID(remaining), extra)
+	if err := client.SendImage(ctx, phone, caption, png); err != nil {
+		slog.Warn("wabot: kirim QRIS", "bot", BotName, "tenant_id", tid, "err", err)
+		return false
+	}
+	return true
 }
 
 func customerByID(custs []*store.Customer) map[xid.ID]*store.Customer {
