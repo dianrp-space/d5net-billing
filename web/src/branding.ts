@@ -1,5 +1,5 @@
 /** Default app logo/favicon shipped with the app (web/public). */
-export const DEFAULT_BRAND_LOGO = "/DRP-Gobill-logo.png";
+export const DEFAULT_BRAND_LOGO = "/d5net-logo.webp";
 
 /** Apply favicon (and optional document title) from branding URLs. */
 export function applyBrandingMeta(opts: {

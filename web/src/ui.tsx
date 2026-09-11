@@ -192,7 +192,7 @@ export function ticketStatusTone(status?: string | null): "wait" | "progress" | 
 }
 
 export function LoginShell({
-  brand = "drp-billing",
+  brand = "D5Net",
   title,
   subtitle,
   logoUrl,

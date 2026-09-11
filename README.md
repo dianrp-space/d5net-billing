@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/public/DRP-Gobill-logo.png" alt="DRP GoBill" width="360" />
+  <img src="web/public/d5net.webp" alt="D5Net — better connecting all" width="360" />
 </p>
 
 # d5net-billing
