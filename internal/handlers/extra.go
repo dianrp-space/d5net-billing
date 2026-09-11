@@ -717,6 +717,12 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if out != nil {
 			l = *out
 		}
+		if l.AssignedTo != nil && !xid.IsNil(*l.AssignedTo) {
+			queueLeadAlert(ctx, d, tid, "lead_assigned",
+				"Lead di-assign: "+strings.TrimSpace(l.FullName),
+				strings.TrimSpace(l.Phone),
+				l.ID)
+		}
 		return &struct{ Body store.Lead }{Body: l}, nil
 	})
 
@@ -864,6 +870,12 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		if out.AssignedTo != nil && !xid.IsNil(*out.AssignedTo) {
+			queueLeadAlert(ctx, d, tid, "lead_assigned",
+				"Lead di-assign: "+strings.TrimSpace(out.FullName),
+				strings.TrimSpace(out.Phone),
+				out.ID)
+		}
 		return &struct{ Body store.Lead }{Body: *out}, nil
 	})
 
@@ -954,6 +966,10 @@ func registerOpsExtra(api huma.API, d *Deps) {
 			}
 			return nil, httpx.BadRequest(err.Error())
 		}
+		queueLeadAlert(ctx, d, tid, "lead_converted",
+			"Lead jadi pelanggan: "+strings.TrimSpace(lead.FullName),
+			cust.CustomerCode,
+			lead.ID)
 		return &struct {
 			Body struct {
 				Customer store.Customer `json:"customer"`
@@ -1421,19 +1437,43 @@ func registerOpsExtra(api huma.API, d *Deps) {
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-alerts", Method: http.MethodGet, Path: "/api/alerts",
-		Tags: []string{"Alerts"}, Security: []map[string][]string{{"bearer": {}}},
+		Summary: "Recent alerts + unread count", Tags: []string{"Alerts"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
-		Limit int `query:"limit"`
-	}) (*struct{ Body []store.Alert }, error) {
+		Limit int `query:"limit" minimum:"1" maximum:"100"`
+	}) (*struct {
+		Body struct {
+			Data        []store.Alert `json:"data"`
+			UnreadCount int64         `json:"unread_count"`
+		}
+	}, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		list, err := d.Store.ListAlerts(ctx, tid, input.Limit)
+		limit := input.Limit
+		if limit <= 0 {
+			limit = 20
+		}
+		list, err := d.Store.ListAlerts(ctx, tid, limit)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body []store.Alert }{Body: list}, nil
+		if list == nil {
+			list = []store.Alert{}
+		}
+		unread, err := d.Store.CountUnreadAlerts(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := &struct {
+			Body struct {
+				Data        []store.Alert `json:"data"`
+				UnreadCount int64         `json:"unread_count"`
+			}
+		}{}
+		out.Body.Data = list
+		out.Body.UnreadCount = unread
+		return out, nil
 	})
 
 	huma.Register(api, huma.Operation{

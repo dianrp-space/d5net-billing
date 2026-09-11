@@ -1,4 +1,5 @@
 import { ThemeToggle } from "./ThemeToggle";
+import { AlertsBell } from "./AlertsBell";
 import { HeaderSearch } from "./HeaderSearch";
 import { UserMenu } from "./UserMenu";
 import { getSidebarOpen, setSidebarOpen } from "./navPersist";
@@ -471,9 +472,7 @@ export function AdminApp({
                 if (isAdminPage(next) && canAccessPage(perms, next)) handleNavigate(next, rest);
               }}
             />
-            <IconButton label="Notifikasi">
-              <IconBell />
-            </IconButton>
+            <AlertsBell onNavigatePage={(p) => onNavigate(p)} />
             <ThemeToggle />
             <UserMenu user={meQ.data} onLogout={onLogout} />
           </div>

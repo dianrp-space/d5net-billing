@@ -562,6 +562,56 @@ func (s *Store) ListAlerts(ctx context.Context, tenantID xid.ID, limit int) ([]A
 	return list, rows.Err()
 }
 
+func (s *Store) CountUnreadAlerts(ctx context.Context, tenantID xid.ID) (int64, error) {
+	var n int64
+	err := s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM alerts WHERE tenant_id=$1 AND NOT COALESCE(is_acked, false)
+	`, tenantID).Scan(&n)
+	return n, err
+}
+
+func (s *Store) AckAlert(ctx context.Context, tenantID, id xid.ID) error {
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE alerts SET is_acked=true WHERE tenant_id=$1 AND id=$2
+	`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) AckAllAlerts(ctx context.Context, tenantID xid.ID) (int64, error) {
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE alerts SET is_acked=true WHERE tenant_id=$1 AND NOT COALESCE(is_acked, false)
+	`, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// HasRecentAlert reports whether a same-kind alert for the entity was created
+// within the window (used to avoid spam, e.g. router down every poll cycle).
+func (s *Store) HasRecentAlert(ctx context.Context, tenantID xid.ID, kind string, entityID *xid.ID, since time.Duration) (bool, error) {
+	var ent string
+	if entityID != nil && !xid.IsNil(*entityID) {
+		ent = entityID.String()
+	}
+	var exists bool
+	err := s.Pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM alerts
+			WHERE tenant_id=$1 AND kind=$2
+			  AND COALESCE(entity_id::text, '') = $3
+			  AND created_at > NOW() - ($4 || ' seconds')::interval
+		)
+	`, tenantID, kind, ent, int64(since/time.Second)).Scan(&exists)
+	return exists, err
+}
+
 type PaymentIntent struct {
 	ID            xid.ID         `json:"id"`
 	TenantID      xid.ID         `json:"tenant_id"`

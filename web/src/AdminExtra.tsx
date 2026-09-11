@@ -145,11 +145,11 @@ export function CommissionBasisSelect({
 
 export function AlertsPanel() {
   const q = useQuery({
-    queryKey: ["alerts"],
-    queryFn: () => api<{ severity: string; title: string; message: string }[]>("/api/alerts"),
+    queryKey: ["alerts-panel"],
+    queryFn: () => api<{ data: { severity: string; title: string; message: string }[] }>("/api/alerts?limit=8"),
     refetchInterval: 15000,
   });
-  const rows = Array.isArray(q.data) ? q.data : [];
+  const rows = Array.isArray(q.data?.data) ? q.data.data : [];
   return (
     <div className="mb-2">
       <h2 className="eyebrow mb-3">Alert realtime</h2>
@@ -871,6 +871,7 @@ export function ResellersPage() {
         />
       </div>
       <Table
+        rowNumberStart={commPage * commLimit + 1}
         columns={["Tanggal", "Pelanggan", "Jenis", "Penerima", "Nominal", "Status", "Aksi"]}
         rows={filteredCommissions.map((c) => [
           c.created_at ? new Date(c.created_at).toLocaleString("id-ID") : "—",

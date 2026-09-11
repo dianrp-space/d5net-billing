@@ -77,6 +77,7 @@ func RegisterAll(api huma.API, d *Deps) {
 	registerCableRoutes(api, d)
 	registerDashboard(api, d)
 	registerSearch(api, d)
+	registerAlerts(api, d)
 	registerPortal(api, d)
 	registerWebhooks(api, d)
 	registerVouchers(api, d)
@@ -3376,12 +3377,14 @@ func registerTickets(api huma.API, d *Deps) {
 				"Kategori: "+full.Category,
 				"Pelanggan: "+who,
 			)
+			queueTicketAlert(ctx, d, tid, full)
 			return &struct{ Body store.Ticket }{Body: *full}, nil
 		}
 		_ = d.Notify.QueueTicketTelegram(ctx, tid, t.CustomerID, t.Subject,
 			"Prioritas: "+t.Priority,
 			"Kategori: "+t.Category,
 		)
+		queueTicketAlert(ctx, d, tid, t)
 		return &struct{ Body store.Ticket }{Body: *t}, nil
 	})
 
@@ -5101,6 +5104,7 @@ func registerPortal(api huma.API, d *Deps) {
 			"Kategori: "+t.Category,
 			"Pelanggan: "+who,
 		)
+		queueTicketAlert(ctx, d, ten.ID, t)
 		if full != nil {
 			return &struct{ Body store.Ticket }{Body: *full}, nil
 		}

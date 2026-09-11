@@ -130,6 +130,14 @@ func (p *Poller) PollRouter(ctx context.Context, tenantID xid.ID, routerID xid.I
 			_ = p.notify.QueueTenantTelegramOnce(ctx, tenantID, "router_down", notify.OpsDayKey(routerID),
 				notify.OpsMsg("router", r.Name, "Tidak merespons poll", msg))
 		}
+		if dup, derr := p.store.HasRecentAlert(ctx, tenantID, "router_down", &routerID, 24*time.Hour); derr == nil && !dup {
+			et := "router"
+			_ = p.store.CreateAlert(ctx, &store.Alert{
+				TenantID: tenantID, Severity: "critical", Kind: "router_down",
+				Title:    "Router tidak merespons: " + r.Name,
+				Message:  msg, EntityType: &et, EntityID: &routerID,
+			})
+		}
 		return err
 	}
 

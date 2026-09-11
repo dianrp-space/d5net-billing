@@ -5,6 +5,7 @@ import { api, apiDownload, clearClientSession, getClientSession, setClientSessio
 import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
 import type { ClientPortalData, PortalCustomer } from "./TenantLogin";
 import { ClientIdCard } from "./ClientIdCard";
+import { ClientBell } from "./ClientBell";
 import { ChatwootWidget } from "./ChatwootWidget";
 import { toastError, toastSuccess } from "./swal";
 import { ThemeToggle } from "./ThemeToggle";
@@ -752,6 +753,13 @@ export function ClientHome({
             </Breadcrumb>
           </div>
           <div className="flex items-center gap-2">
+            <ClientBell
+              invoices={invoices}
+              payments={payments}
+              subscriptions={subscriptions}
+              multi={multi}
+              onNavigatePage={setPage}
+            />
             <ThemeToggle />
             <span className="portal-header-logout">
               <IconButton label="Keluar" onClick={logout}>
