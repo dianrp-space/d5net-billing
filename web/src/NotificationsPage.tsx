@@ -5,6 +5,7 @@ import { IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { Button, IconButton, Input, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table } from "./ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ListToolbar, useDebouncedValue } from "./ListToolbar";
 import { usePersistedTab } from "./navPersist";
 
 type NotifTemplate = {
@@ -40,7 +41,7 @@ function renderPreview(body: string): string {
 
 export function NotificationsPage() {
   const qc = useQueryClient();
-  const [tab, setTab] = usePersistedTab("notifications", "broadcast", ["broadcast", "templates"] as const);
+  const [tab, setTab] = usePersistedTab("notifications", "broadcast", ["broadcast", "templates", "history"] as const);
   const templatesQ = useQuery({
     queryKey: ["notification-templates"],
     queryFn: () => api<NotifTemplate[]>("/api/notifications/templates"),
@@ -176,13 +177,14 @@ export function NotificationsPage() {
       <Tabs
         value={tab}
         onValueChange={(v) => {
-          if (v === "broadcast" || v === "templates") setTab(v);
+          if (v === "broadcast" || v === "templates" || v === "history") setTab(v);
         }}
         className="space-y-0"
       >
         <TabsList aria-label="Notifikasi">
           <TabsTrigger value="broadcast">Broadcast</TabsTrigger>
           <TabsTrigger value="templates">Template</TabsTrigger>
+          <TabsTrigger value="history">Riwayat</TabsTrigger>
         </TabsList>
         <TabsContent value="broadcast">
           <div className="grid max-w-xl gap-3">
@@ -426,7 +428,176 @@ export function NotificationsPage() {
             </div>
           </div>
         </TabsContent>
+        <TabsContent value="history">
+          <NotificationHistoryTab />
+        </TabsContent>
       </Tabs>
     </Section>
+  );
+}
+
+type NotifLog = {
+  id: string;
+  channel: string;
+  event: string;
+  recipient: string;
+  subject?: string | null;
+  body: string;
+  status: string;
+  attempts: number;
+  error?: string | null;
+  batch_id?: string | null;
+  scheduled_at: string;
+  sent_at?: string | null;
+  created_at: string;
+};
+
+const EVENT_LABELS: Record<string, string> = {
+  broadcast: "Broadcast",
+  invoice_reminder: "Pengingat tagihan",
+  payment_confirmation: "Konfirmasi bayar",
+  ops_telegram: "Alert ops",
+  monthly_report: "Laporan bulanan",
+};
+
+const LOG_STATUS: Record<string, { label: string; tone: string }> = {
+  pending: { label: "Menunggu", tone: "var(--warn, #b7791f)" },
+  sent: { label: "Terkirim", tone: "var(--ok)" },
+  failed: { label: "Gagal", tone: "var(--danger)" },
+};
+
+function formatDateTime(s?: string | null): string {
+  if (!s) return "—";
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" });
+}
+
+function NotificationHistoryTab() {
+  const [status, setStatus] = useState("");
+  const [channel, setChannel] = useState("");
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const [page, setPage] = useState(0);
+  const limit = 20;
+
+  const q = useQuery({
+    queryKey: ["notification-history", status, channel, debouncedSearch, page],
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(page * limit) });
+      if (status) params.set("status", status);
+      if (channel) params.set("channel", channel);
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+      return api<{ data: NotifLog[]; total: number; pending: number; sent: number; failed: number }>(
+        `/api/notifications/history?${params}`,
+      );
+    },
+    refetchInterval: 10000,
+  });
+
+  const rows = q.data?.data ?? [];
+  const total = q.data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / limit));
+
+  return (
+    <div className="grid gap-3">
+      <p className="text-sm text-[var(--muted)]">
+        Riwayat semua pengiriman (dunning, konfirmasi bayar, broadcast, alert ops, laporan). Pakai kolom Keterangan
+        untuk menelusuri kiriman yang gagal atau ganda.
+      </p>
+      <div className="flex flex-wrap gap-2 text-xs">
+        <span className="rounded-full border border-[var(--border)] px-2.5 py-1">
+          ⏳ Menunggu: <strong>{q.data?.pending ?? 0}</strong>
+        </span>
+        <span className="rounded-full border border-[var(--border)] px-2.5 py-1">
+          ✅ Terkirim: <strong>{q.data?.sent ?? 0}</strong>
+        </span>
+        <span
+          className="rounded-full border px-2.5 py-1"
+          style={{
+            borderColor: (q.data?.failed ?? 0) > 0 ? "var(--danger)" : "var(--border)",
+            color: (q.data?.failed ?? 0) > 0 ? "var(--danger)" : undefined,
+          }}
+        >
+          ❌ Gagal: <strong>{q.data?.failed ?? 0}</strong>
+        </span>
+      </div>
+      <ListToolbar
+        search={search}
+        onSearchChange={(v) => {
+          setSearch(v);
+          setPage(0);
+        }}
+        searchPlaceholder="Nomor, isi pesan…"
+        filters={[
+          {
+            key: "channel",
+            label: "Channel",
+            value: channel,
+            onChange: (v) => {
+              setChannel(v);
+              setPage(0);
+            },
+            options: [
+              { value: "whatsapp", label: "WhatsApp" },
+              { value: "telegram", label: "Telegram" },
+              { value: "email", label: "Email" },
+            ],
+          },
+          {
+            key: "status",
+            label: "Status",
+            value: status,
+            onChange: (v) => {
+              setStatus(v);
+              setPage(0);
+            },
+            options: [
+              { value: "pending", label: "Menunggu" },
+              { value: "sent", label: "Terkirim" },
+              { value: "failed", label: "Gagal" },
+            ],
+          },
+        ]}
+        page={page}
+        pageCount={pages}
+        onPageChange={setPage}
+        total={total}
+      />
+      <Table
+        rowNumberStart={page * limit + 1}
+        columns={["Waktu", "Jenis", "Channel", "Penerima", "Pesan", "Status", "Keterangan"]}
+        rows={rows.map((n) => {
+          const st = LOG_STATUS[n.status] ?? { label: n.status, tone: "var(--muted)" };
+          const body = n.body.length > 80 ? `${n.body.slice(0, 80)}…` : n.body;
+          return [
+            <span key="t" title={formatDateTime(n.created_at)}>
+              {formatDateTime(n.created_at)}
+            </span>,
+            EVENT_LABELS[n.event] || n.event || "—",
+            n.channel,
+            n.recipient,
+            <span key="b" title={n.body}>
+              {body}
+            </span>,
+            <span key="s" style={{ color: st.tone, fontWeight: 600 }}>
+              {st.label}
+            </span>,
+            n.error ? (
+              <span key="e" className="text-[var(--danger)]" title={n.error}>
+                {n.error.length > 60 ? `${n.error.slice(0, 60)}…` : n.error}
+              </span>
+            ) : n.status === "sent" ? (
+              <span key="e" className="text-[var(--muted)]" title={n.sent_at ?? undefined}>
+                terkirim {formatDateTime(n.sent_at)}
+              </span>
+            ) : n.attempts > 0 ? (
+              <span key="e" className="text-[var(--muted)]">percobaan ke-{n.attempts + 1}</span>
+            ) : (
+              <span key="e" className="text-[var(--muted)]">—</span>
+            ),
+          ];
+        })}
+      />
+    </div>
   );
 }

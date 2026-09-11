@@ -72,7 +72,7 @@ func (s *Service) QueueTenantTelegram(ctx context.Context, tenantID xid.ID, body
 	if chatID == "" {
 		return nil
 	}
-	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "telegram", Recipient: chatID, Body: body})
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "telegram", Recipient: chatID, Body: body, Event: "ops_telegram"})
 }
 
 // QueueTenantTelegramOnce sends at most one ops Telegram for (kind, key) per tenant.

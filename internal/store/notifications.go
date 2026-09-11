@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"time"
 
 	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"github.com/jackc/pgx/v5"
@@ -119,4 +122,91 @@ func (s *Store) ListBroadcastPhones(ctx context.Context, tenantID xid.ID, audien
 		out = append(out, phone)
 	}
 	return out, rows.Err()
+}
+
+// NotificationLog adalah satu baris riwayat pengiriman (antrean notifikasi).
+type NotificationLog struct {
+	ID          xid.ID     `json:"id"`
+	Channel     string     `json:"channel"`
+	Event       string     `json:"event"`
+	Recipient   string     `json:"recipient"`
+	Subject     *string    `json:"subject,omitempty"`
+	Body        string     `json:"body"`
+	Status      string     `json:"status"`
+	Attempts    int        `json:"attempts"`
+	Error       *string    `json:"error,omitempty"`
+	BatchID     *xid.ID    `json:"batch_id,omitempty"`
+	ScheduledAt time.Time  `json:"scheduled_at"`
+	SentAt      *time.Time `json:"sent_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+// ListNotificationHistory memfilter antrean notifikasi untuk halaman Riwayat.
+func (s *Store) ListNotificationHistory(ctx context.Context, tenantID xid.ID, status, channel, search string, limit, offset int) ([]NotificationLog, int64, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, 0, err
+	}
+	where := "WHERE tenant_id = $1"
+	args := []any{tenantID}
+	if v := strings.TrimSpace(status); v != "" {
+		args = append(args, v)
+		where += fmt.Sprintf(" AND status = $%d", len(args))
+	}
+	if v := strings.TrimSpace(channel); v != "" {
+		args = append(args, v)
+		where += fmt.Sprintf(" AND channel = $%d", len(args))
+	}
+	if v := strings.TrimSpace(search); v != "" {
+		args = append(args, "%"+v+"%")
+		n := len(args)
+		where += fmt.Sprintf(" AND (recipient ILIKE $%d OR body ILIKE $%d OR COALESCE(subject,'') ILIKE $%d)", n, n, n)
+	}
+	var total int64
+	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM notification_queue `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	args = append(args, limit, offset)
+	q := `
+		SELECT id, channel, event, recipient, subject, body, status, attempts, error,
+		       batch_id, scheduled_at, sent_at, created_at
+		FROM notification_queue ` + where +
+		fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
+	rows, err := s.Pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var list []NotificationLog
+	for rows.Next() {
+		var n NotificationLog
+		if err := rows.Scan(&n.ID, &n.Channel, &n.Event, &n.Recipient, &n.Subject, &n.Body, &n.Status,
+			&n.Attempts, &n.Error, &n.BatchID, &n.ScheduledAt, &n.SentAt, &n.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		list = append(list, n)
+	}
+	return list, total, rows.Err()
+}
+
+// NotificationHistoryStats menghitung status antrean untuk ringkasan riwayat.
+func (s *Store) NotificationHistoryStats(ctx context.Context, tenantID xid.ID) (pending, sent, failed int64, err error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return 0, 0, 0, err
+	}
+	err = s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE status = 'pending'),
+		       COUNT(*) FILTER (WHERE status = 'sent'),
+		       COUNT(*) FILTER (WHERE status = 'failed')
+		FROM notification_queue WHERE tenant_id = $1
+	`, tenantID).Scan(&pending, &sent, &failed)
+	return pending, sent, failed, err
 }

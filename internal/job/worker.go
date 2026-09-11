@@ -647,7 +647,7 @@ func (w *Worker) monthlyReportEmail(ctx context.Context, t store.Tenant, now tim
 		t.Name, now.Format("January 2006"), stats["active_customers"], stats["active_subscriptions"], stats["unpaid_invoices"], stats["monthly_revenue"])
 	_ = w.notify.Queue(ctx, notify.Message{
 		TenantID: t.ID, Channel: "email", Recipient: to,
-		Subject: "Laporan bisnis bulanan D5Net", Body: body,
+		Subject: fmt.Sprintf("Laporan bisnis bulanan %s", t.Name), Body: body, Event: "monthly_report",
 	})
 }
 

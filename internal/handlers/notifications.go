@@ -142,7 +142,7 @@ func registerNotifications(api huma.API, d *Deps) {
 		if len(recipients) == 0 {
 			return nil, httpx.BadRequest("tidak ada penerima")
 		}
-		n, batch, err := d.Notify.QueueBroadcast(ctx, tid, ch, input.Body.Subject, body, recipients, input.Body.DelaySeconds)
+		n, batch, err := d.Notify.QueueBroadcast(ctx, tid, ch, input.Body.Subject, body, recipients, input.Body.DelaySeconds, input.Body.TemplateEvent)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -200,6 +200,53 @@ func registerNotifications(api huma.API, d *Deps) {
 		out.Body.Sent = sent
 		out.Body.Failed = failed
 		out.Body.Failures = failures
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-notification-history", Method: http.MethodGet, Path: "/api/notifications/history",
+		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Status  string `query:"status"`
+		Channel string `query:"channel"`
+		Search  string `query:"search"`
+		Limit   int    `query:"limit"`
+		Offset  int    `query:"offset"`
+	}) (*struct {
+		Body struct {
+			Data    []store.NotificationLog `json:"data"`
+			Total   int64                   `json:"total"`
+			Pending int64                   `json:"pending"`
+			Sent    int64                   `json:"sent"`
+			Failed  int64                   `json:"failed"`
+		}
+	}, error) {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		list, total, err := d.Store.ListNotificationHistory(ctx, tid, input.Status, input.Channel, input.Search, input.Limit, input.Offset)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		pending, sent, failed, err := d.Store.NotificationHistoryStats(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := &struct {
+			Body struct {
+				Data    []store.NotificationLog `json:"data"`
+				Total   int64                   `json:"total"`
+				Pending int64                   `json:"pending"`
+				Sent    int64                   `json:"sent"`
+				Failed  int64                   `json:"failed"`
+			}
+		}{}
+		out.Body.Data = list
+		out.Body.Total = total
+		out.Body.Pending = pending
+		out.Body.Sent = sent
+		out.Body.Failed = failed
 		return out, nil
 	})
 }

@@ -21,6 +21,9 @@ type Message struct {
 	Body        string
 	ScheduledAt *time.Time
 	BatchID     xid.ID
+	// Event menandai jenis pesan (invoice_reminder, payment_confirmation,
+	// broadcast, ops_telegram, monthly_report) untuk riwayat di UI.
+	Event string
 }
 
 type Notifier interface {
@@ -57,26 +60,30 @@ func (s *Service) Queue(ctx context.Context, msg Message) error {
 	}
 	if msg.ScheduledAt != nil {
 		_, err := s.store.Pool.Exec(ctx, `
-			INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body, scheduled_at, batch_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)
-		`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body, *msg.ScheduledAt, batch)
+			INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body, scheduled_at, batch_id, event)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body, *msg.ScheduledAt, batch, msg.Event)
 		return err
 	}
 	_, err := s.store.Pool.Exec(ctx, `
-		INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body, batch_id)
-		VALUES ($1,$2,$3,$4,$5,$6)
-	`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body, batch)
+		INSERT INTO notification_queue (tenant_id, channel, recipient, subject, body, batch_id, event)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+	`, msg.TenantID, msg.Channel, msg.Recipient, msg.Subject, msg.Body, batch, msg.Event)
 	return err
 }
 
 // QueueBroadcast enqueues many messages with staggered scheduled_at (rate limit).
 // Returns queued count + batch ID for progress tracking.
-func (s *Service) QueueBroadcast(ctx context.Context, tenantID xid.ID, channel, subject, body string, recipients []string, delaySeconds int) (int, xid.ID, error) {
+func (s *Service) QueueBroadcast(ctx context.Context, tenantID xid.ID, channel, subject, body string, recipients []string, delaySeconds int, event string) (int, xid.ID, error) {
 	if delaySeconds < 1 {
 		delaySeconds = 2
 	}
 	if delaySeconds > 60 {
 		delaySeconds = 60
+	}
+	event = strings.TrimSpace(event)
+	if event == "" {
+		event = "broadcast"
 	}
 	batch := xid.New()
 	n := 0
@@ -88,7 +95,7 @@ func (s *Service) QueueBroadcast(ctx context.Context, tenantID xid.ID, channel, 
 		}
 		at := base.Add(time.Duration(i*delaySeconds) * time.Second)
 		if err := s.Queue(ctx, Message{
-			TenantID: tenantID, Channel: channel, Recipient: r, Subject: subject, Body: body, ScheduledAt: &at, BatchID: batch,
+			TenantID: tenantID, Channel: channel, Recipient: r, Subject: subject, Body: body, ScheduledAt: &at, BatchID: batch, Event: event,
 		}); err != nil {
 			return n, batch, err
 		}
@@ -514,7 +521,7 @@ func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, phon
 	if err != nil {
 		return err
 	}
-	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body})
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "invoice_reminder"})
 }
 
 func (s *Service) SendPaymentConfirmation(ctx context.Context, tenantID xid.ID, phone, customerName, planName, invoiceNum string, amount int64) error {
@@ -528,5 +535,5 @@ func (s *Service) SendPaymentConfirmation(ctx context.Context, tenantID xid.ID, 
 	if err != nil {
 		return err
 	}
-	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body})
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "payment_confirmation"})
 }
