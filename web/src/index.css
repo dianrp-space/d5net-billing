@@ -787,16 +787,15 @@ input, select, textarea, button { font: inherit; }
 .landing {
   position: relative;
   overflow: hidden;
-  background: #0a1218;
-  color: #e8eef5;
+  background: var(--bg);
+  color: var(--text);
 }
 .landing-bg {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 80% 50% at 20% 10%, rgba(90, 90, 64, 0.35), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 90% 80%, rgba(140, 115, 85, 0.22), transparent 50%),
-    linear-gradient(165deg, #0a1218 0%, #141810 45%, #12100c 100%);
+    radial-gradient(ellipse 80% 50% at 20% 10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 90% 80%, color-mix(in srgb, var(--secondary) 14%, transparent), transparent 50%);
 }
 .landing-brand {
   font-family: "Instrument Serif", Georgia, serif;
@@ -806,11 +805,303 @@ input, select, textarea, button { font: inherit; }
 .landing-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
-  color: #c9c4a8;
-  background: rgba(15, 28, 18, 0.7);
-  border: 1px solid #3a4030;
+  color: var(--text-body);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
   border-radius: 0.25rem;
   padding: 0.15rem 0.45rem;
+}
+.landing-logo {
+  height: 2.25rem;
+  width: auto;
+  border-radius: 0.55rem;
+  background: #fff;
+  padding: 0.2rem 0.45rem;
+}
+.landing-header-banner {
+  height: 2.6rem;
+  width: auto;
+  display: block;
+}
+.landing-hero {
+  display: grid;
+  gap: 3rem;
+  align-items: center;
+  padding-top: 3.5rem;
+}
+.landing-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  padding: 0.3rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.landing-title {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+  font-size: 3.2rem;
+  margin-top: 1.2rem;
+  color: var(--text);
+}
+.landing-title em { font-style: italic; color: color-mix(in srgb, #e03131 72%, var(--text)); }
+.landing-sub {
+  margin-top: 1.1rem;
+  max-width: 32rem;
+  font-size: 1.1rem;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.landing-trust {
+  list-style: none;
+  margin: 1.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.landing-trust li { display: inline-flex; align-items: center; gap: 0.4rem; }
+.landing-trust svg { color: var(--ok); }
+.landing-visual { position: relative; display: grid; gap: 1rem; align-content: center; }
+.landing-visual::before {
+  content: "";
+  position: absolute;
+  inset: 8% -5%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%);
+  pointer-events: none;
+}
+.landing-mock {
+  position: relative;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  padding: 1rem 1.1rem;
+  box-shadow: 0 24px 55px -28px rgb(0 0 0 / 0.35);
+}
+.landing-mock-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; font-size: 0.78rem; }
+.landing-mock-no { font-family: ui-monospace, monospace; color: var(--muted); }
+.landing-mock-paid {
+  border-radius: 999px;
+  background: var(--online-bg);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+  color: var(--online-fg);
+  padding: 0.1rem 0.6rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.landing-mock-amount { margin-top: 0.35rem; font-size: 1.35rem; font-weight: 800; letter-spacing: -0.01em; color: var(--text); }
+.landing-mock-bar { margin-top: 0.6rem; height: 0.4rem; border-radius: 999px; background: var(--panel-muted); overflow: hidden; }
+.landing-mock-bar i { display: block; height: 100%; width: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--secondary)); }
+.landing-mock-toast { display: flex; align-items: center; gap: 0.6rem; font-size: 0.83rem; font-weight: 600; color: var(--text); }
+.landing-mock-toast svg { color: var(--ok); flex-shrink: 0; }
+.landing-mock-toast small { display: block; font-weight: 400; color: var(--muted); }
+.landing-invoice {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.1rem;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, transparent), transparent 45%),
+    var(--panel);
+  padding: 1.3rem 1.3rem 1.15rem;
+  box-shadow:
+    0 30px 60px -25px rgb(0 0 0 / 0.4),
+    inset 0 1px 0 rgb(255 255 255 / 0.06);
+  animation: landing-float 7s ease-in-out infinite;
+}
+.landing-invoice::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(180deg, #e03131, #fcc419 55%, #2f9e44);
+}
+.landing-invoice-sheen {
+  position: absolute;
+  inset: -40% -20%;
+  background: linear-gradient(105deg, transparent 42%, rgb(255 255 255 / 0.09) 50%, transparent 58%);
+  pointer-events: none;
+}
+@keyframes landing-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-invoice { animation: none; }
+}
+.landing-invoice-head { display: flex; align-items: center; gap: 0.7rem; }
+.landing-invoice-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.3rem;
+  width: 2.3rem;
+  flex-shrink: 0;
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--accent);
+}
+.landing-invoice-head b {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.landing-invoice-head span { font-family: ui-monospace, monospace; font-size: 0.72rem; color: var(--muted); }
+.landing-invoice-stamp {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  transform: rotate(6deg);
+  border-radius: 0.5rem;
+  border: 2px solid var(--online-fg);
+  background: var(--online-bg);
+  color: var(--online-fg);
+  padding: 0.2rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--ok) 70%, transparent);
+}
+.landing-invoice-meta {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.landing-invoice-meta span { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+.landing-invoice-meta b { display: block; margin-top: 0.15rem; font-size: 0.88rem; }
+.landing-invoice-items {
+  margin-top: 0.85rem;
+  border-top: 1px dashed var(--border);
+  padding-top: 0.7rem;
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+}
+.landing-invoice-items > div { display: flex; justify-content: space-between; gap: 1rem; color: var(--text-body); }
+.landing-invoice-free { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 700; color: var(--online-fg); }
+.landing-invoice-free s { font-weight: 400; color: var(--muted); }
+.landing-invoice-total {
+  margin-top: 0.7rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.7rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 800;
+}
+.landing-invoice-total b {
+  font-size: 1.3rem;
+  letter-spacing: -0.01em;
+  background: linear-gradient(100deg, #e03131, #f08c00);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.landing-invoice-bar { margin-top: 0.85rem; height: 0.45rem; border-radius: 999px; background: var(--panel-muted); overflow: hidden; }
+.landing-invoice-bar i { display: block; height: 100%; width: 100%; border-radius: 999px; background: linear-gradient(90deg, #2f9e44, #7bed9f); }
+.landing-chips {
+  margin-top: 3.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+.landing-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-body);
+  padding: 0.4rem 0.95rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.landing-steps { margin-top: 5rem; }
+.landing-section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+.landing-steps-grid {
+  margin-top: 1.4rem;
+  display: grid;
+  gap: 1rem;
+}
+.landing-step {
+  position: relative;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  padding: 1.4rem 1.3rem 1.3rem;
+  overflow: hidden;
+}
+.landing-step-no {
+  position: absolute;
+  top: 0.4rem;
+  right: 1rem;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 3rem;
+  line-height: 1;
+  color: color-mix(in srgb, var(--text) 9%, transparent);
+}
+.landing-step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.4rem;
+  width: 2.4rem;
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--accent);
+}
+.landing-step b { display: block; margin-top: 0.9rem; font-size: 1.02rem; color: var(--text); }
+.landing-step p { margin-top: 0.35rem; font-size: 0.88rem; line-height: 1.6; color: var(--muted); }
+.landing-contact {
+  margin-top: 4rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2rem;
+  border-radius: 1.2rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 13%, transparent), transparent 70%), var(--panel);
+  padding: 1.8rem;
+}
+.landing-contact h2 { font-size: 1.3rem; font-weight: 800; color: var(--text); }
+.landing-contact p { margin-top: 0.4rem; font-size: 0.92rem; color: var(--muted); }
+.landing-footer {
+  margin-top: 3.5rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+@media (min-width: 900px) {
+  .landing-hero { grid-template-columns: 1.05fr 0.95fr; padding-top: 5rem; }
+  .landing-title { font-size: 4.6rem; }
+  .landing-steps-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 .status-badge {
