@@ -196,26 +196,34 @@ export function LoginShell({
   title,
   subtitle,
   logoUrl,
+  badge,
+  footer,
   children,
 }: {
   brand?: string;
   title: string;
   subtitle: string;
   logoUrl?: string | null;
+  badge?: ReactNode;
+  footer?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-h-full items-center justify-center bg-[var(--bg)] p-6">
-      <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-sm">
-        <div className="mb-4 flex items-center gap-3">
-          <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="h-10 w-10 rounded-lg object-contain" />
-          <div className="min-w-0">
-            <div className="text-sm tracking-wide text-[var(--muted)]">{brand}</div>
-            <h1 className="text-xl font-bold tracking-tight">{title}</h1>
+    <div className="auth-wrap">
+      <div className="auth-glow" aria-hidden />
+      <div className="auth-card">
+        <div className="auth-card-bar" aria-hidden />
+        <div className="auth-card-body">
+          <div className="text-center">
+            <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="auth-logo" />
+            <div className="auth-brand">{brand}</div>
+            <h1 className="auth-title">{title}</h1>
+            {badge ? <span className="auth-badge">{badge}</span> : null}
+            <p className="auth-subtitle">{subtitle}</p>
           </div>
+          {children}
+          {footer ? <div className="auth-footer">{footer}</div> : null}
         </div>
-        <p className="mb-6 text-sm text-[var(--muted)]">{subtitle}</p>
-        {children}
       </div>
     </div>
   );

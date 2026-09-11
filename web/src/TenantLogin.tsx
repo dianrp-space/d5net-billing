@@ -1,4 +1,14 @@
 import { useEffect, useState } from "react";
+import {
+  ArrowLeft,
+  CircleAlert,
+  Loader2,
+  LockKeyhole,
+  Mail,
+  Phone,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 import { api, setClientSession, setToken } from "./api";
 import { applyBrandingMeta } from "./branding";
 import { LoginShell, SecretInput } from "./ui";
@@ -104,7 +114,7 @@ export function TenantLogin({
     applyBrandingMeta({
       appName: tenant.name || tenant.app_name,
       faviconUrl: tenant.favicon_url,
-      titleSuffix: isAdmin ? "Admin" : "Login Portal Pelanggan",
+      titleSuffix: isAdmin ? "Login Portal Admin" : "Login Portal Pelanggan",
       separator: "-",
     });
   }, [tenant, isAdmin]);
@@ -153,25 +163,99 @@ export function TenantLogin({
         logoUrl={tenant?.logo_url}
         title={isAdmin ? "Masuk admin" : "Login Portal Pelanggan"}
         subtitle={isAdmin ? "Panel administrator" : "Cek paket & tagihan · password default = nomor HP"}
+        badge={
+          isAdmin ? (
+            <>
+              <ShieldCheck size={12} /> Administrator
+            </>
+          ) : (
+            <>
+              <UserRound size={12} /> Pelanggan
+            </>
+          )
+        }
+        footer={
+          isAdmin ? (
+            <>Area khusus administrator. Akses tercatat.</>
+          ) : (
+            <a href="/">
+              <ArrowLeft size={14} /> Kembali ke beranda
+            </a>
+          )
+        }
       >
         {isAdmin ? (
-          <form className="flex flex-col gap-3" onSubmit={onSubmit}>
-            <input className="input" placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            <SecretInput placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
-            <button className="btn" disabled={busy || !tenant}>
-              {busy ? "Masuk..." : "Masuk"}
+          <form className="auth-form" onSubmit={onSubmit}>
+            <label className="auth-label">
+              Email
+              <span className="auth-field">
+                <Mail size={16} className="auth-field-icon" />
+                <input
+                  className="input"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoComplete="username"
+                />
+              </span>
+            </label>
+            <label className="auth-label">
+              Password
+              <span className="auth-field">
+                <LockKeyhole size={16} className="auth-field-icon" />
+                <SecretInput value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
+              </span>
+            </label>
+            <button className="btn auth-submit" disabled={busy || !tenant}>
+              {busy ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" /> Masuk...
+                </>
+              ) : (
+                "Masuk"
+              )}
             </button>
           </form>
         ) : (
-          <form className="flex flex-col gap-3" onSubmit={onSubmit}>
-            <input className="input" placeholder="Nomor telepon" value={phone} onChange={(e) => setPhone(e.target.value)} required />
-            <SecretInput placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-            <button className="btn" disabled={busy || !tenant}>
-              {busy ? "Masuk..." : "Masuk"}
+          <form className="auth-form" onSubmit={onSubmit}>
+            <label className="auth-label">
+              Nomor telepon
+              <span className="auth-field">
+                <Phone size={16} className="auth-field-icon" />
+                <input
+                  className="input"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  required
+                  autoComplete="username"
+                  inputMode="tel"
+                />
+              </span>
+            </label>
+            <label className="auth-label">
+              Password
+              <span className="auth-field">
+                <LockKeyhole size={16} className="auth-field-icon" />
+                <SecretInput value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+              </span>
+            </label>
+            <button className="btn auth-submit" disabled={busy || !tenant}>
+              {busy ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" /> Masuk...
+                </>
+              ) : (
+                "Masuk"
+              )}
             </button>
           </form>
         )}
-        {err && <p className="mt-3 text-sm text-[var(--danger)]">{err}</p>}
+        {err && (
+          <p className="auth-error" role="alert">
+            <CircleAlert size={16} /> <span>{err}</span>
+          </p>
+        )}
       </LoginShell>
     </AuthThemeCorner>
   );

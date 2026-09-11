@@ -200,6 +200,7 @@ export function IsolirPortalPage() {
         title={appName}
         subtitle="Layanan diisolir — login untuk melihat & bayar tagihan"
         logoUrl={tenant?.logo_url}
+        badge="Isolir"
       >
         <form className="grid gap-3" onSubmit={onLogin}>
           <label className="grid gap-1 text-sm">
