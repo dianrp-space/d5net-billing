@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func testRSAPrivateKey(t *testing.T) string {
@@ -109,8 +109,8 @@ func TestDokuVerifyWebhook(t *testing.T) {
 	secret := "whsec-doku"
 	body := []byte(`{"order":{"invoice_number":"INV-1","amount":150000},"transaction":{"status":"SUCCESS","date":"2026-09-11T02:00:00Z","original_request_id":"req-1"}}`)
 	headers := map[string]string{
-		"Client-Id":        "MCH-TEST-1",
-		"Request-Id":       "rid-1",
+		"Client-Id":         "MCH-TEST-1",
+		"Request-Id":        "rid-1",
 		"Request-Timestamp": "2026-09-11T02:00:10Z",
 	}
 	headers["Signature"] = dokuSignature(secret, headers["Client-Id"], headers["Request-Id"], headers["Request-Timestamp"], DokuWebhookPath, body)

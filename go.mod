@@ -1,4 +1,4 @@
-module github.com/dianrp/drp-billing
+module github.com/dianrp-space/d5net-billing
 
 go 1.26.0
 

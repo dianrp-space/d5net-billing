@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/dianrp/drp-billing/internal/auth"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	_ "github.com/go-sql-driver/mysql"
 )
 

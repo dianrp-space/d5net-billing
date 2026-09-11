@@ -6,20 +6,38 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"github.com/go-routeros/routeros/v3"
 )
 
 const (
-	isolirRuleCommentDNS       = "drp-isolir:dns"
-	isolirRuleCommentPortal    = "drp-isolir:portal"
-	isolirRuleCommentNATProxy  = "drp-isolir:nat-to-proxy"
-	isolirProxyAllowComment    = "drp-isolir:proxy-allow-portal"
-	isolirProxyRedirectComment = "drp-isolir:proxy-redirect"
-	isolirPortalAddressList    = "drp-isolir-portal"
+	isolirRuleCommentDNS       = "d5n-isolir:dns"
+	isolirRuleCommentPortal    = "d5n-isolir:portal"
+	isolirRuleCommentNATProxy  = "d5n-isolir:nat-to-proxy"
+	isolirProxyAllowComment    = "d5n-isolir:proxy-allow-portal"
+	isolirProxyRedirectComment = "d5n-isolir:proxy-redirect"
+	isolirPortalAddressList    = "d5n-isolir-portal"
 	isolirDefaultProxyPort     = "8080"
 )
+
+// isolirLegacyComments maps current infra comments to their drp- era names.
+// Sync matches either and renames legacy rows in place, so existing routers
+// migrate without duplicate rules.
+var isolirLegacyComments = map[string]string{
+	isolirRuleCommentDNS:          "drp-isolir:dns",
+	isolirRuleCommentDNS + "-tcp": "drp-isolir:dns-tcp",
+	isolirRuleCommentPortal:       "drp-isolir:portal",
+	isolirRuleCommentNATProxy:     "drp-isolir:nat-to-proxy",
+	isolirProxyAllowComment:       "drp-isolir:proxy-allow-portal",
+	isolirProxyRedirectComment:    "drp-isolir:proxy-redirect",
+}
+
+const isolirLegacyPortalAddressList = "drp-isolir-portal"
+
+func isolirLegacyComment(comment string) string {
+	return isolirLegacyComments[comment]
+}
 
 // EnsureIsolirInfra creates pool + PPP/hotspot isolir profile + Web Proxy redirect + NAT/filter.
 func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.ID, cfg store.IsolirNetworkSettings, tenantSlug string) error {
@@ -162,7 +180,7 @@ func rangesToSrcMatch(ranges string) string {
 }
 
 func upsertFirewallFilterByComment(cl *routeros.Client, comment string, props []string) error {
-	return upsertByComment(cl, "/ip/firewall/filter", comment, props)
+	return upsertByCommentWithLegacy(cl, "/ip/firewall/filter", comment, isolirLegacyComment(comment), props)
 }
 
 // upsertIsolirPortalAllow lets isolir clients reach the billing site over HTTP/HTTPS.
@@ -186,7 +204,8 @@ func upsertIsolirPortalAllow(cl *routeros.Client, src, portalHost string) error 
 	if err == nil && reply != nil {
 		for _, re := range reply.Re {
 			id := re.Map[".id"]
-			if id == "" || strings.TrimSpace(re.Map["comment"]) != isolirRuleCommentPortal {
+			cmt := strings.TrimSpace(re.Map["comment"])
+			if id == "" || (cmt != isolirRuleCommentPortal && cmt != isolirLegacyComment(isolirRuleCommentPortal)) {
 				continue
 			}
 			if rowMatchesProps(re.Map, props) && !fieldFilled(re.Map, "dst-address") {
@@ -226,7 +245,8 @@ func upsertAddressListFQDN(cl *routeros.Client, list, address, comment string) e
 			if id == "" || isROSTrue(re.Map["dynamic"]) {
 				continue
 			}
-			if strings.TrimSpace(re.Map["comment"]) != comment {
+			cmt := strings.TrimSpace(re.Map["comment"])
+			if cmt != comment && cmt != isolirLegacyComment(comment) {
 				continue
 			}
 			if rowMatchesProps(re.Map, props) {
@@ -243,11 +263,11 @@ func upsertAddressListFQDN(cl *routeros.Client, list, address, comment string) e
 }
 
 func upsertFirewallNATByComment(cl *routeros.Client, comment string, props []string) error {
-	return upsertByComment(cl, "/ip/firewall/nat", comment, props)
+	return upsertByCommentWithLegacy(cl, "/ip/firewall/nat", comment, isolirLegacyComment(comment), props)
 }
 
 func upsertProxyAccessByComment(cl *routeros.Client, comment string, props []string) error {
-	return upsertByComment(cl, "/ip/proxy/access", comment, props)
+	return upsertByCommentWithLegacy(cl, "/ip/proxy/access", comment, isolirLegacyComment(comment), props)
 }
 
 // proxyRedirectPropSets: RouterOS 7 uses action=redirect + action-data;

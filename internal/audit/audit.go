@@ -1,7 +1,7 @@
 package audit
 
 import (
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"context"
 	"encoding/json"
 	"net"

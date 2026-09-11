@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/dianrp/drp-billing/internal/httpx"
-	"github.com/dianrp/drp-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/httpx"
+	"github.com/dianrp-space/d5net-billing/internal/store"
 )
 
 // singleTenant resolves the one and only provider/tenant for this deployment.

@@ -86,7 +86,7 @@ func (n *EmailNotifier) Send(ctx context.Context, msg Message) error {
 	}
 	subject := strings.TrimSpace(msg.Subject)
 	if subject == "" {
-		subject = "Notifikasi drp-billing"
+		subject = "Notifikasi D5Net"
 	}
 	raw := buildEmailMessage(from, fromName, msg.Recipient, subject, msg.Body)
 	return sendSMTP(ctx, host, port, user, pass, from, []string{msg.Recipient}, raw)

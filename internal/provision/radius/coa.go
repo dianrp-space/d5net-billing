@@ -6,11 +6,11 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"fmt"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"net"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
 )
 
 const (

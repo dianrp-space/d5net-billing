@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 const ProviderDoku = "doku"
@@ -46,13 +46,13 @@ func DokuBaseURL(sandbox bool) string {
 }
 
 type DokuProvider struct {
-	ClientID         string
-	SecretKey        string
+	ClientID  string
+	SecretKey string
 	// Direct API (SNAP QRIS) credentials; only needed for QR ops.
-	PrivateKey string
-	MerchantID string
-	TerminalID string
-	PostalCode string
+	PrivateKey       string
+	MerchantID       string
+	TerminalID       string
+	PostalCode       string
 	Sandbox          bool
 	ExpiresInMinutes int
 	HTTP             *http.Client

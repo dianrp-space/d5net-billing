@@ -161,10 +161,10 @@ func dokuFetchToken(ctx context.Context, p *DokuProvider) (string, int64, error)
 		return "", 0, fmt.Errorf("DOKU token %d: %s", resp.StatusCode, dokuErrMessage(body))
 	}
 	var out struct {
-		AccessToken string `json:"accessToken"`
+		AccessToken  string `json:"accessToken"`
 		AccessToken2 string `json:"access_token"`
-		ExpiresIn   any    `json:"expiresIn"`
-		ExpiresIn2  any    `json:"expires_in"`
+		ExpiresIn    any    `json:"expiresIn"`
+		ExpiresIn2   any    `json:"expires_in"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		return "", 0, fmt.Errorf("DOKU token: parse response: %w", err)

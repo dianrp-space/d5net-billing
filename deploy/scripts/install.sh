@@ -50,4 +50,4 @@ systemctl daemon-reload
 systemctl enable d5net-billing-api d5net-billing-worker
 systemctl restart d5net-billing-api d5net-billing-worker
 
-echo "==> Install complete. Configure Nginx via aaPanel using deploy/nginx/drp-billing.conf"
+echo "==> Install complete. Configure Nginx via aaPanel using deploy/nginx/d5net-billing.conf"

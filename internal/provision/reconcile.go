@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 type Drift struct {
@@ -71,7 +71,7 @@ func SanitizeBrandPrefix(appName string) string {
 	}
 	s := strings.Trim(b.String(), "-")
 	if s == "" {
-		return "drp"
+		return "d5n"
 	}
 	if len(s) > 32 {
 		s = s[:32]

@@ -7,18 +7,18 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/dianrp/drp-billing/internal/httpx"
-	"github.com/dianrp/drp-billing/internal/payment"
-	"github.com/dianrp/drp-billing/internal/provision"
-	"github.com/dianrp/drp-billing/internal/provision/routeros"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/httpx"
+	"github.com/dianrp-space/d5net-billing/internal/payment"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/provision/routeros"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func ownershipComment(ctx context.Context, d *Deps, tenantID xid.ID, code, name string) string {
 	app, err := d.Store.EffectiveAppName(ctx, tenantID)
 	if err != nil || app == "" {
-		app = "drp-billing"
+		app = "D5Net"
 	}
 	return provision.CommentTag(app, code, name)
 }

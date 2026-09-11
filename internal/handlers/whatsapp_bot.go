@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dianrp-space/d5net-billing/internal/payment"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/wa"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"github.com/skip2/go-qrcode"
-	"github.com/dianrp/drp-billing/internal/payment"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/wa"
-	"github.com/dianrp/drp-billing/internal/xid"
 )
 
 // WhatsApp customer bot.

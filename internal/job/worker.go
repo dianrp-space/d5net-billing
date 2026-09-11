@@ -10,14 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/billing"
-	"github.com/dianrp/drp-billing/internal/monitor"
-	"github.com/dianrp/drp-billing/internal/notify"
-	"github.com/dianrp/drp-billing/internal/provision"
-	"github.com/dianrp/drp-billing/internal/provision/routeros"
-	"github.com/dianrp/drp-billing/internal/provisioner"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/billing"
+	"github.com/dianrp-space/d5net-billing/internal/monitor"
+	"github.com/dianrp-space/d5net-billing/internal/notify"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/provision/routeros"
+	"github.com/dianrp-space/d5net-billing/internal/provisioner"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 type Worker struct {
@@ -648,7 +648,7 @@ func (w *Worker) monthlyReportEmail(ctx context.Context, t store.Tenant, now tim
 		t.Name, now.Format("January 2006"), stats["active_customers"], stats["active_subscriptions"], stats["unpaid_invoices"], stats["monthly_revenue"])
 	_ = w.notify.Queue(ctx, notify.Message{
 		TenantID: t.ID, Channel: "email", Recipient: to,
-		Subject: "Laporan bisnis bulanan drp-billing", Body: body,
+		Subject: "Laporan bisnis bulanan D5Net", Body: body,
 	})
 }
 

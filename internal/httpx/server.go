@@ -40,7 +40,7 @@ func NewServer(origins []string, extra ...func(http.Handler) http.Handler) *Serv
 		r.Use(mw)
 	}
 
-	config := huma.DefaultConfig("drp-billing API", "1.0.0")
+	config := huma.DefaultConfig("d5net-billing API", "1.0.0")
 	config.Info.Description = "ISP Billing API for MikroTik RouterOS"
 	api := humachi.New(r, config)
 

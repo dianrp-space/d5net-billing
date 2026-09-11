@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func SSEHandler(st *store.Store) http.HandlerFunc {

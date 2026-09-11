@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/dianrp/drp-billing/internal/dbbackup"
-	"github.com/dianrp/drp-billing/internal/httpx"
+	"github.com/dianrp-space/d5net-billing/internal/dbbackup"
+	"github.com/dianrp-space/d5net-billing/internal/httpx"
 	"github.com/go-chi/chi/v5"
 )
 

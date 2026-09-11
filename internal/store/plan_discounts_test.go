@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func TestApplyPlanDiscount(t *testing.T) {

@@ -98,6 +98,46 @@ export const MAP_MARKER = {
   customer: { color: "#15803d", label: "Pelanggan" },
 } as const;
 
+/** Warna fix standar serat fiber (TIA-598) agar pilihan warna jalur konsisten. */
+export const ROUTE_COLOR_PRESETS = [
+  "#1971C2", // biru
+  "#F08C00", // oranye
+  "#2F9E44", // hijau
+  "#8C7355", // cokelat (default)
+  "#868E96", // abu
+  "#F1F3F5", // putih
+  "#E03131", // merah
+  "#212529", // hitam
+  "#FCC419", // kuning
+  "#7048E8", // ungu
+  "#E64980", // pink
+  "#0C8599", // aqua
+];
+
+export const DEFAULT_ROUTE_COLOR = "#8C7355";
+
+const ROUTE_COLOR_HISTORY_KEY = "d5net_route_colors";
+
+export function normalizeHexColor(value: string): string | null {
+  const m = value.trim().match(/^#?([0-9a-fA-F]{6})$/);
+  return m ? `#${m[1].toLowerCase()}` : null;
+}
+
+function loadRecentRouteColors(): string[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(ROUTE_COLOR_HISTORY_KEY) || "[]");
+    if (Array.isArray(raw)) {
+      return raw
+        .filter((c): c is string => typeof c === "string" && normalizeHexColor(c) !== null)
+        .map((c) => (normalizeHexColor(c) as string))
+        .slice(0, 8);
+    }
+  } catch {
+    /* abaikan */
+  }
+  return [];
+}
+
 /** Distinct SVG glyphs so POP / ODP / pelanggan are readable at a glance. */
 function mapMarkerSvg(kind: MapMarkerKind, color: string): string {
   if (kind === "pop") {
@@ -229,7 +269,30 @@ export function MapODP({
   editIdRef.current = editId;
   const [draft, setDraft] = useState<[number, number][]>([]);
   const [routeName, setRouteName] = useState("");
-  const [routeColor, setRouteColor] = useState("#8C7355");
+  const [routeColor, setRouteColor] = useState(DEFAULT_ROUTE_COLOR);
+  const [hexDraft, setHexDraft] = useState<string | null>(null);
+  const [recentColors, setRecentColors] = useState<string[]>(loadRecentRouteColors);
+
+  // Draft hex mengikuti perubahan warna dari picker/swatch/edit.
+  useEffect(() => {
+    setHexDraft(null);
+  }, [routeColor]);
+
+  function applyHex(value: string): boolean {
+    const normalized = normalizeHexColor(value);
+    if (!normalized) {
+      setSaveErr("Format hex tidak valid, contoh #8C7355.");
+      return false;
+    }
+    setSaveErr("");
+    setRouteColor(normalized);
+    return true;
+  }
+
+  function pickSwatch(color: string) {
+    setSaveErr("");
+    setRouteColor(color);
+  }
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveErr, setSaveErr] = useState("");
   const [odpOpen, setOdpOpen] = useState(false);
@@ -251,7 +314,7 @@ export function MapODP({
     setEditId(null);
     setDraft([]);
     setRouteName("");
-    setRouteColor("#8C7355");
+    setRouteColor(DEFAULT_ROUTE_COLOR);
     setSaveErr("");
   };
 
@@ -275,7 +338,7 @@ export function MapODP({
       const body: Record<string, unknown> = {
         name: routeName.trim() || `Jalur ${new Date().toLocaleString("id-ID")}`,
         path: draft,
-        color: routeColor || "#8C7355",
+        color: routeColor || DEFAULT_ROUTE_COLOR,
       };
       if (clusterId && clusterId !== "__none__") body.cluster_id = clusterId;
       if (editId) {
@@ -286,6 +349,17 @@ export function MapODP({
     },
     onSuccess: () => {
       setSaveOpen(false);
+      setHexDraft(null);
+      setRecentColors((prev) => {
+        const c = normalizeHexColor(routeColor) ?? DEFAULT_ROUTE_COLOR;
+        const next = [c, ...prev.filter((x) => x.toLowerCase() !== c.toLowerCase())].slice(0, 8);
+        try {
+          localStorage.setItem(ROUTE_COLOR_HISTORY_KEY, JSON.stringify(next));
+        } catch {
+          /* abaikan */
+        }
+        return next;
+      });
       cancelDraw();
       qc.invalidateQueries({ queryKey: ["cable-routes"] });
       void toastSuccess(editId ? "Jalur diperbarui" : "Jalur ditambahkan");
@@ -379,7 +453,7 @@ export function MapODP({
     setPlaceOdpMode(false);
     setEditId(r.id);
     setRouteName(r.name);
-    setRouteColor(r.color || "#8C7355");
+    setRouteColor(r.color || DEFAULT_ROUTE_COLOR);
     setDraft(path);
     setDrawMode(true);
     setSaveErr("");
@@ -395,7 +469,7 @@ export function MapODP({
     setPlaceOdpMode(false);
     setEditId(null);
     setRouteName("");
-    setRouteColor("#8C7355");
+    setRouteColor(DEFAULT_ROUTE_COLOR);
     setDraft([]);
     setDrawMode(true);
     setSaveErr("");
@@ -529,7 +603,7 @@ export function MapODP({
     setEditId(null);
     setDraft([]);
     setRouteName("");
-    setRouteColor("#8C7355");
+    setRouteColor(DEFAULT_ROUTE_COLOR);
     setSaveErr("");
     if (!clusterCenter) return;
     map.setView([clusterCenter.lat, clusterCenter.lng], 15, { animate: true });
@@ -602,7 +676,7 @@ export function MapODP({
       const path = parsePath(r.path);
       if (path.length < 2) continue;
       const latlngs = path.map(([lng, lat]) => L.latLng(lat, lng));
-      L.polyline(latlngs, { color: r.color || "#8C7355", weight: 4 })
+      L.polyline(latlngs, { color: r.color || DEFAULT_ROUTE_COLOR, weight: 4 })
         .bindPopup(`<b>${r.name}</b><br/>${formatDistance(pathLengthMeters(path))} · ${path.length} titik`)
         .addTo(group);
       for (const ll of latlngs) pts.push({ lat: ll.lat, lng: ll.lng });
@@ -834,15 +908,78 @@ export function MapODP({
             value={routeName}
             onChange={(e) => setRouteName(e.target.value)}
           />
-          <label className="flex items-center gap-2 text-sm text-[var(--muted)]">
-            Warna
-            <input
-              type="color"
-              value={routeColor}
-              onChange={(e) => setRouteColor(e.target.value)}
-              className="h-8 w-12 cursor-pointer rounded border border-[var(--border)] bg-transparent"
-            />
-          </label>
+          <div className="grid gap-2">
+            <span className="text-sm text-[var(--muted)]">Warna jalur</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={routeColor}
+                onChange={(e) => pickSwatch(e.target.value)}
+                className="h-9 w-14 shrink-0 cursor-pointer rounded border border-[var(--border)] bg-transparent p-0.5"
+                aria-label="Pilih warna"
+              />
+              <input
+                className="input w-28 font-mono uppercase"
+                value={hexDraft ?? routeColor}
+                maxLength={7}
+                spellCheck={false}
+                placeholder="#8C7355"
+                aria-label="Kode hex warna"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setHexDraft(v);
+                  if (normalizeHexColor(v)) applyHex(v);
+                }}
+                onBlur={(e) => {
+                  if (hexDraft !== null && !normalizeHexColor(e.target.value)) setHexDraft(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+              />
+              <span
+                aria-hidden
+                className="h-6 flex-1 rounded-md border border-[var(--border)]"
+                style={{ background: routeColor }}
+              />
+            </div>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Warna standar fiber">
+              {ROUTE_COLOR_PRESETS.map((c) => {
+                const active = c.toLowerCase() === routeColor.toLowerCase();
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    title={c}
+                    aria-label={`Warna ${c}`}
+                    aria-pressed={active}
+                    onClick={() => pickSwatch(c)}
+                    className="h-7 w-7 rounded-md border border-[var(--border)]"
+                    style={{
+                      background: c,
+                      boxShadow: active ? "0 0 0 2px var(--panel), 0 0 0 4px var(--accent)" : undefined,
+                    }}
+                  />
+                );
+              })}
+            </div>
+            {recentColors.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-[var(--muted)]">Terakhir:</span>
+                {recentColors.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    title={c}
+                    aria-label={`Warna ${c}`}
+                    onClick={() => pickSwatch(c)}
+                    className="h-6 w-6 rounded-md border border-[var(--border)]"
+                    style={{ background: c }}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
           <p className="text-xs text-[var(--muted)]">
             {draft.length} titik · panjang sekitar <strong className="text-[var(--text)]">{formatDistance(draftMeters)}</strong>
             {draftMeters >= 1 ? ` (${Math.round(draftMeters)} m)` : ""}.

@@ -7,15 +7,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/dianrp/drp-billing/internal/auth"
-	"github.com/dianrp/drp-billing/internal/billing"
-	"github.com/dianrp/drp-billing/internal/config"
-	"github.com/dianrp/drp-billing/internal/db"
-	"github.com/dianrp/drp-billing/internal/job"
-	"github.com/dianrp/drp-billing/internal/monitor"
-	"github.com/dianrp/drp-billing/internal/notify"
-	"github.com/dianrp/drp-billing/internal/provisioner"
-	"github.com/dianrp/drp-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/billing"
+	"github.com/dianrp-space/d5net-billing/internal/config"
+	"github.com/dianrp-space/d5net-billing/internal/db"
+	"github.com/dianrp-space/d5net-billing/internal/job"
+	"github.com/dianrp-space/d5net-billing/internal/monitor"
+	"github.com/dianrp-space/d5net-billing/internal/notify"
+	"github.com/dianrp-space/d5net-billing/internal/provisioner"
+	"github.com/dianrp-space/d5net-billing/internal/store"
 )
 
 func main() {

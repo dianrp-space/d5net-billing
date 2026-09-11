@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/dianrp/drp-billing/internal/auth"
-	"github.com/dianrp/drp-billing/internal/httpx"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/tenant"
-	"github.com/dianrp/drp-billing/internal/upload"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/httpx"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/tenant"
+	"github.com/dianrp-space/d5net-billing/internal/upload"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"github.com/go-chi/chi/v5"
 )
 

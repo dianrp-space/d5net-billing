@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/dianrp/drp-billing/internal/httpx"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/httpx"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func registerIPAM(api huma.API, d *Deps) {

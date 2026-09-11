@@ -87,15 +87,24 @@ func upsertByName(cl *routeros.Client, basePath, name string, props []string) (*
 }
 
 func upsertByComment(cl *routeros.Client, basePath, comment string, props []string) error {
+	return upsertByCommentWithLegacy(cl, basePath, comment, "", props)
+}
+
+// upsertByCommentWithLegacy matches rows by the current comment or a legacy
+// one. Legacy rows are updated in place (props carry the new comment), so a
+// rename migrates existing routers without duplicates.
+func upsertByCommentWithLegacy(cl *routeros.Client, basePath, comment, legacy string, props []string) error {
+	comment = strings.TrimSpace(comment)
+	legacy = strings.TrimSpace(legacy)
 	reply, err := cl.Run(basePath + "/print")
 	if err == nil && reply != nil {
 		for _, re := range reply.Re {
 			id := re.Map[".id"]
-			cmt := re.Map["comment"]
-			if id == "" || strings.TrimSpace(cmt) != strings.TrimSpace(comment) {
+			cmt := strings.TrimSpace(re.Map["comment"])
+			if id == "" || (cmt != comment && (legacy == "" || cmt != legacy)) {
 				continue
 			}
-			if rowMatchesProps(re.Map, props) {
+			if cmt == comment && rowMatchesProps(re.Map, props) {
 				return nil
 			}
 			args := append([]string{basePath + "/set", "=numbers=" + id}, props...)

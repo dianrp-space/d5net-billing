@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dianrp/drp-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/store"
 )
 
 // RenderOptions carries tenant-configurable invoice content plus bill-to details

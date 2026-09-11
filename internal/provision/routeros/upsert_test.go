@@ -1,6 +1,9 @@
 package routeros
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseROSProp(t *testing.T) {
 	k, v, ok := parseROSProp("=rate-limit=1M/1M")
@@ -15,12 +18,12 @@ func TestParseROSProp(t *testing.T) {
 func TestRowMatchesProps(t *testing.T) {
 	row := map[string]string{
 		"ranges":   "10.10.70.2-10.10.70.254",
-		"comment":  "DRP-NET",
+		"comment":  "D5N-NET",
 		"enabled":  "true",
 		"disabled": "false",
 		"port":     "8080",
 	}
-	if !rowMatchesProps(row, []string{"=ranges=10.10.70.2-10.10.70.254", "=comment=DRP-NET"}) {
+	if !rowMatchesProps(row, []string{"=ranges=10.10.70.2-10.10.70.254", "=comment=D5N-NET"}) {
 		t.Fatal("expected match")
 	}
 	if rowMatchesProps(row, []string{"=ranges=10.10.70.2-10.10.70.253"}) {
@@ -38,10 +41,10 @@ func TestRowMatchesPropsPPPSecret(t *testing.T) {
 	row := map[string]string{
 		"profile":        "isolir",
 		"disabled":       "false",
-		"comment":        "ISOLIR DRP-NET:RDA-202609-0002 Dian Rama Putra",
+		"comment":        "ISOLIR D5N-NET:RDA-202609-0002 Dian Rama Putra",
 		"remote-address": "",
 	}
-	props := []string{"=profile=isolir", "=disabled=no", "=comment=ISOLIR DRP-NET:RDA-202609-0002 Dian Rama Putra"}
+	props := []string{"=profile=isolir", "=disabled=no", "=comment=ISOLIR D5N-NET:RDA-202609-0002 Dian Rama Putra"}
 	if !rowMatchesProps(row, props) {
 		t.Fatal("isolir secret should already match")
 	}
@@ -50,13 +53,37 @@ func TestRowMatchesPropsPPPSecret(t *testing.T) {
 	}
 }
 
+func TestIsolirLegacyCommentMapping(t *testing.T) {
+	for _, c := range []string{
+		isolirRuleCommentDNS, isolirRuleCommentDNS + "-tcp", isolirRuleCommentPortal,
+		isolirRuleCommentNATProxy, isolirProxyAllowComment, isolirProxyRedirectComment,
+	} {
+		legacy := isolirLegacyComment(c)
+		if legacy == "" || legacy == c {
+			t.Fatalf("missing legacy mapping for %q", c)
+		}
+		if !strings.HasPrefix(legacy, "drp-isolir") {
+			t.Fatalf("legacy %q should keep drp- prefix", legacy)
+		}
+		if strings.HasPrefix(legacy, "d5n-") {
+			t.Fatalf("legacy %q must not use new prefix", legacy)
+		}
+	}
+	if isolirLegacyComment("unrelated") != "" {
+		t.Fatal("unknown comments must have no legacy")
+	}
+}
+
 func TestCommentExactMatchDNSVsTCP(t *testing.T) {
-	dns := "drp-isolir:dns"
-	tcp := "drp-isolir:dns-tcp"
+	dns := "d5n-isolir:dns"
+	tcp := "d5n-isolir:dns-tcp"
 	if dns == tcp {
 		t.Fatal("comments must differ")
 	}
 	if !(len(tcp) > len(dns) && tcp[:len(dns)] == dns) {
 		t.Fatal("tcp comment is a prefix of dns; upsert must use exact equality, not Contains")
+	}
+	if isolirLegacyComment(dns) != "drp-isolir:dns" || isolirLegacyComment(tcp) != "drp-isolir:dns-tcp" {
+		t.Fatal("legacy mapping must cover dns + dns-tcp exactly")
 	}
 }

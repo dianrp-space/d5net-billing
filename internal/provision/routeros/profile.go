@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dianrp/drp-billing/internal/provision"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"github.com/go-routeros/routeros/v3"
 )
 
@@ -27,7 +27,7 @@ func (c *Client) EnsureBandwidthProfile(ctx context.Context, tenantID, routerID 
 	rate := mbpsLimit(down) + "/" + mbpsLimit(up)
 	app, err := c.store.EffectiveAppName(ctx, tenantID)
 	if err != nil || app == "" {
-		app = "drp-billing"
+		app = "D5Net"
 	}
 	comment := provision.ProfileComment(app, price)
 

@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/dianrp/drp-billing/internal/httpx"
-	"github.com/dianrp/drp-billing/internal/job"
-	"github.com/dianrp/drp-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/httpx"
+	"github.com/dianrp-space/d5net-billing/internal/job"
+	"github.com/dianrp-space/d5net-billing/internal/store"
 )
 
 func registerJobsSettings(api huma.API, d *Deps) {

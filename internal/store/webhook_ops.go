@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"errors"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 
 	"github.com/jackc/pgx/v5"
 )

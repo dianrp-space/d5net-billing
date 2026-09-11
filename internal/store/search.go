@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 // SearchHit is one global-search result for the admin header.

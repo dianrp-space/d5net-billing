@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dianrp/drp-billing/internal/auth"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func TestPublicOriginPrefersBrowserOrigin(t *testing.T) {

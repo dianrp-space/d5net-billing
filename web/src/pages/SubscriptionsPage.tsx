@@ -1085,58 +1085,64 @@ export function SubscriptionsPage({
                 </p>
               ) : (
                 <>
-                  <label className="grid gap-1 text-sm">
-                    <span>Tanggal mulai</span>
-                    <Input
-                      type="date"
-                      required
-                      value={billForm.started_at}
-                      onChange={(e) => {
-                        const started_at = e.target.value;
-                        const start = parseDateInput(started_at);
-                        setBillForm((f) => ({
-                          ...f,
-                          started_at,
-                          next_bill_at: start
-                            ? toDateInput(defaultNextBill(start, activateCycle, f.prorate))
-                            : f.next_bill_at,
-                        }));
-                      }}
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={billForm.prorate}
-                      onCheckedChange={(v) => {
-                        const prorate = v === true;
-                        const start = parseDateInput(billForm.started_at) || new Date();
-                        setBillForm((f) => ({
-                          ...f,
-                          prorate,
-                          next_bill_at: toDateInput(defaultNextBill(start, activateCycle, prorate)),
-                        }));
-                      }}
-                    />
-                    <span>Prorata tagihan pertama</span>
-                  </label>
-                  {billForm.prorate ? (
+                  <div className="grid items-start gap-3 sm:grid-cols-2">
                     <label className="grid gap-1 text-sm">
-                      <span>Tanggal tagihan berikutnya</span>
+                      <span>Tanggal mulai</span>
                       <Input
                         type="date"
                         required
-                        value={billForm.next_bill_at}
-                        onChange={(e) => setBillForm({ ...billForm, next_bill_at: e.target.value })}
+                        value={billForm.started_at}
+                        onChange={(e) => {
+                          const started_at = e.target.value;
+                          const start = parseDateInput(started_at);
+                          setBillForm((f) => ({
+                            ...f,
+                            started_at,
+                            next_bill_at: start
+                              ? toDateInput(defaultNextBill(start, activateCycle, f.prorate))
+                              : f.next_bill_at,
+                          }));
+                        }}
                       />
-                      <span className="text-xs text-[var(--muted)]">
-                        Default: tanggal {cycleStartDay} (Pengaturan → Umum). Bisa diubah manual.
-                      </span>
                     </label>
-                  ) : (
-                    <p className="text-xs text-[var(--muted)]">
-                      Tanpa prorata: tagihan penuh 1 siklus ({activateCycle}).
-                    </p>
-                  )}
+                    <div className="grid gap-1">
+                      <span className="flex items-center justify-between gap-2 text-sm">
+                        <span>Tanggal tagihan berikutnya</span>
+                        <label className="flex cursor-pointer items-center gap-1.5 text-xs font-normal text-[var(--muted)]">
+                          <Checkbox
+                            checked={billForm.prorate}
+                            onCheckedChange={(v) => {
+                              const prorate = v === true;
+                              const start = parseDateInput(billForm.started_at) || new Date();
+                              setBillForm((f) => ({
+                                ...f,
+                                prorate,
+                                next_bill_at: toDateInput(defaultNextBill(start, activateCycle, prorate)),
+                              }));
+                            }}
+                          />
+                          Prorata
+                        </label>
+                      </span>
+                      {billForm.prorate ? (
+                        <>
+                          <Input
+                            type="date"
+                            required
+                            value={billForm.next_bill_at}
+                            onChange={(e) => setBillForm({ ...billForm, next_bill_at: e.target.value })}
+                          />
+                          <span className="text-xs text-[var(--muted)]">
+                            Default: tanggal {cycleStartDay} (Pengaturan → Umum). Bisa diubah manual.
+                          </span>
+                        </>
+                      ) : (
+                        <p className="text-xs text-[var(--muted)]">
+                          Tanpa prorata: tagihan penuh 1 siklus ({activateCycle}).
+                        </p>
+                      )}
+                    </div>
+                  </div>
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 text-sm">
                     <div className="flex justify-between gap-2">
                       <span className="text-[var(--muted)]">Harga paket</span>

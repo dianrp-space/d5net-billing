@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dianrp/drp-billing/internal/provision"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 // Client implements RADIUS provisioning via radcheck/radreply tables in PostgreSQL.

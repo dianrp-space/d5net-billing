@@ -3,7 +3,7 @@ package payment
 import (
 	"testing"
 
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func TestWebhookIsPaid(t *testing.T) {
@@ -43,9 +43,9 @@ func TestParseWebhookBodyBytesForm(t *testing.T) {
 }
 
 func TestParseWebhookBodyBytesJSON(t *testing.T) {
-	raw := []byte(`{"referenceId":"drp-1","status":"PAID","amount":1000}`)
+	raw := []byte(`{"referenceId":"ref-1","status":"PAID","amount":1000}`)
 	got := ParseWebhookBodyBytes("application/json", raw)
-	if got["referenceId"] != "drp-1" {
+	if got["referenceId"] != "ref-1" {
 		t.Fatalf("%+v", got)
 	}
 }

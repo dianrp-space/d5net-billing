@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 const generalSettingKey = "tenant.general"

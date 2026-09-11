@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 type fakeProv struct {
@@ -28,15 +28,15 @@ func (f *fakeProv) BackupConfig(ctx context.Context, routerID xid.ID) (string, e
 func (f *fakeProv) Capabilities() Caps { return Caps{PPPoE: true} }
 
 func TestCommentTag(t *testing.T) {
-	got := CommentTag("drp-billing", "DLMA-202609-0001", "Budi Santoso")
-	want := "drp-billing:DLMA-202609-0001 Budi Santoso"
+	got := CommentTag("D5Net", "DLMA-202609-0001", "Budi Santoso")
+	want := "D5Net:DLMA-202609-0001 Budi Santoso"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 	if CommentTag("Acme ISP", "ABC", "") != "Acme-ISP:ABC" {
 		t.Fatal(CommentTag("Acme ISP", "ABC", ""))
 	}
-	if CommentTag("", "ABC", "") != "drp:ABC" {
+	if CommentTag("", "ABC", "") != "d5n:ABC" {
 		t.Fatal(CommentTag("", "ABC", ""))
 	}
 	if !IsOwnedComment("drp:KODE Nama", "Acme") || IsOwnedComment("manual", "Acme") {

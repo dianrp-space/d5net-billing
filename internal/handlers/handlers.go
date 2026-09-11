@@ -18,19 +18,19 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/dianrp/drp-billing/internal/auth"
-	"github.com/dianrp/drp-billing/internal/billing"
-	"github.com/dianrp/drp-billing/internal/config"
-	"github.com/dianrp/drp-billing/internal/dbbackup"
-	"github.com/dianrp/drp-billing/internal/httpx"
-	"github.com/dianrp/drp-billing/internal/job"
-	"github.com/dianrp/drp-billing/internal/notify"
-	"github.com/dianrp/drp-billing/internal/payment"
-	"github.com/dianrp/drp-billing/internal/provision"
-	"github.com/dianrp/drp-billing/internal/provisioner"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/tenant"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/billing"
+	"github.com/dianrp-space/d5net-billing/internal/config"
+	"github.com/dianrp-space/d5net-billing/internal/dbbackup"
+	"github.com/dianrp-space/d5net-billing/internal/httpx"
+	"github.com/dianrp-space/d5net-billing/internal/job"
+	"github.com/dianrp-space/d5net-billing/internal/notify"
+	"github.com/dianrp-space/d5net-billing/internal/payment"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/provisioner"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/tenant"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 type Deps struct {
@@ -465,7 +465,7 @@ func registerAuth(api huma.API, d *Deps) {
 			UserID   xid.ID `json:"user_id"`
 		}
 	}, error) {
-		return nil, httpx.BadRequest("public registration disabled; use platform admin or drpctl create-tenant")
+		return nil, httpx.BadRequest("public registration disabled; use drpctl create-tenant")
 	})
 }
 

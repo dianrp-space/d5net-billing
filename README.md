@@ -69,7 +69,7 @@ Yang tetap di luar webroot hanya unit systemd (`/etc/systemd/system/`) — syste
 | `/etc/systemd/system/d5net-billing-api.service` | Unit API — [`deploy/systemd/d5net-billing-api.service`](deploy/systemd/d5net-billing-api.service) |
 | `/etc/systemd/system/d5net-billing-worker.service` | Unit worker — [`deploy/systemd/d5net-billing-worker.service`](deploy/systemd/d5net-billing-worker.service) |
 
-Unit systemd memakai `ProtectSystem=strict` dan hanya boleh tulis ke `data/`. Log proses lewat `journalctl` (bukan `/var/log/drp-billing`).
+Unit systemd memakai `ProtectSystem=strict` dan hanya boleh tulis ke `data/`. Log proses lewat `journalctl` (bukan `/var/log/d5net-billing`).
 
 ### Prasyarat
 
@@ -91,7 +91,7 @@ sudo apt-get install -y postgresql-18-contrib
 Di aaPanel → PostgreSQL, buat database + user. Catat DSN:
 
 ```
-postgres://USER:PASSWORD@127.0.0.1:5432/drp_billing?sslmode=disable
+postgres://USER:PASSWORD@127.0.0.1:5432/d5net_billing?sslmode=disable
 ```
 
 ### 2. Clone repo
@@ -127,7 +127,7 @@ Isi minimal (sesuaikan). Path data relatif ke folder repo:
 ```bash
 APP_ENV=production
 HTTP_ADDR=127.0.0.1:8088
-DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/drp_billing?sslmode=disable
+DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/d5net_billing?sslmode=disable
 JWT_SECRET='<acak panjang, openssl rand -hex 32>'
 ENCRYPTION_KEY='<tepat 32 karakter, openssl rand -base64 24 | cut -c1-32>'
 CORS_ORIGINS=https://delimanet.dianrp.com
@@ -169,7 +169,7 @@ sudo systemctl status d5net-billing-api d5net-billing-worker --no-pager
 
 1. Buat website `delimanet.dianrp.com`, aktifkan SSL Let's Encrypt.
 2. Set **website root** ke `/www/wwwroot/delimanet.dianrp.com/web/dist` (bukan folder git).
-3. Gabungkan reverse proxy dari template [`deploy/nginx/drp-billing.conf`](deploy/nginx/drp-billing.conf) (lokasi `/api/`, `/uploads/`, `/events/`, `try_files` SPA, proxy ke **8088**). Reload Nginx.
+3. Gabungkan reverse proxy dari template [`deploy/nginx/d5net-billing.conf`](deploy/nginx/d5net-billing.conf) (lokasi `/api/`, `/uploads/`, `/events/`, `try_files` SPA, proxy ke **8088**). Reload Nginx.
 
 | Lokasi | Peran |
 |--------|--------|
@@ -227,7 +227,7 @@ Enable API: `/ip service enable api` — port **8728** (TLS **8729**). Isi alama
 
 ## Nginx: cuplikan
 
-Template penuh: [`deploy/nginx/drp-billing.conf`](deploy/nginx/drp-billing.conf).
+Template penuh: [`deploy/nginx/d5net-billing.conf`](deploy/nginx/d5net-billing.conf).
 
 ```nginx
 root /www/wwwroot/delimanet.dianrp.com/web/dist;

@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/auth"
-	"github.com/dianrp/drp-billing/internal/notify"
-	ros "github.com/dianrp/drp-billing/internal/provision/routeros"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/notify"
+	ros "github.com/dianrp-space/d5net-billing/internal/provision/routeros"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 const pollerTick = 15 * time.Second

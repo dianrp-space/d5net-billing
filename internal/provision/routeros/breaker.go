@@ -1,7 +1,7 @@
 package routeros
 
 import (
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"sync"
 	"time"
 )

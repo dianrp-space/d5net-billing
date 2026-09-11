@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/dianrp/drp-billing/internal/httpx"
-	"github.com/dianrp/drp-billing/internal/notify"
-	"github.com/dianrp/drp-billing/internal/provision"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/httpx"
+	"github.com/dianrp-space/d5net-billing/internal/notify"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"github.com/skip2/go-qrcode"
 	"github.com/xuri/excelize/v2"
 )
@@ -276,7 +276,7 @@ func registerAdvanced(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		raw := fmt.Sprintf("drp_%d_%d", tid, time.Now().UnixNano())
+		raw := fmt.Sprintf("d5n_%d_%d", tid, time.Now().UnixNano())
 		sum := sha256.Sum256([]byte(raw))
 		_, err = d.Store.Pool.Exec(ctx, `INSERT INTO api_keys (tenant_id, name, key_hash) VALUES ($1,$2,$3)`, tid, input.Body.Name, hex.EncodeToString(sum[:]))
 		if err != nil {

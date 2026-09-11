@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/dianrp/drp-billing/internal/httpx"
-	"github.com/dianrp/drp-billing/internal/provision"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/httpx"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func registerIsolirSettings(api huma.API, d *Deps) {
@@ -204,7 +204,7 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 		"2. /ip proxy access: allow host billing; ROS7 action=redirect action-data=URL (ROS6: deny + redirect-to)\n" +
 		"3. NAT: tcp/80 dari pool → redirect ke port 8080\n" +
 		"4. Filter: allow DNS; HTTPS portal via address-list FQDN (bukan IP publik)\n" +
-		"Comment: drp-isolir:* · Secret isolir: prefix \"ISOLIR \""
+		"Comment: d5n-isolir:* (aturan lama drp-isolir:* otomatis di-rename saat sync) · Secret isolir: prefix \"ISOLIR \""
 }
 
 func registerPublicIsolir(api huma.API, d *Deps) {

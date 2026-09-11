@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
-	"github.com/dianrp/drp-billing/internal/envfile"
+	"github.com/dianrp-space/d5net-billing/internal/envfile"
 )
 
 type Config struct {

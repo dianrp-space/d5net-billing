@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/auth"
-	"github.com/dianrp/drp-billing/internal/provision"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 	"github.com/go-routeros/routeros/v3"
 )
 
@@ -116,16 +116,16 @@ func commentTag(spec *provision.ServiceSpec) string {
 		return spec.Comment
 	}
 	if !xid.IsNil(spec.SubscriptionID) {
-		return "drp:" + spec.SubscriptionID.String()
+		return "d5n:" + spec.SubscriptionID.String()
 	}
-	return "drp"
+	return "d5n"
 }
 
 // brandComment is the RouterOS comment for tenant-owned objects (profiles, pools).
 func (c *Client) brandComment(ctx context.Context, tenantID xid.ID) string {
 	app, err := c.store.EffectiveAppName(ctx, tenantID)
 	if err != nil || strings.TrimSpace(app) == "" {
-		app = "drp-billing"
+		app = "D5Net"
 	}
 	return provision.SanitizeBrandPrefix(app)
 }
@@ -225,18 +225,21 @@ func (c *Client) applyDHCP(ctx context.Context, spec *provision.ServiceSpec) err
 				return reply, nil
 			}
 			// Fallback: address-list with ownership comment.
+			// Pre-remove by address so legacy drp-dhcp entries migrate without dupes.
+			_, _ = cl.Run("/ip/firewall/address-list/remove", "=numbers="+spec.IPAddress)
 			listArgs := []string{
 				"/ip/firewall/address-list/add",
-				"=list=drp-dhcp",
+				"=list=d5n-dhcp",
 				"=address=" + spec.IPAddress,
 				"=comment=" + comment,
 			}
 			return cl.Run(listArgs...)
 		}
 		if spec.MACAddress != "" {
+			_, _ = cl.Run("/ip/firewall/address-list/remove", "=numbers="+spec.MACAddress)
 			return cl.Run(
 				"/ip/firewall/address-list/add",
-				"=list=drp-dhcp",
+				"=list=d5n-dhcp",
 				"=address="+spec.MACAddress,
 				"=comment="+comment,
 			)
@@ -246,13 +249,15 @@ func (c *Client) applyDHCP(ctx context.Context, spec *provision.ServiceSpec) err
 }
 
 func (c *Client) applySimpleQueue(ctx context.Context, spec *provision.ServiceSpec) error {
-	name := "drp-" + spec.Username
+	name := "d5n-" + spec.Username
 	up := spec.UploadMbps
 	if up <= 0 {
 		up = spec.DownloadMbps
 	}
 	maxLimit := mbpsLimit(up) + "/" + mbpsLimit(spec.DownloadMbps)
 	return c.run(ctx, spec.TenantID, spec.RouterID, nil, "/queue/simple/add", func(cl *routeros.Client) (*routeros.Reply, error) {
+		// Drop the legacy drp- queue first so a rename never leaves duplicates.
+		_, _ = cl.Run("/queue/simple/remove", "=numbers=drp-"+spec.Username)
 		_, _ = cl.Run("/queue/simple/remove", "=numbers="+name)
 		args := []string{
 			"/queue/simple/add",

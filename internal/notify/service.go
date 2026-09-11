@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/wa"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/wa"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 type Message struct {
@@ -161,7 +161,7 @@ func (s *Service) SendTest(ctx context.Context, tenantID xid.ID, channel, recipi
 	channel = strings.ToLower(strings.TrimSpace(channel))
 	recipient = strings.TrimSpace(recipient)
 	if strings.TrimSpace(body) == "" {
-		body = "Tes notifikasi drp-billing — gateway berfungsi."
+		body = "Tes notifikasi D5Net — gateway berfungsi."
 	}
 	switch channel {
 	case "whatsapp":

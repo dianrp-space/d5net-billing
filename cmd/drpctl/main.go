@@ -8,12 +8,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dianrp/drp-billing/internal/auth"
-	"github.com/dianrp/drp-billing/internal/config"
-	"github.com/dianrp/drp-billing/internal/db"
-	"github.com/dianrp/drp-billing/internal/importer"
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/config"
+	"github.com/dianrp-space/d5net-billing/internal/db"
+	"github.com/dianrp-space/d5net-billing/internal/importer"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func main() {

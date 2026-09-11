@@ -3,11 +3,11 @@ package provisioner
 import (
 	"fmt"
 
-	"github.com/dianrp/drp-billing/internal/auth"
-	"github.com/dianrp/drp-billing/internal/provision"
-	"github.com/dianrp/drp-billing/internal/provision/radius"
-	"github.com/dianrp/drp-billing/internal/provision/routeros"
-	"github.com/dianrp/drp-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/provision"
+	"github.com/dianrp-space/d5net-billing/internal/provision/radius"
+	"github.com/dianrp-space/d5net-billing/internal/provision/routeros"
+	"github.com/dianrp-space/d5net-billing/internal/store"
 )
 
 type Registry struct {

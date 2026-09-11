@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dianrp/drp-billing/internal/store"
-	"github.com/dianrp/drp-billing/internal/xid"
+	"github.com/dianrp-space/d5net-billing/internal/store"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func TestIsolirInfraCacheSkipsUntilConfigChanges(t *testing.T) {
@@ -15,7 +15,7 @@ func TestIsolirInfraCacheSkipsUntilConfigChanges(t *testing.T) {
 		PoolRanges:    "10.10.70.0/24",
 		PortalBaseURL: "https://billing.example.com",
 	}
-	k := isolirInfraCacheKey(xid.Nil(), xid.Nil(), cfg, "drpnet")
+	k := isolirInfraCacheKey(xid.Nil(), xid.Nil(), cfg, "d5nnet")
 	if w.isolirInfraFresh(k) {
 		t.Fatal("expected cache miss")
 	}
@@ -24,7 +24,7 @@ func TestIsolirInfraCacheSkipsUntilConfigChanges(t *testing.T) {
 		t.Fatal("expected cache hit")
 	}
 	cfg.PoolRanges = "10.10.71.0/24"
-	k2 := isolirInfraCacheKey(xid.Nil(), xid.Nil(), cfg, "drpnet")
+	k2 := isolirInfraCacheKey(xid.Nil(), xid.Nil(), cfg, "d5nnet")
 	if k2 == k {
 		t.Fatal("config change must change cache key")
 	}

@@ -11,10 +11,10 @@ Create a limited API user (write needed for provisioning):
 
 ```
 /user group add name=billing policy=read,write,api,!local
-/user add name=drp group=billing password=CHANGE_ME
+/user add name=d5n group=billing password=CHANGE_ME
 ```
 
-In drp-billing, add router with host or DDNS name and port 8728.
+In d5net-billing, add router with host or DDNS name and port 8728.
 
 ## Isolir (IP → Web Proxy)
 
@@ -23,12 +23,12 @@ In drp-billing, add router with host or DDNS name and port 8728.
 Set **Portal base URL** di admin → Settings → **Template Isolir**, lalu gunakan:
 
 ```
-{portal_base_url}/{tenantSlug}/client
+{portal_base_url}/login
 ```
 
-Contoh: `https://billing.example.com/acme/client`
+Contoh: `https://billing.example.com/login`
 
-HTML fallback: `GET /api/public/tenants/{slug}/isolir`
+HTML fallback: `GET /api/public/isolir`
 
 ### Alur
 
@@ -51,7 +51,7 @@ Sync membuat di router itu saja:
 3. **`/ip/proxy`** + access allow, lalu redirect URL isolir (ROS7 `action=redirect` / ROS6 `redirect-to`)  
 4. NAT transparent tcp/80 → proxy 8080 + filter DNS/portal  
 
-Comment rule: `drp-isolir:*`
+Comment rule: `d5n-isolir:*` (aturan lama `drp-isolir:*` otomatis di-rename saat Sync)
 
 ### Contoh manual (Winbox: IP → Web Proxy)
 
@@ -62,24 +62,24 @@ Comment rule: `drp-isolir:*`
 /ip proxy set enabled=yes port=8080
 
 /ip proxy access
-add src-address=10.250.0.0/24 dst-host=billing.example.com action=allow comment=drp-isolir:proxy-allow-portal
+add src-address=10.250.0.0/24 dst-host=billing.example.com action=allow comment=d5n-isolir:proxy-allow-portal
 add src-address=10.250.0.0/24 action=redirect \
-  action-data="https://billing.example.com/acme/client" comment=drp-isolir:proxy-redirect
+  action-data="https://billing.example.com/login" comment=d5n-isolir:proxy-redirect
 # RouterOS 6:
 # add src-address=10.250.0.0/24 action=deny \
-#   redirect-to="https://billing.example.com/acme/client" comment=drp-isolir:proxy-redirect
+#   redirect-to="https://billing.example.com/login" comment=d5n-isolir:proxy-redirect
 
 /ip firewall nat
 add chain=dstnat src-address=10.250.0.0/24 protocol=tcp dst-port=80 \
-  action=redirect to-ports=8080 comment=drp-isolir:nat-to-proxy
+  action=redirect to-ports=8080 comment=d5n-isolir:nat-to-proxy
 
 /ip firewall address-list
-add list=drp-isolir-portal address=billing.example.com comment=drp-isolir:portal
+add list=d5n-isolir-portal address=billing.example.com comment=d5n-isolir:portal
 
 /ip firewall filter
-add chain=forward src-address=10.250.0.0/24 protocol=udp dst-port=53 action=accept comment=drp-isolir:dns
-add chain=forward src-address=10.250.0.0/24 dst-address-list=drp-isolir-portal protocol=tcp dst-port=80,443 \
-  action=accept comment=drp-isolir:portal
+add chain=forward src-address=10.250.0.0/24 protocol=udp dst-port=53 action=accept comment=d5n-isolir:dns
+add chain=forward src-address=10.250.0.0/24 dst-address-list=d5n-isolir-portal protocol=tcp dst-port=80,443 \
+  action=accept comment=d5n-isolir:portal
 ```
 
 Catatan: Web Proxy hanya mengintercept HTTP (port 80). HTTPS ke host billing harus di-allow di filter supaya halaman isolir/login bisa load. Jangan isi IP publik di `dst-address` — pakai FQDN di address-list (RouterOS resolve A/AAAA sendiri, aman untuk Cloudflare/CDN).
