@@ -18,7 +18,7 @@ import (
 func ownershipComment(ctx context.Context, d *Deps, tenantID xid.ID, code, name string) string {
 	app, err := d.Store.EffectiveAppName(ctx, tenantID)
 	if err != nil || app == "" {
-		app = "D5Net"
+		app = "Delima Net"
 	}
 	return provision.CommentTag(app, code, name)
 }

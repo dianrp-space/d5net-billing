@@ -67,6 +67,9 @@ func registerPublicBranding(api huma.API, d *Deps) {
 			}
 		}{}
 		out.Body.Name = ten.Name
+		if strings.TrimSpace(out.Body.Name) == "" {
+			out.Body.Name = view.Effective.AppName
+		}
 		out.Body.AppName = view.Effective.AppName
 		out.Body.LogoURL = view.Effective.LogoURL
 		out.Body.FaviconURL = view.Effective.FaviconURL

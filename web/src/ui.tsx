@@ -219,7 +219,7 @@ export function ticketStatusTone(status?: string | null): "wait" | "progress" | 
 }
 
 export function LoginShell({
-  brand = "D5Net",
+  brand = "Delima Net",
   title,
   subtitle,
   logoUrl,

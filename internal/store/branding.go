@@ -42,13 +42,13 @@ func (s *Store) GetPlatformBranding(ctx context.Context) (*Branding, error) {
 	var b Branding
 	err := row.Scan(&b.AppName, &b.LogoURL, &b.FaviconURL, &b.MapPopIconURL, &b.MapODPIconURL, &b.MapCustomerIconURL)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return &Branding{AppName: "D5Net"}, nil
+		return &Branding{AppName: "Delima Net"}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(b.AppName) == "" {
-		b.AppName = "D5Net"
+		b.AppName = "Delima Net"
 	}
 	return &b, nil
 }
@@ -56,7 +56,7 @@ func (s *Store) GetPlatformBranding(ctx context.Context) (*Branding, error) {
 func (s *Store) UpdatePlatformBranding(ctx context.Context, b *Branding) error {
 	name := strings.TrimSpace(b.AppName)
 	if name == "" {
-		name = "D5Net"
+		name = "Delima Net"
 	}
 	_, err := s.Pool.Exec(ctx, `
 		INSERT INTO platform_branding (id, app_name, logo_url, favicon_url,
@@ -146,7 +146,7 @@ func (s *Store) ResolveTenantBranding(ctx context.Context, tenantID xid.ID) (*Te
 		tenantName = ten.Name
 	}
 	view := &TenantBrandingView{Overrides: *raw}
-	app, fromApp := coalesceDisplayName(raw.AppName, tenantName, owner.AppName, "D5Net")
+	app, fromApp := coalesceDisplayName(raw.AppName, tenantName, owner.AppName, "Delima Net")
 	logo, fromLogo := coalescePtr(raw.LogoURL, owner.LogoURL)
 	fav, fromFav := coalescePtr(raw.FaviconURL, owner.FaviconURL)
 	popIcon, fromPopIcon := coalescePtr(raw.MapPopIconURL, owner.MapPopIconURL)
@@ -193,7 +193,7 @@ func (s *Store) EffectiveMapIcons(ctx context.Context, tenantID xid.ID) (MapIcon
 func (s *Store) EffectiveAppName(ctx context.Context, tenantID xid.ID) (string, error) {
 	v, err := s.ResolveTenantBranding(ctx, tenantID)
 	if err != nil {
-		return "D5Net", err
+		return "Delima Net", err
 	}
 	return v.Effective.AppName, nil
 }

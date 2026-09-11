@@ -298,7 +298,7 @@ export function AdminApp({
     }
   }, [meQ.data, page, onNavigate]);
 
-  const appName = (branding.data?.name || branding.data?.app_name || "D5Net").trim();
+  const appName = (branding.data?.name || branding.data?.app_name || "Delima Net").trim();
   const logoUrl = branding.data?.logo_url;
   const faviconUrl = branding.data?.favicon_url;
   const [sidebarOpen, setSidebarOpenState] = useState(() => getSidebarOpen());

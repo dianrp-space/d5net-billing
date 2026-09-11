@@ -74,7 +74,7 @@ export function Landing({ onGoLogin }: { onGoLogin: () => void }) {
     };
   }, []);
 
-  const name = (branding?.name || branding?.app_name || "ISP").trim();
+  const name = (branding?.name || branding?.app_name || "Delima Net").trim();
   const logo = branding?.logo_url || DEFAULT_BRAND_LOGO;
 
   return (
