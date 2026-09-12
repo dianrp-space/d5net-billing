@@ -649,7 +649,7 @@ function InvoiceFormPreview({
         {paidPreview ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden" aria-hidden>
             <span
-              className="select-none text-[72px] font-bold tracking-[0.28em] text-red-800/15"
+              className="select-none text-[84px] font-bold tracking-[0.28em] text-blue-800/15"
               style={{ transform: "rotate(-35deg)" }}
             >
               LUNAS

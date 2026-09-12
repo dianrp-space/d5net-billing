@@ -585,6 +585,43 @@ export function ClientHome({
     }).catch((e: Error) => void toastError(e.message || "Gagal unduh invoice"));
   }
 
+  // Status payment-intent yang masih bisa dibatalkan pelanggan.
+  // Intent lunas / sudah final (batal, kedaluwarsa, gagal, void) tidak ditawari tombol batal.
+  function isCancellablePayment(status?: string | null) {
+    const s = String(status || "").trim().toLowerCase();
+    return ["pending", "created", "unpaid", "open", "waiting", "process", "processing", "initialized"].includes(s);
+  }
+
+  const [cancellingKey, setCancellingKey] = useState("");
+
+  async function cancelPendingPayment(p: { invoice_id?: string; invoice_number?: string; created_at?: string; paid_at?: string }) {
+    const invoiceId = (p.invoice_id || "").trim();
+    if (!invoiceId) {
+      void toastError("Pembayaran ini tidak terhubung ke tagihan.");
+      return;
+    }
+    if (!data.portal_token) {
+      void toastError("Sesi portal lama. Keluar lalu login ulang.");
+      return;
+    }
+    const key = `${invoiceId}-${p.created_at || p.paid_at || p.invoice_number || ""}`;
+    setCancellingKey(key);
+    try {
+      await api(`/api/portal/invoices/${invoiceId}/payment-intent/cancel`, {
+        method: "POST",
+        headers: portalHeaders,
+      });
+      clearSavedPayMethod(data.tenant_slug);
+      void toastSuccess("Pembayaran pending dibatalkan.");
+      void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
+      void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Gagal membatalkan pembayaran");
+    } finally {
+      setCancellingKey("");
+    }
+  }
+
   async function onChangePassword(e: React.FormEvent) {
     e.preventDefault();
     setFormErr("");
@@ -683,8 +720,25 @@ export function ClientHome({
         ];
   });
 
-  const paymentRows = payments.map((p) =>
-    multi
+  const paymentRows = payments.map((p) => {
+    const cancellable = isCancellablePayment(p.status) && Boolean((p.invoice_id || "").trim());
+    const cancelKey = `${p.invoice_id || ""}-${p.created_at || p.paid_at || p.invoice_number || ""}`;
+    const action =
+      cancellable ? (
+        <span className="flex flex-wrap items-center justify-end gap-1.5">
+          <button
+            type="button"
+            className="btn-ghost whitespace-nowrap text-sm"
+            disabled={cancellingKey === cancelKey}
+            onClick={() => void cancelPendingPayment(p)}
+          >
+            {cancellingKey === cancelKey ? "Membatalkan…" : "Batalkan"}
+          </button>
+        </span>
+      ) : (
+        <span className="text-[var(--muted)]">—</span>
+      );
+    return multi
       ? [
           accountLabel(p.customer_code, p.customer_name),
           p.invoice_number || "—",
@@ -693,6 +747,7 @@ export function ClientHome({
           formatRp(p.amount),
           paymentMethodLabel(p.method),
           paymentStatusLabel(p.status),
+          action,
         ]
       : [
           p.invoice_number || "—",
@@ -701,8 +756,9 @@ export function ClientHome({
           formatRp(p.amount),
           paymentMethodLabel(p.method),
           paymentStatusLabel(p.status),
-        ],
-  );
+          action,
+        ];
+  });
 
   return (
     <div className={`app-shell app-shell--portal${sidebarOpen ? "" : " is-sidebar-collapsed"}`}>
@@ -1016,6 +1072,7 @@ export function ClientHome({
                 ) : (
                   invoices.map((i) => {
                     const unpaid = isInvoiceUnpaid(i);
+                    const paidSomething = i.status === "paid" || (i.paid_amount ?? 0) > 0;
                     return (
                       <article key={i.id || i.invoice_number} className="portal-item-card">
                         <div className="flex items-start justify-between gap-2">
@@ -1030,11 +1087,25 @@ export function ClientHome({
                         <p className="text-xs text-[var(--muted)]">
                           Jatuh tempo {i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—"}
                         </p>
-                        {unpaid ? (
-                          <button type="button" className="btn" onClick={() => startPay(i)}>
-                            Bayar sekarang
-                          </button>
-                        ) : null}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {unpaid ? (
+                            <>
+                              <button type="button" className="btn" onClick={() => startPay(i)}>
+                                Bayar sekarang
+                              </button>
+                              {hasSavedPayMethod(data.tenant_slug) ? (
+                                <IconButton label="Batalkan / ganti metode" onClick={() => void resetPayMethod(i)}>
+                                  <IconBan />
+                                </IconButton>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {paidSomething ? (
+                            <IconButton label="Unduh invoice" onClick={() => downloadInvoice(i)}>
+                              <IconDownload />
+                            </IconButton>
+                          ) : null}
+                        </div>
                       </article>
                     );
                   })
@@ -1047,7 +1118,7 @@ export function ClientHome({
             <Section title="Riwayat pembayaran">
               <div className="portal-table-desktop">
                 <Table
-                  columns={multi ? ["Akun", "Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status"] : ["Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status"]}
+                  columns={multi ? ["Akun", "Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status", "Aksi"] : ["Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status", "Aksi"]}
                   rows={paymentRows}
                 />
               </div>
@@ -1071,6 +1142,18 @@ export function ClientHome({
                         {" · "}
                         {p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—"}
                       </p>
+                      {isCancellablePayment(p.status) && (p.invoice_id || "").trim() ? (
+                        <button
+                          type="button"
+                          className="btn-ghost w-fit text-sm"
+                          disabled={cancellingKey === `${p.invoice_id || ""}-${p.created_at || p.paid_at || p.invoice_number || ""}`}
+                          onClick={() => void cancelPendingPayment(p)}
+                        >
+                          {cancellingKey === `${p.invoice_id || ""}-${p.created_at || p.paid_at || p.invoice_number || ""}`
+                            ? "Membatalkan…"
+                            : "Batalkan pembayaran"}
+                        </button>
+                      ) : null}
                     </article>
                   ))
                 )}

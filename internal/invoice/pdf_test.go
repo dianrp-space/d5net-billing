@@ -101,6 +101,9 @@ func TestRenderPDFPaidWatermark(t *testing.T) {
 	if !bytes.Contains(out, []byte("(LUNAS)")) {
 		t.Fatal("expected LUNAS watermark on paid invoice")
 	}
+	if !bytes.Contains(out, []byte("0.12 0.25 0.69")) {
+		t.Fatal("expected blue stamp color on LUNAS watermark")
+	}
 	if !bytes.Contains(out, []byte("/ExtGState")) {
 		t.Fatal("expected ExtGState for watermark opacity")
 	}

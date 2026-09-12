@@ -37,7 +37,7 @@ const (
 	colFill   = "0.969 0.965 0.949"
 	colHead   = "0.353 0.353 0.251"
 	colWhite  = "1 1 1"
-	colStamp  = "0.55 0.45 0.33"
+	colStamp  = "0.12 0.25 0.69"
 	colDanger = "0.55 0.20 0.16"
 )
 
@@ -640,14 +640,14 @@ func (c *canvas) drawJPEG(x, y, w, h float64) {
 
 func (c *canvas) paidWatermark(cx, cy, contentH float64) {
 	c.watermark = true
-	size := 48.0
+	size := 56.0
 	if contentH > 0 && contentH < 520 {
 		size = contentH * 0.11
-		if size < 36 {
-			size = 36
+		if size < 40 {
+			size = 40
 		}
-		if size > 52 {
-			size = 52
+		if size > 60 {
+			size = 60
 		}
 	}
 	const (

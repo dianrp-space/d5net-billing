@@ -62,6 +62,8 @@ export type ClientPortalData = {
     items?: { description: string; quantity?: number; unit_price?: number; amount?: number }[];
   }[];
   payments?: {
+    id?: string;
+    invoice_id?: string;
     amount: number;
     method: string;
     status: string;
