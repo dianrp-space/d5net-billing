@@ -1522,11 +1522,11 @@ input, select, textarea, button { font: inherit; }
     width: 100%;
   }
   /* Widget Chatwoot naik di atas menu docking portal (mobile). */
-  .app-shell--portal .woot-widget-bubble {
+  body.portal-dock .woot-widget-bubble {
     bottom: calc(5.75rem + env(safe-area-inset-bottom)) !important;
     right: 1rem !important;
   }
-  .app-shell--portal .woot-widget-holder {
+  body.portal-dock .woot-widget-holder {
     bottom: calc(5.75rem + env(safe-area-inset-bottom)) !important;
     right: 0.75rem !important;
     max-height: calc(100dvh - 7rem) !important;

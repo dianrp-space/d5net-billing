@@ -244,6 +244,14 @@ export function ClientHome({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [formErr, setFormErr] = useState("");
+  // Tandai body agar CSS bisa mengangkat widget Chatwoot di atas menu docking
+  // (widget ditempel SDK ke document.body, di luar .app-shell--portal).
+  useEffect(() => {
+    document.body.classList.add("portal-dock");
+    return () => {
+      document.body.classList.remove("portal-dock");
+    };
+  }, []);
   const [page, setPage] = usePersistedTab("client-portal", "home", ["home", "plans", "invoices", "payments", "tickets", "account"] as const) as [
     ClientPage,
     (next: ClientPage) => void,
