@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -157,9 +158,16 @@ func latestInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 		return pi, nil
 	}
 	prov, rerr := resolvePaymentProvider(ctx, d, tid, pi.Provider)
+	if rerr != nil {
+		slog.Warn("payment status check skipped", "provider", pi.Provider, "external_id", pi.ExternalID, "err", rerr)
+	}
 	if rerr == nil {
 		if checker, ok := prov.(payment.StatusChecker); ok && pi.ExternalID != "" {
-			if remote, serr := checker.CheckStatus(ctx, pi.ExternalID); serr == nil && remote != nil {
+			remote, serr := checker.CheckStatus(ctx, pi.ExternalID)
+			if serr != nil {
+				slog.Warn("payment status check failed", "provider", pi.Provider, "external_id", pi.ExternalID, "err", serr)
+			}
+			if serr == nil && remote != nil {
 				status := strings.ToLower(strings.TrimSpace(remote.Status))
 				if status != "" && status != pi.Status {
 					_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, status)
