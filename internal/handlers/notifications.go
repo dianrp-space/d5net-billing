@@ -154,6 +154,9 @@ func registerNotifications(api huma.API, d *Deps) {
 		}{}
 		out.Body.Queued = n
 		out.Body.BatchID = batch.String()
+		auditEvent(ctx, d, AuditBroadcast, "notification", nil, map[string]any{
+			"channel": ch, "audience": input.Body.Audience, "queued": n, "batch_id": batch.String(),
+		})
 		return out, nil
 	})
 

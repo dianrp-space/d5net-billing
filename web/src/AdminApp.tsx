@@ -23,6 +23,7 @@ import {
   IconChart,
   IconClock,
   IconDownload,
+  IconEye,
   IconGauge,
   IconHeadset,
   IconHome,
@@ -116,6 +117,9 @@ const JobsSettingsPage = lazy(() =>
 const NotificationsPage = lazy(() =>
   import("./NotificationsPage").then((m) => ({ default: m.NotificationsPage })),
 );
+const AuditLogPage = lazy(() =>
+  import("./pages/AuditLogPage").then((m) => ({ default: m.AuditLogPage })),
+);
 const RolesSettingsPage = lazy(() =>
   import("./SettingsPages").then((m) => ({ default: m.RolesSettingsPage })),
 );
@@ -193,6 +197,7 @@ const navGroups: NavGroup[] = [
     label: "Settings",
     items: [
       { id: "general", label: "Umum", icon: <IconSettings /> },
+      { id: "audit-logs", label: "Audit Log", icon: <IconEye /> },
       { id: "invoice-format", label: "Format Invoice", icon: <IconReceipt /> },
       { id: "isolir-template", label: "Template Isolir", icon: <IconShield /> },
       { id: "jobs", label: "Cronjob", icon: <IconClock /> },
@@ -543,6 +548,7 @@ export function AdminApp({
               {page === "accounting" && <AccountingPage />}
               {page === "resellers" && <ResellersPage />}
               {page === "general" && <GeneralSettingsPage />}
+              {page === "audit-logs" && <AuditLogPage />}
               {page === "invoice-format" && <InvoiceSettingsPage />}
               {page === "isolir-template" && <IsolirTemplatePage />}
               {page === "jobs" && <JobsSettingsPage />}

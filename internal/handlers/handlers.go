@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/dianrp-space/d5net-billing/internal/audit"
 	"github.com/dianrp-space/d5net-billing/internal/auth"
 	"github.com/dianrp-space/d5net-billing/internal/billing"
 	"github.com/dianrp-space/d5net-billing/internal/config"
@@ -43,6 +44,7 @@ type Deps struct {
 	Provisioner *provisioner.Registry
 	Config      *config.Config
 	DBBackup    *dbbackup.Service
+	Audit       *audit.Logger
 	Jobs        JobRunner
 }
 
@@ -133,6 +135,7 @@ func registerAuth(api huma.API, d *Deps) {
 		}
 		ok, err := auth.VerifyPassword(body.Password, user.PasswordHash)
 		if err != nil || !ok {
+			auditEvent(ctx, d, AuditAuthLoginFailed, "user", &user.ID, map[string]any{"email": body.Email})
 			return nil, httpx.Unauthorized("invalid credentials")
 		}
 		if user.TOTPEnabled {
@@ -194,6 +197,8 @@ func registerAuth(api huma.API, d *Deps) {
 		hash := hashToken(refresh)
 		_ = d.Store.SaveRefreshToken(ctx, user.ID, hash, refreshExp)
 		_ = d.Store.UpdateLastLogin(ctx, user.ID)
+		loginCtx := tenant.WithInfo(ctx, tenant.Info{ID: tid, Role: role, UserID: user.ID})
+		auditEvent(loginCtx, d, AuditAuthLogin, "user", &user.ID, map[string]any{"email": user.Email, "role": role})
 
 		out := &LoginOutput{}
 		out.Body.AccessToken = access
@@ -870,6 +875,9 @@ func registerCustomers(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditCustomerDismantle, "customer", &c.ID, map[string]any{
+			"customer_code": c.CustomerCode, "full_name": c.FullName,
+		})
 		return &struct{ Body store.Customer }{Body: *out}, nil
 	})
 
@@ -1008,8 +1016,12 @@ func registerCustomers(api huma.API, d *Deps) {
 				out.Body.Failed++
 				continue
 			}
-			out.Body.Updated++
+		out.Body.Updated++
 		}
+		auditEvent(ctx, d, AuditCustomerStatus, "customer", nil, map[string]any{
+			"is_active": input.Body.IsActive, "updated": out.Body.Updated,
+			"skipped_dismantled": out.Body.SkippedDismantled, "failed": out.Body.Failed,
+		})
 		return out, nil
 	})
 	huma.Register(api, huma.Operation{
@@ -1047,6 +1059,9 @@ func registerCustomers(api huma.API, d *Deps) {
 				c.CustomerCode+" — "+c.FullName,
 			))
 		}
+		auditEvent(ctx, d, AuditCustomerDelete, "customer", &c.ID, map[string]any{
+			"customer_code": c.CustomerCode, "full_name": c.FullName,
+		})
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "deleted"}}, nil
 	})
 
@@ -3244,6 +3259,9 @@ func registerInvoices(api huma.API, d *Deps) {
 		if err := d.Store.CreateInvoice(ctx, inv, items); err != nil {
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditInvoiceIssue, "invoice", &inv.ID, map[string]any{
+			"invoice_number": invNum, "total": total, "items": len(items),
+		})
 		out := &struct {
 			Body manualInvoiceOutput
 		}{}
@@ -3361,6 +3379,9 @@ func registerInvoices(api huma.API, d *Deps) {
 			_ = d.Notify.SendPaymentConfirmation(ctx, tid, cust.Phone, cust.FullName, planName, inv.InvoiceNumber, amount)
 		}
 		resumeAfterInvoicePaid(ctx, d, tid, inv)
+		auditEvent(ctx, d, AuditInvoicePay, "invoice", &inv.ID, map[string]any{
+			"invoice_number": inv.InvoiceNumber, "amount": amount, "method": method,
+		})
 		return &struct{ Body store.Payment }{Body: *p}, nil
 	})
 
@@ -3379,6 +3400,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		} else if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditInvoiceDelete, "invoice", &input.ID, nil)
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "deleted"}}, nil
 	})
 
@@ -3397,6 +3419,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		} else if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditInvoiceRestore, "invoice", &input.ID, nil)
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "restored"}}, nil
 	})
 	huma.Register(api, huma.Operation{
@@ -3416,6 +3439,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		} else if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditInvoicePurge, "invoice", &input.ID, nil)
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "purged"}}, nil
 	})
 
@@ -4990,6 +5014,8 @@ func registerPortal(api huma.API, d *Deps) {
 		if tok, terr := d.Tokens.CreatePortalToken(ten.ID, customers[0].Phone); terr == nil {
 			out.Body.PortalToken = tok
 		}
+		portalCtx := tenant.WithInfo(ctx, tenant.Info{ID: ten.ID, Role: "portal", UserID: customers[0].ID})
+		auditEvent(portalCtx, d, AuditPortalLogin, "customer", &customers[0].ID, map[string]any{"phone": customers[0].Phone})
 		return out, nil
 	})
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,6 +19,41 @@ import (
 	"github.com/go-chi/cors"
 )
 
+type ctxKey string
+
+const clientIPKey ctxKey = "client-ip"
+
+// ClientIPMiddleware menyimpan IP klien (setelah RealIP) ke ctx untuk audit log.
+func ClientIPMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := clientIPFromRemoteAddr(r.RemoteAddr)
+		if ip != nil {
+			r = r.WithContext(context.WithValue(r.Context(), clientIPKey, ip))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func clientIPFromRemoteAddr(remoteAddr string) net.IP {
+	host := strings.TrimSpace(remoteAddr)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		return ip
+	}
+	return nil
+}
+
+// IPFromContext mengembalikan IP klien yang disimpan middleware (nil bila tak ada).
+func IPFromContext(ctx context.Context) net.IP {
+	if ip, ok := ctx.Value(clientIPKey).(net.IP); ok {
+		return ip
+	}
+	return nil
+}
+
 type Server struct {
 	Router chi.Router
 	API    huma.API
@@ -27,6 +63,7 @@ func NewServer(origins []string, extra ...func(http.Handler) http.Handler) *Serv
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	r.Use(ClientIPMiddleware)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(cors.Handler(cors.Options{

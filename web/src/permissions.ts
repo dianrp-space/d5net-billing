@@ -11,7 +11,7 @@ export const PERMISSION_PAGE_MAP: Record<string, string[]> = {
   tickets: ["dashboard", "tickets", "leads"],
   // legacy key from older roles — fold into tickets (portal teknisi/WO digabung ke tiket)
   tech: ["dashboard", "tickets", "leads"],
-  settings: ["general", "invoice-format", "isolir-template", "jobs", "notifications", "roles", "users", "backup", "webhooks", "payment-gw", "messaging-gw", "sla-report"],
+  settings: ["general", "audit-logs", "invoice-format", "isolir-template", "jobs", "notifications", "roles", "users", "backup", "webhooks", "payment-gw", "messaging-gw", "sla-report"],
   // page-level aliases (if checked directly in custom roles)
   plans: ["plans"],
   offers: ["offers"],
@@ -31,6 +31,7 @@ export const PERMISSION_PAGE_MAP: Record<string, string[]> = {
   vouchers: ["vouchers"],
   branding: ["general"],
   general: ["general"],
+  "audit-logs": ["audit-logs"],
   "invoice-format": ["invoice-format"],
   "isolir-template": ["isolir-template"],
   jobs: ["jobs"],

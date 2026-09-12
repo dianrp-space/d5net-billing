@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dianrp-space/d5net-billing/internal/audit"
 	"github.com/dianrp-space/d5net-billing/internal/auth"
 	"github.com/dianrp-space/d5net-billing/internal/billing"
 	"github.com/dianrp-space/d5net-billing/internal/config"
@@ -72,6 +73,7 @@ func main() {
 		Store: st, Tokens: tokens, Encryptor: encryptor,
 		Billing: billingEngine, Notify: notifySvc, Payments: payments,
 		Provisioner: provReg, Config: cfg, DBBackup: dbBackup,
+		Audit: audit.New(database.Pool),
 		Jobs: jobsWorker,
 	}
 	handlers.RegisterAll(srv.API, deps)

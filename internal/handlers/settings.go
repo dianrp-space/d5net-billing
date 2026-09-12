@@ -781,6 +781,7 @@ func registerRolesUsers(api huma.API, d *Deps) {
 		if err := d.Store.CreateRole(ctx, r); err != nil {
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditRoleCreate, "role", &r.ID, map[string]any{"slug": slug, "name": name})
 		return &struct{ Body store.Role }{Body: *r}, nil
 	})
 
@@ -820,6 +821,7 @@ func registerRolesUsers(api huma.API, d *Deps) {
 		if err := d.Store.UpdateRole(ctx, existing); err != nil {
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditRoleUpdate, "role", &existing.ID, map[string]any{"slug": slug})
 		return &struct{ Body store.Role }{Body: *existing}, nil
 	})
 
@@ -842,6 +844,7 @@ func registerRolesUsers(api huma.API, d *Deps) {
 			}
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditRoleDelete, "role", &input.ID, nil)
 		return &struct{}{}, nil
 	})
 
@@ -895,6 +898,7 @@ func registerRolesUsers(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditUserCreate, "user", &uid, map[string]any{"email": email})
 		return &struct{ Body map[string]string }{Body: map[string]string{"user_id": uid.String()}}, nil
 	})
 
@@ -957,7 +961,44 @@ func registerRolesUsers(api huma.API, d *Deps) {
 			}
 			return nil, httpx.Internal(err)
 		}
+		auditEvent(ctx, d, AuditUserDelete, "user", &input.ID, nil)
 		return &struct{}{}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-audit-logs", Method: http.MethodGet, Path: "/api/audit-logs",
+		Tags: []string{"Settings"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Action string `query:"action"`
+		Search string `query:"search"`
+		Limit  int    `query:"limit"`
+		Offset int    `query:"offset"`
+	}) (*struct {
+		Body struct {
+			Data  []store.AuditLog `json:"data"`
+			Total int64            `json:"total"`
+		}
+	}, error) {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		list, total, err := d.Store.ListAuditLogs(ctx, tid, input.Action, input.Search, input.Limit, input.Offset)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.AuditLog{}
+		}
+		out := &struct {
+			Body struct {
+				Data  []store.AuditLog `json:"data"`
+				Total int64            `json:"total"`
+			}
+		}{}
+		out.Body.Data = list
+		out.Body.Total = total
+		return out, nil
 	})
 
 	huma.Register(api, huma.Operation{
