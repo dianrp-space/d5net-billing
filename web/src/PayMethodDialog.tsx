@@ -37,7 +37,6 @@ export function PayMethodDialog({
   open,
   invoiceNumber,
   amount,
-  tenantSlug,
   methods,
   loading,
   busy,
@@ -48,7 +47,6 @@ export function PayMethodDialog({
   open: boolean;
   invoiceNumber: string;
   amount: number;
-  tenantSlug?: string;
   methods: PayMethodDef[];
   loading?: boolean;
   busy?: boolean;
@@ -56,18 +54,6 @@ export function PayMethodDialog({
   onClose: () => void;
   onConfirm: (method: PayMethodId) => void;
 }) {
-  const [method, setMethod] = useState<PayMethodId>(() => getSavedPayMethod(tenantSlug));
-
-  useEffect(() => {
-    if (!open) return;
-    const saved = getSavedPayMethod(tenantSlug);
-    if (methods.some((m) => m.id === saved)) {
-      setMethod(saved);
-      return;
-    }
-    if (methods[0]) setMethod(methods[0].id);
-  }, [open, tenantSlug, methods]);
-
   return (
     <FormDialog open={open} title="Pilih metode pembayaran" onClose={onClose}>
       <div className="grid gap-3">
@@ -80,42 +66,34 @@ export function PayMethodDialog({
         ) : methods.length === 0 ? (
           <p className="text-sm text-[var(--danger)]">Belum ada payment gateway yang aktif. Hubungi admin.</p>
         ) : (
-          <div className="grid gap-2" role="radiogroup" aria-label="Metode pembayaran">
-            {methods.map((m) => {
-              const selected = method === m.id;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  disabled={busy}
-                  onClick={() => setMethod(m.id)}
-                  className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
-                    selected
-                      ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]"
-                      : "border-[var(--border)] bg-[var(--panel)] hover:border-[var(--border-strong)]"
-                  }`}
-                >
-                  <span className="mt-0.5 text-[var(--accent)]">{methodIcon(m.id)}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold">{m.label}</span>
-                    <span className="mt-0.5 block text-xs text-[var(--muted)]">{m.description}</span>
-                  </span>
-                </button>
-              );
-            })}
+          <div className="grid gap-2" role="list" aria-label="Metode pembayaran">
+            {methods.length > 1 ? (
+              <p className="text-xs text-[var(--muted)]">Klik salah satu untuk langsung bayar:</p>
+            ) : (
+              <p className="text-xs text-[var(--muted)]">Menyiapkan pembayaran…</p>
+            )}
+            {methods.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                role="listitem"
+                disabled={busy}
+                onClick={() => onConfirm(m.id)}
+                className="flex w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3 text-left transition-colors hover:border-[var(--accent)] disabled:opacity-60"
+              >
+                <span className="mt-0.5 text-[var(--accent)]">{methodIcon(m.id)}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold">{m.label}</span>
+                  <span className="mt-0.5 block text-xs text-[var(--muted)]">{m.description}</span>
+                </span>
+                <span className="shrink-0 text-[var(--muted)]" aria-hidden>
+                  →
+                </span>
+              </button>
+            ))}
           </div>
         )}
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-        <button
-          type="button"
-          className="btn w-fit"
-          disabled={busy || loading || methods.length === 0}
-          onClick={() => onConfirm(method)}
-        >
-          {busy ? "Menyiapkan…" : "Lanjut bayar"}
-        </button>
       </div>
     </FormDialog>
   );
@@ -155,17 +133,18 @@ export function PortalPayHost({
     autoTriedFor.current = null;
   }, [invoice?.id]);
 
-  // Auto-advance to the previously chosen method (once per invoice) unless the
-  // customer cleared it via the "batalkan / ganti metode" action.
+  // Langsung bayar tanpa konfirmasi tambahan: 1 PG aktif → otomatis jalan;
+  // beberapa PG + ada metode tersimpan → pakai yang tersimpan. Selain itu
+  // tampilkan opsi, dan setiap opsi yang diklik langsung memproses bayar.
   useEffect(() => {
     if (!invoice?.id || step !== "method" || busy) return;
     if (autoTriedFor.current === invoice.id) return;
     if (options.isLoading || !methods.length) return;
-    if (!hasSavedPayMethod(tenantSlug)) return;
     const saved = getSavedPayMethod(tenantSlug);
-    if (!methods.some((m) => m.id === saved)) return;
+    const useSaved = hasSavedPayMethod(tenantSlug) && methods.some((m) => m.id === saved);
+    if (!useSaved && methods.length !== 1) return;
     autoTriedFor.current = invoice.id;
-    void confirmMethod(saved);
+    void confirmMethod(useSaved ? saved : methods[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoice?.id, step, busy, options.isLoading, methods.length, tenantSlug]);
 
@@ -263,7 +242,6 @@ export function PortalPayHost({
         open={step === "method"}
         invoiceNumber={invoice.invoice_number}
         amount={amount}
-        tenantSlug={tenantSlug}
         methods={methods}
         loading={options.isLoading}
         busy={busy}
