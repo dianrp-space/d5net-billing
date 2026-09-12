@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dianrp-space/d5net-billing/internal/payment"
 	"github.com/dianrp-space/d5net-billing/internal/store"
@@ -288,6 +289,10 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 	if len(custs) == 0 {
 		return
 	}
+	// Tampilkan "mengetik…" + jeda singkat agar balasan terasa natural.
+	// Best-effort: gateway lama tanpa /send/presence mengabaikannya.
+	botShowTyping(ctx, client, phone)
+	defer botStopTyping(ctx, client, phone)
 	name := strings.TrimSpace(custs[0].FullName)
 	if name == "" {
 		name = custs[0].CustomerCode
@@ -411,6 +416,32 @@ func sendDokuQRIS(ctx context.Context, d *Deps, tid xid.ID, phone string, inv *s
 		return false
 	}
 	return true
+}
+
+// botTypingDelay menahan balasan sebentar agar indikator mengetik sempat
+// terlihat pelanggan sebelum pesan masuk.
+const botTypingDelay = 1200 * time.Millisecond
+
+// botShowTyping mengirim presence "mengetik…" lalu menahan sebentar.
+// Best-effort: error (mis. gateway lama tanpa /send/presence) diabaikan.
+func botShowTyping(ctx context.Context, client *wa.Client, phone string) {
+	if client == nil {
+		return
+	}
+	pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_ = client.SendPresence(pctx, phone, wa.PresenceComposing)
+	time.Sleep(botTypingDelay)
+}
+
+// botStopTyping menghentikan indikator mengetik setelah balasan dikirim.
+func botStopTyping(ctx context.Context, client *wa.Client, phone string) {
+	if client == nil {
+		return
+	}
+	pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_ = client.SendPresence(pctx, phone, wa.PresencePaused)
 }
 
 func customerByID(custs []*store.Customer) map[xid.ID]*store.Customer {

@@ -110,6 +110,46 @@ func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 	return out.Results, nil
 }
 
+// Presence states understood by the GOWA gateway (/send/presence).
+const (
+	PresenceComposing = "composing" // "mengetik…"
+	PresencePaused    = "paused"    // berhenti mengetik
+)
+
+// SendPresence calls POST /send/presence with phone + presence state.
+// Gateways without presence support answer 404 — callers that only want a
+// best-effort typing indicator should ignore that error.
+func (c *Client) SendPresence(ctx context.Context, phone, presence string) error {
+	if !c.Configured() {
+		return fmt.Errorf("whatsapp gateway belum dikonfigurasi")
+	}
+	p := NormalizePhone(phone)
+	if p == "" {
+		return fmt.Errorf("nomor WhatsApp kosong")
+	}
+	presence = strings.TrimSpace(presence)
+	if presence == "" {
+		presence = PresencePaused
+	}
+	payload, _ := json.Marshal(map[string]any{"phone": p, "presence": presence})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/send/presence", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.applyHeaders(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("whatsapp gateway %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return nil
+}
+
 // SendText calls POST /send/message with phone + message.
 func (c *Client) SendText(ctx context.Context, phone, body string) error {
 	if !c.Configured() {

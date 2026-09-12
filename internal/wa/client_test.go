@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"encoding/json"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -89,5 +90,32 @@ func TestSendFileMultipart(t *testing.T) {
 	}
 	if gotName != "INV-1.pdf" || gotCT != "application/pdf" {
 		t.Fatalf("name=%q ct=%q", gotName, gotCT)
+	}
+}
+
+func TestSendPresence(t *testing.T) {
+	var gotPath, gotPhone, gotPresence string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		var body struct {
+			Phone    string `json:"phone"`
+			Presence string `json:"presence"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		gotPhone, gotPresence = body.Phone, body.Presence
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":200}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL})
+	if err := c.SendPresence(t.Context(), "081234567890", PresenceComposing); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/send/presence" || gotPhone != "6281234567890" || gotPresence != "composing" {
+		t.Fatalf("path=%q phone=%q presence=%q", gotPath, gotPhone, gotPresence)
 	}
 }
