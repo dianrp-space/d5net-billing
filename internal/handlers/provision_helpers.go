@@ -621,11 +621,26 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			slog.Warn("payment intent not found for webhook", "external_id", event.ExternalID)
+			// #region agent log
+			agentDebugLog("provision_helpers.go:completePaidWebhook", "intent not found, invoice untouched", "E", map[string]any{
+				"provider":    provider,
+				"external_id": event.ExternalID,
+				"outcome":     "intent_not_found",
+			})
+			// #endregion
 			return nil
 		}
 		return err
 	}
 	if pi.Status == "paid" {
+		// #region agent log
+		agentDebugLog("provision_helpers.go:completePaidWebhook", "intent already paid, skip RecordPayment", "E", map[string]any{
+			"provider":    provider,
+			"external_id": event.ExternalID,
+			"outcome":     "already_paid",
+			"invoice_id":  pi.InvoiceID != nil,
+		})
+		// #endregion
 		return nil // idempotent
 	}
 
@@ -662,6 +677,15 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 		Reference:  &ref,
 	}
 	if err := d.Store.RecordPayment(ctx, p); err != nil {
+		// #region agent log
+		agentDebugLog("provision_helpers.go:completePaidWebhook", "RecordPayment failed", "E", map[string]any{
+			"provider":    provider,
+			"external_id": event.ExternalID,
+			"outcome":     "record_payment_error",
+			"err":         err.Error(),
+			"amount":      amount,
+		})
+		// #endregion
 		return err
 	}
 	_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, "paid")
@@ -707,6 +731,31 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 		}
 	}
 
+	// #region agent log
+	invStatus := ""
+	invPaid := int64(0)
+	invTotal := int64(0)
+	if inv != nil {
+		if fresh, _, gerr := d.Store.GetInvoice(ctx, pi.TenantID, inv.ID); gerr == nil && fresh != nil {
+			invStatus = fresh.Status
+			invPaid = fresh.PaidAmount
+			invTotal = fresh.TotalAmount
+		} else {
+			invStatus = inv.Status
+			invPaid = inv.PaidAmount
+			invTotal = inv.TotalAmount
+		}
+	}
+	agentDebugLog("provision_helpers.go:completePaidWebhook", "RecordPayment done", "E", map[string]any{
+		"provider":       provider,
+		"external_id":    event.ExternalID,
+		"outcome":        "recorded",
+		"amount":         amount,
+		"invoice_status": invStatus,
+		"paid_amount":    invPaid,
+		"total_amount":   invTotal,
+	})
+	// #endregion
 	return nil
 }
 

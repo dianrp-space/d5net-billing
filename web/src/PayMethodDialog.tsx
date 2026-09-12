@@ -224,7 +224,24 @@ export function PortalPayHost({
     }
     try {
       await openDuitkuPopup(reference, sandbox, {
-        onSuccess: () => onPaid?.(),
+        onSuccess: () => {
+          // #region agent log
+          fetch("http://127.0.0.1:7813/ingest/d5ceb638-f02e-4b79-b49c-b843ba23dc69", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f19e18" },
+            body: JSON.stringify({
+              sessionId: "f19e18",
+              runId: "pre-fix",
+              hypothesisId: "F",
+              location: "PayMethodDialog.tsx:duitkuOnSuccess",
+              message: "Duitku popup onSuccess fired (UI only, no RecordPayment)",
+              data: { invoice: invoice.invoice_number, invoiceId: invoice.id },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
+          onPaid?.();
+        },
         onError: () => void toastError("Pembayaran Duitku gagal atau dibatalkan."),
         onClose: () => onClose(),
       });

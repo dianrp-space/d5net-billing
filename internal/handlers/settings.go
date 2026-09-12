@@ -233,6 +233,14 @@ func MountStaticAndUploads(r chi.Router, d *Deps) {
 // bayar. Arahkan ke dashboard portal; guard login meneruskan yang belum login.
 func MountPaymentReturnPages(r chi.Router) {
 	r.Get("/api/webhooks/payment/doku", func(w http.ResponseWriter, req *http.Request) {
+		// #region agent log
+		agentDebugLog("settings.go:MountPaymentReturnPages", "DOKU browser GET redirect (no invoice update)", "A", map[string]any{
+			"path":       req.URL.Path,
+			"query":      req.URL.RawQuery,
+			"user_agent": req.UserAgent(),
+			"referer":    req.Referer(),
+		})
+		// #endregion
 		http.Redirect(w, req, "/client/dashboard", http.StatusFound)
 	})
 }

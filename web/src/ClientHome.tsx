@@ -434,6 +434,34 @@ export function ClientHome({
     refetchInterval: 15000,
   });
   const invoices = invoicesQ.isSuccess ? (invoicesQ.data?.data ?? []) : (data.invoices ?? []);
+  useEffect(() => {
+    if (!invoicesQ.isSuccess) return;
+    const rows = invoicesQ.data?.data ?? [];
+    // #region agent log
+    fetch("http://127.0.0.1:7813/ingest/d5ceb638-f02e-4b79-b49c-b843ba23dc69", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f19e18" },
+      body: JSON.stringify({
+        sessionId: "f19e18",
+        runId: "pre-fix",
+        hypothesisId: "F",
+        location: "ClientHome.tsx:invoicesQ",
+        message: "client dashboard invoices loaded",
+        data: {
+          count: rows.length,
+          unpaid: rows.filter((i) => String(i.status || "").toLowerCase() !== "paid" && Number(i.total_amount || 0) - Number(i.paid_amount || 0) > 0).length,
+          invoices: rows.map((i) => ({
+            number: i.invoice_number,
+            status: i.status,
+            paid: i.paid_amount,
+            total: i.total_amount,
+          })),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [invoicesQ.isSuccess, invoicesQ.data]);
 
   const paymentsQ = useQuery({
     queryKey: ["portal-payments", data.tenant_slug],
