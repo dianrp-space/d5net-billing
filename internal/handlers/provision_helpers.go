@@ -640,9 +640,10 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 
 	var invoiceID *xid.ID
 	var inv *store.Invoice
+	var items []store.InvoiceItem
 	if pi.InvoiceID != nil {
 		invoiceID = pi.InvoiceID
-		inv, _, err = d.Store.GetInvoice(ctx, pi.TenantID, *pi.InvoiceID)
+		inv, items, err = d.Store.GetInvoice(ctx, pi.TenantID, *pi.InvoiceID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
@@ -703,7 +704,8 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 		cust, _ := d.Store.GetCustomer(ctx, pi.TenantID, pi.CustomerID)
 		if cust != nil && cust.Phone != "" {
 			planName := d.Store.PlanNameForSubscription(ctx, pi.TenantID, inv.SubscriptionID)
-			_ = d.Notify.SendPaymentConfirmation(ctx, pi.TenantID, cust.Phone, cust.FullName, planName, inv.InvoiceNumber, amount)
+			itemName := store.NotificationItemName(planName, items)
+			_ = d.Notify.SendPaymentConfirmation(ctx, pi.TenantID, cust.Phone, cust.FullName, planName, itemName, inv.InvoiceNumber, amount)
 		}
 	}
 

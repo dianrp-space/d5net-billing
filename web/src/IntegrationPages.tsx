@@ -391,6 +391,13 @@ export function PaymentGWPage() {
               />
               Sandbox (api-sandbox.duitku.com)
             </label>
+            {duitkuForm.sandbox ? (
+              <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+                Dashboard Duitku sandbox tidak punya tandai lunas. Saat sandbox aktif, portal pelanggan dan daftar
+                tagihan admin punya aksi <strong>Uji sandbox: tandai lunas</strong> yang menjalankan alur webhook yang
+                sama.
+              </p>
+            ) : null}
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Merchant code</span>
               <input

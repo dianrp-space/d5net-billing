@@ -1541,6 +1541,30 @@ func registerOpsExtra(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "invoice-sandbox-pay", Method: http.MethodPost, Path: "/api/invoices/{id}/sandbox-pay",
+		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body store.PaymentIntent }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		inv, _, err := d.Store.GetInvoice(ctx, tid, input.ID)
+		if err != nil {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		pi, err := simulateSandboxInvoicePayment(ctx, d, tid, inv)
+		if err != nil {
+			return nil, err
+		}
+		auditEvent(ctx, d, AuditInvoicePay, "invoice", &inv.ID, map[string]any{
+			"invoice_number": inv.InvoiceNumber, "sandbox": true, "provider": "duitku",
+		})
+		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "invoice-payment-intent", Method: http.MethodGet, Path: "/api/invoices/{id}/payment-intent",
 		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {

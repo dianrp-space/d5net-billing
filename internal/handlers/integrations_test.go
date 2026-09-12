@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/dianrp-space/d5net-billing/internal/auth"
+	"github.com/dianrp-space/d5net-billing/internal/store"
 	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
@@ -55,6 +57,16 @@ func TestDuitkuViewReturnsDecryptedKeyAndCallbackURL(t *testing.T) {
 	}
 	if paymentWebhookPathFor("duitku") != "/api/webhooks/payment/duitku" {
 		t.Fatalf("duitku path = %q", paymentWebhookPathFor("duitku"))
+	}
+}
+
+func TestSandboxSimExternalID(t *testing.T) {
+	got := sandboxSimExternalID(&store.Invoice{InvoiceNumber: "INV-TES-1"})
+	if !strings.Contains(got, "INV-TES-1-SIM-") {
+		t.Fatalf("external id = %q", got)
+	}
+	if sandboxSimExternalID(nil) == "" {
+		t.Fatal("empty sim id")
 	}
 }
 

@@ -5,10 +5,10 @@ import echarts from "./echarts";
 import { api, apiDownload, getToken } from "./api";
 import { useAppDialog } from "./confirm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconTrash, IconUndo } from "./icons";
+import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconTrash, IconUndo, IconZap } from "./icons";
 import { ListToolbar, matchesQuery } from "./ListToolbar";
 import { toastError, toastSuccess } from "./swal";
-import { PAY_METHOD_TUNAI } from "./payMethod";
+import { PAY_METHOD_TUNAI, payOptionsHasDuitkuSandbox, type PayOption } from "./payMethod";
 import { usePersistedTab } from "./navPersist";
 import {
   Button,
@@ -973,6 +973,12 @@ export function InvoiceActions({
   const qc = useQueryClient();
   const { confirm } = useAppDialog();
   const unpaid = !trashed && status !== "paid" && status !== "void" && status !== "cancelled";
+  const payOpts = useQuery({
+    queryKey: ["pay-options"],
+    queryFn: () => api<PayOption[]>("/api/integrations/pay-options"),
+    staleTime: 60_000,
+  });
+  const duitkuSandbox = payOptionsHasDuitkuSandbox(payOpts.data);
   function refreshBilling() {
     void qc.invalidateQueries({ queryKey: ["invoices"] });
     void qc.invalidateQueries({ queryKey: ["invoices-recent"] });
@@ -986,6 +992,14 @@ export function InvoiceActions({
       refreshBilling();
     },
     onError: (e: Error) => void toastError(e.message || "Gagal bayar"),
+  });
+  const sandboxPay = useMutation({
+    mutationFn: () => api(`/api/invoices/${id}/sandbox-pay`, { method: "POST" }),
+    onSuccess: () => {
+      void toastSuccess("Sandbox: tagihan ditandai lunas (alur webhook Duitku)");
+      refreshBilling();
+    },
+    onError: (e: Error) => void toastError(e.message || "Gagal uji sandbox"),
   });
   const remove = useMutation({
     mutationFn: () => api(`/api/invoices/${id}`, { method: "DELETE" }),
@@ -1030,6 +1044,23 @@ export function InvoiceActions({
           }}
         >
           <IconBanknote />
+        </IconButton>
+      )}
+      {unpaid && duitkuSandbox && (
+        <IconButton
+          label="Uji sandbox: tandai lunas"
+          disabled={sandboxPay.isPending}
+          onClick={() => {
+            void confirm({
+              title: "Uji sandbox Duitku?",
+              description: `Tandai lunas ${invoiceNumber} lewat alur webhook Duitku (hanya sandbox). Dashboard Duitku tidak punya tombol ini.`,
+              confirmLabel: "Tandai lunas",
+            }).then((ok) => {
+              if (ok) sandboxPay.mutate();
+            });
+          }}
+        >
+          <IconZap />
         </IconButton>
       )}
       <IconButton

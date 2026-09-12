@@ -37,6 +37,7 @@ export type PayOption = {
   label: string;
   description: string;
   kind: string;
+  sandbox?: boolean;
 };
 
 export type PayableInvoice = {
@@ -86,6 +87,13 @@ export function payOptionsToMethods(options: PayOption[] | null | undefined): Pa
     });
   }
   return out;
+}
+
+/** True when Duitku sandbox is the active PG — testers can mark paid without the Duitku dashboard. */
+export function payOptionsHasDuitkuSandbox(options: PayOption[] | null | undefined): boolean {
+  return Boolean(
+    options?.some((opt) => opt.sandbox && providerToPayMethod(opt.provider) === PAY_METHOD_DUITKU),
+  );
 }
 
 /** Label for a stored method/provider id. Unknown values are shown as-is (never forced to "manual"). */

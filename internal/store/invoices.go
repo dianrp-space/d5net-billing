@@ -42,6 +42,41 @@ type InvoiceItem struct {
 	Amount      int64  `json:"amount"`
 }
 
+func isLateFeeDescription(desc string) bool {
+	d := strings.ToLower(strings.TrimSpace(desc))
+	return strings.Contains(d, "denda") || strings.Contains(d, "late") || strings.Contains(d, "keterlambatan")
+}
+
+// InvoiceItemName joins non-late-fee line descriptions for customer-facing copy.
+func InvoiceItemName(items []InvoiceItem) string {
+	var names []string
+	seen := map[string]struct{}{}
+	for _, it := range items {
+		d := strings.TrimSpace(it.Description)
+		if d == "" || isLateFeeDescription(d) {
+			continue
+		}
+		key := strings.ToLower(d)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		names = append(names, d)
+	}
+	return strings.Join(names, ", ")
+}
+
+// NotificationItemName prefers invoice line names, then the plan, then a generic label.
+func NotificationItemName(planName string, items []InvoiceItem) string {
+	if n := InvoiceItemName(items); n != "" {
+		return n
+	}
+	if p := strings.TrimSpace(planName); p != "" {
+		return p
+	}
+	return "layanan"
+}
+
 type Payment struct {
 	ID            xid.ID        `json:"id"`
 	TenantID      xid.ID        `json:"tenant_id"`
@@ -760,7 +795,8 @@ func SummarizeInvoiceItems(items []InvoiceItem) string {
 	return strings.Join(parts, ", ")
 }
 
-func (s *Store) SumOverdueUnpaidForSubscription(ctx context.Context, tenantID xid.ID, subscriptionID xid.ID) (int64, error) {	var sum int64
+func (s *Store) SumOverdueUnpaidForSubscription(ctx context.Context, tenantID xid.ID, subscriptionID xid.ID) (int64, error) {
+	var sum int64
 	err := s.Pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(total_amount - paid_amount), 0)
 		FROM invoices

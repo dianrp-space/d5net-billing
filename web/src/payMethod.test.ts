@@ -9,6 +9,7 @@ import {
   notePaymentReturnFromLocation,
   PAY_METHOD_DUITKU,
   paymentMethodLabel,
+  payOptionsHasDuitkuSandbox,
   portalPaymentReturnURL,
   setSavedPayMethod,
 } from "./payMethod";
@@ -41,6 +42,15 @@ describe("payMethod", () => {
     expect(paymentMethodLabel("doku")).toBe("DOKU");
     expect(paymentMethodLabel("")).toBe("—");
     expect(paymentMethodLabel("midtrans")).toBe("midtrans");
+    expect(
+      payOptionsHasDuitkuSandbox([{ provider: "duitku", label: "Duitku", description: "", kind: "popup", sandbox: true }]),
+    ).toBe(true);
+    expect(
+      payOptionsHasDuitkuSandbox([{ provider: "duitku", label: "Duitku", description: "", kind: "popup", sandbox: false }]),
+    ).toBe(false);
+    expect(
+      payOptionsHasDuitkuSandbox([{ provider: "doku", label: "DOKU", description: "", kind: "redirect", sandbox: true }]),
+    ).toBe(false);
   });
 
   it("marks and consumes payment return from query", () => {

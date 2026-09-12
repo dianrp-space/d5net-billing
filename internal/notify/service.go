@@ -21,7 +21,7 @@ type Message struct {
 	Body        string
 	ScheduledAt *time.Time
 	BatchID     xid.ID
-	// Event menandai jenis pesan (invoice_reminder, payment_confirmation,
+	// Event menandai jenis pesan (invoice_issued, invoice_reminder, payment_confirmation,
 	// broadcast, ops_telegram, monthly_report) untuk riwayat di UI.
 	Event string
 }
@@ -455,6 +455,21 @@ type TemplateEvent struct {
 func TemplateCatalog() []TemplateEvent {
 	return []TemplateEvent{
 		{
+			Event:       "invoice_issued",
+			Label:       "Tagihan baru (manual)",
+			Description: "Dikirim otomatis saat admin menerbitkan tagihan manual.",
+			Channels:    []string{"whatsapp"},
+			Variables: []TemplateVariable{
+				{Name: "customer_name", Desc: "Nama pelanggan"},
+				{Name: "plan_name", Desc: "Nama paket/langganan"},
+				{Name: "item_name", Desc: "Nama item tagihan (baris invoice, tanpa denda)"},
+				{Name: "invoice_number", Desc: "Nomor tagihan"},
+				{Name: "amount", Desc: "Nominal tagihan (angka)"},
+				{Name: "due_date", Desc: "Tanggal jatuh tempo"},
+			},
+			DefaultBody: "Halo {{customer_name}}, tagihan baru {{item_name}} ({{invoice_number}}) sebesar Rp {{amount}} telah diterbitkan. Jatuh tempo {{due_date}}. Bayar via portal pelanggan.",
+		},
+		{
 			Event:       "invoice_reminder",
 			Label:       "Pengingat tagihan (dunning)",
 			Description: "Dikirim otomatis sesuai offset hari di menu Cronjob.",
@@ -462,11 +477,12 @@ func TemplateCatalog() []TemplateEvent {
 			Variables: []TemplateVariable{
 				{Name: "customer_name", Desc: "Nama pelanggan"},
 				{Name: "plan_name", Desc: "Nama paket/langganan"},
+				{Name: "item_name", Desc: "Nama item tagihan (baris invoice, tanpa denda)"},
 				{Name: "invoice_number", Desc: "Nomor tagihan"},
 				{Name: "amount", Desc: "Nominal tagihan (angka)"},
 				{Name: "due_date", Desc: "Tanggal jatuh tempo"},
 			},
-			DefaultBody: "Halo {{customer_name}}, tagihan {{invoice_number}} sebesar Rp {{amount}} jatuh tempo {{due_date}}. Bayar via portal pelanggan.",
+			DefaultBody: "Halo {{customer_name}}, tagihan {{item_name}} ({{invoice_number}}) sebesar Rp {{amount}} jatuh tempo {{due_date}}. Bayar via portal pelanggan.",
 		},
 		{
 			Event:       "payment_confirmation",
@@ -476,10 +492,11 @@ func TemplateCatalog() []TemplateEvent {
 			Variables: []TemplateVariable{
 				{Name: "customer_name", Desc: "Nama pelanggan"},
 				{Name: "plan_name", Desc: "Nama paket/langganan"},
+				{Name: "item_name", Desc: "Nama item tagihan (baris invoice, tanpa denda)"},
 				{Name: "invoice_number", Desc: "Nomor tagihan"},
 				{Name: "amount", Desc: "Nominal dibayar (angka)"},
 			},
-			DefaultBody: "Terima kasih {{customer_name}}! Pembayaran tagihan {{invoice_number}} sebesar Rp {{amount}} berhasil diterima.",
+			DefaultBody: "Terima kasih {{customer_name}}! Pembayaran {{item_name}} ({{invoice_number}}) sebesar Rp {{amount}} berhasil diterima.",
 		},
 		{
 			Event:       "broadcast",
@@ -509,10 +526,41 @@ func applyVars(tpl string, vars map[string]string) string {
 	return out
 }
 
-func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, phone, customerName, planName, invoiceNum string, amount int64, dueDate string) error {
+func notificationItemName(planName, itemName string) string {
+	if n := strings.TrimSpace(itemName); n != "" {
+		return n
+	}
+	if p := strings.TrimSpace(planName); p != "" {
+		return p
+	}
+	return "layanan"
+}
+
+func (s *Service) SendInvoiceIssued(ctx context.Context, tenantID xid.ID, phone, customerName, planName, itemName, invoiceNum string, amount int64, dueDate string) error {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return nil
+	}
 	vars := map[string]string{
 		"customer_name":  customerName,
 		"plan_name":      planName,
+		"item_name":      notificationItemName(planName, itemName),
+		"invoice_number": invoiceNum,
+		"amount":         fmt.Sprintf("%d", amount),
+		"due_date":       dueDate,
+	}
+	_, body, err := s.RenderTemplate(ctx, tenantID, "whatsapp", "invoice_issued", vars)
+	if err != nil {
+		return err
+	}
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "invoice_issued"})
+}
+
+func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, phone, customerName, planName, itemName, invoiceNum string, amount int64, dueDate string) error {
+	vars := map[string]string{
+		"customer_name":  customerName,
+		"plan_name":      planName,
+		"item_name":      notificationItemName(planName, itemName),
 		"invoice_number": invoiceNum,
 		"amount":         fmt.Sprintf("%d", amount),
 		"due_date":       dueDate,
@@ -524,10 +572,11 @@ func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, phon
 	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "invoice_reminder"})
 }
 
-func (s *Service) SendPaymentConfirmation(ctx context.Context, tenantID xid.ID, phone, customerName, planName, invoiceNum string, amount int64) error {
+func (s *Service) SendPaymentConfirmation(ctx context.Context, tenantID xid.ID, phone, customerName, planName, itemName, invoiceNum string, amount int64) error {
 	vars := map[string]string{
 		"customer_name":  customerName,
 		"plan_name":      planName,
+		"item_name":      notificationItemName(planName, itemName),
 		"invoice_number": invoiceNum,
 		"amount":         fmt.Sprintf("%d", amount),
 	}

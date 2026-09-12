@@ -217,6 +217,89 @@ func latestInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 	return pi, nil
 }
 
+func sandboxSimExternalID(inv *store.Invoice) string {
+	base := ""
+	if inv != nil {
+		base = strings.TrimSpace(inv.InvoiceNumber)
+	}
+	if base == "" {
+		base = "SIM"
+	}
+	if len(base) > 28 {
+		base = base[:28]
+	}
+	return base + "-SIM-" + xid.New().String()
+}
+
+// simulateSandboxInvoicePayment marks an unpaid invoice paid through the same
+// webhook path as Duitku. Only allowed while Duitku sandbox is active — the
+// Duitku dashboard has no "mark paid" control.
+func simulateSandboxInvoicePayment(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoice) (*store.PaymentIntent, error) {
+	if inv == nil {
+		return nil, httpx.NotFound("invoice not found")
+	}
+	if !duitkuSandboxReady(ctx, d, tid) {
+		return nil, httpx.BadRequest("simulasi hanya tersedia saat Duitku sandbox aktif")
+	}
+	st := strings.ToLower(strings.TrimSpace(inv.Status))
+	if st == "paid" || st == "void" || st == "cancelled" {
+		return nil, httpx.BadRequest("invoice sudah lunas / tidak bisa dibayar")
+	}
+	amount := invoiceRemaining(inv)
+	if amount <= 0 {
+		return nil, httpx.BadRequest("tidak ada sisa tagihan")
+	}
+
+	var pi *store.PaymentIntent
+	existing, err := d.Store.GetLatestPendingPaymentIntent(ctx, tid, inv.ID, payment.ProviderDuitku)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, httpx.Internal(err)
+	}
+	if existing != nil && !payment.WebhookIsPaid(existing.Status) {
+		pi = existing
+	}
+	if pi == nil {
+		latest, lerr := d.Store.GetLatestPaymentIntentForInvoice(ctx, tid, inv.ID, payment.ProviderDuitku)
+		if lerr != nil && !errors.Is(lerr, store.ErrNotFound) {
+			return nil, httpx.Internal(lerr)
+		}
+		if latest != nil && !payment.WebhookIsPaid(latest.Status) {
+			status := strings.ToLower(strings.TrimSpace(latest.Status))
+			if status != "cancelled" && status != "canceled" && status != "expired" {
+				pi = latest
+			}
+		}
+	}
+	if pi == nil {
+		created, ierr := d.Store.InsertPaymentIntent(ctx, &store.PaymentIntent{
+			TenantID:   tid,
+			CustomerID: inv.CustomerID,
+			InvoiceID:  &inv.ID,
+			Provider:   payment.ProviderDuitku,
+			ExternalID: sandboxSimExternalID(inv),
+			Amount:     amount,
+			Status:     "pending",
+			Metadata:   map[string]any{"sandbox_sim": true, "duitku_sandbox": true},
+		})
+		if ierr != nil {
+			return nil, httpx.Internal(ierr)
+		}
+		pi = created
+	}
+
+	ev := &payment.WebhookEvent{
+		ExternalID: pi.ExternalID,
+		Status:     "paid",
+		Amount:     amount,
+		Reference:  "sandbox-sim",
+	}
+	if err := completePaidWebhook(ctx, d, payment.ProviderDuitku, ev); err != nil {
+		return nil, httpx.Internal(err)
+	}
+	pi.Status = "paid"
+	return pi, nil
+}
+
 func cancelInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoice) (*store.PaymentIntent, error) {
 	if inv == nil {
 		return nil, httpx.NotFound("invoice not found")

@@ -29,6 +29,7 @@ type TemplateEvent = {
 const PREVIEW_SAMPLES: Record<string, string> = {
   customer_name: "Budi Santoso",
   plan_name: "Home 20 Mbps",
+  item_name: "Tes 3",
   invoice_number: "INV-D5N-2026090001-092026A3F9K2",
   amount: "150000",
   due_date: "10/09/2026",
@@ -454,6 +455,7 @@ type NotifLog = {
 
 const EVENT_LABELS: Record<string, string> = {
   broadcast: "Broadcast",
+  invoice_issued: "Tagihan baru",
   invoice_reminder: "Pengingat tagihan",
   payment_confirmation: "Konfirmasi bayar",
   ops_telegram: "Alert ops",

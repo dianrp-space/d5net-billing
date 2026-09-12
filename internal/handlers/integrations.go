@@ -99,6 +99,7 @@ type payOptionView struct {
 	Label       string `json:"label"`
 	Description string `json:"description"`
 	Kind        string `json:"kind"`
+	Sandbox     bool   `json:"sandbox"`
 }
 
 type messagingIntegrationStored struct {
@@ -989,39 +990,54 @@ func normalizePaymentProviderName(name string) string {
 
 func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payOptionView {
 	out := make([]payOptionView, 0, 2)
-	if duitkuPaymentReady(ctx, d, tenantID) {
+	if cfg, _ := loadDuitkuIntegration(ctx, d, tenantID); duitkuCredentialsReady(d, cfg) {
 		out = append(out, payOptionView{
 			Provider:    payment.ProviderDuitku,
 			Label:       "Duitku Payment Gateway",
 			Description: "Popup pembayaran Duitku (VA, e-wallet, retail, QRIS)",
 			Kind:        "popup",
+			Sandbox:     cfg.Sandbox,
 		})
 	}
-	if dokuPaymentReady(ctx, d, tenantID) {
+	if cfg, _ := loadDokuIntegration(ctx, d, tenantID); dokuCredentialsReady(d, cfg) {
 		out = append(out, payOptionView{
 			Provider:    payment.ProviderDoku,
 			Label:       "DOKU",
 			Description: "Halaman bayar DOKU (VA, kartu, e-wallet, QRIS, retail)",
 			Kind:        "redirect",
+			Sandbox:     cfg.Sandbox,
 		})
 	}
 	return out
 }
 
-func duitkuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
-	cfg, _ := loadDuitkuIntegration(ctx, d, tenantID)
+func duitkuCredentialsReady(d *Deps, cfg duitkuIntegrationStored) bool {
 	if !cfg.Enabled {
 		return false
 	}
 	return strings.TrimSpace(cfg.MerchantCode) != "" && decryptSecret(d, cfg.APIKey) != ""
 }
 
-func dokuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
-	cfg, _ := loadDokuIntegration(ctx, d, tenantID)
+func dokuCredentialsReady(d *Deps, cfg dokuIntegrationStored) bool {
 	if !cfg.Enabled {
 		return false
 	}
 	return strings.TrimSpace(cfg.ClientID) != "" && decryptSecret(d, cfg.SecretKey) != ""
+}
+
+func duitkuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
+	cfg, _ := loadDuitkuIntegration(ctx, d, tenantID)
+	return duitkuCredentialsReady(d, cfg)
+}
+
+func duitkuSandboxReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
+	cfg, _ := loadDuitkuIntegration(ctx, d, tenantID)
+	return cfg.Sandbox && duitkuCredentialsReady(d, cfg)
+}
+
+func dokuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
+	cfg, _ := loadDokuIntegration(ctx, d, tenantID)
+	return dokuCredentialsReady(d, cfg)
 }
 
 // resolvePaymentProvider resolves the gateway for the provider from the

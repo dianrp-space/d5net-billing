@@ -215,7 +215,7 @@ export function InvoicesPage() {
 
   const issueInvoice = useMutation({
     mutationFn: () =>
-      api<{ invoice_number: string; total_amount: number }>("/api/invoices", {
+      api<{ invoice_number: string; total_amount: number; whatsapp_queued?: boolean }>("/api/invoices", {
         method: "POST",
         body: JSON.stringify({
           customer_id: customerId,
@@ -232,7 +232,11 @@ export function InvoicesPage() {
     onSuccess: (res) => {
       closeIssue();
       qc.invalidateQueries({ queryKey: ["invoices"] });
-      void toastSuccess(`Tagihan ${res.invoice_number} diterbitkan (${formatRp(res.total_amount)})`);
+      void toastSuccess(
+        res.whatsapp_queued
+          ? `Tagihan ${res.invoice_number} diterbitkan (${formatRp(res.total_amount)}). Notifikasi WhatsApp diantrikan.`
+          : `Tagihan ${res.invoice_number} diterbitkan (${formatRp(res.total_amount)})`,
+      );
     },
     onError: (e: Error) => {
       setIssueErr(e.message);
@@ -540,6 +544,9 @@ export function InvoicesPage() {
               Batal
             </Button>
           </div>
+          <p className="text-xs text-[var(--muted)]">
+            Jika nomor WA pelanggan terisi, notifikasi tagihan baru diantrikan otomatis (template “Tagihan baru”).
+          </p>
           {issueErr && <p className="text-sm text-[var(--danger)]">{issueErr}</p>}
         </form>
       </FormDialog>

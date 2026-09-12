@@ -3163,10 +3163,11 @@ type manualInvoiceInput struct {
 }
 
 type manualInvoiceOutput struct {
-	ID            xid.ID `json:"id"`
-	InvoiceNumber string `json:"invoice_number"`
-	TotalAmount   int64  `json:"total_amount"`
-	DueDate       string `json:"due_date"`
+	ID             xid.ID `json:"id"`
+	InvoiceNumber  string `json:"invoice_number"`
+	TotalAmount    int64  `json:"total_amount"`
+	DueDate        string `json:"due_date"`
+	WhatsAppQueued bool   `json:"whatsapp_queued"`
 }
 
 func registerInvoices(api huma.API, d *Deps) {
@@ -3259,8 +3260,18 @@ func registerInvoices(api huma.API, d *Deps) {
 		if err := d.Store.CreateInvoice(ctx, inv, items); err != nil {
 			return nil, httpx.Internal(err)
 		}
+		waQueued := false
+		if d.Notify != nil && strings.TrimSpace(cust.Phone) != "" {
+			planName := d.Store.PlanNameForSubscription(ctx, tid, inv.SubscriptionID)
+			itemName := store.NotificationItemName(planName, items)
+			if err := d.Notify.SendInvoiceIssued(ctx, tid, cust.Phone, cust.FullName, planName, itemName, invNum, total, dueDate.Format("02/01/2006")); err != nil {
+				slog.Warn("manual invoice whatsapp", "invoice", invNum, "err", err)
+			} else {
+				waQueued = true
+			}
+		}
 		auditEvent(ctx, d, AuditInvoiceIssue, "invoice", &inv.ID, map[string]any{
-			"invoice_number": invNum, "total": total, "items": len(items),
+			"invoice_number": invNum, "total": total, "items": len(items), "whatsapp_queued": waQueued,
 		})
 		out := &struct {
 			Body manualInvoiceOutput
@@ -3269,6 +3280,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		out.Body.InvoiceNumber = invNum
 		out.Body.TotalAmount = total
 		out.Body.DueDate = dueDate.Format("2006-01-02")
+		out.Body.WhatsAppQueued = waQueued
 		return out, nil
 	})
 	huma.Register(api, huma.Operation{
@@ -3349,7 +3361,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		inv, _, err := d.Store.GetInvoice(ctx, tid, input.ID)
+		inv, items, err := d.Store.GetInvoice(ctx, tid, input.ID)
 		if err != nil {
 			return nil, httpx.NotFound("invoice not found")
 		}
@@ -3376,7 +3388,8 @@ func registerInvoices(api huma.API, d *Deps) {
 		cust, _ := d.Store.GetCustomer(ctx, tid, inv.CustomerID)
 		if cust != nil {
 			planName := d.Store.PlanNameForSubscription(ctx, tid, inv.SubscriptionID)
-			_ = d.Notify.SendPaymentConfirmation(ctx, tid, cust.Phone, cust.FullName, planName, inv.InvoiceNumber, amount)
+			itemName := store.NotificationItemName(planName, items)
+			_ = d.Notify.SendPaymentConfirmation(ctx, tid, cust.Phone, cust.FullName, planName, itemName, inv.InvoiceNumber, amount)
 		}
 		resumeAfterInvoicePaid(ctx, d, tid, inv)
 		auditEvent(ctx, d, AuditInvoicePay, "invoice", &inv.ID, map[string]any{
@@ -5167,6 +5180,38 @@ func registerPortal(api huma.API, d *Deps) {
 			returnURL = origin
 		}
 		pi, err := checkoutInvoice(ctx, d, ten.ID, inv, providerName, returnURL, origin)
+		if err != nil {
+			return nil, err
+		}
+		return &struct{ Body store.PaymentIntent }{Body: *pi}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-invoice-sandbox-pay", Method: http.MethodPost, Path: "/api/portal/invoices/{id}/sandbox-pay",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+	}) (*struct{ Body store.PaymentIntent }, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		inv, _, err := d.Store.GetInvoice(ctx, ten.ID, input.ID)
+		if err != nil {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		allowed := false
+		for _, c := range custs {
+			if c.ID == inv.CustomerID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		pi, err := simulateSandboxInvoicePayment(ctx, d, ten.ID, inv)
 		if err != nil {
 			return nil, err
 		}
