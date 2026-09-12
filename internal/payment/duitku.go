@@ -180,8 +180,8 @@ func (p *DuitkuProvider) CreateIntent(ctx context.Context, req IntentRequest) (*
 		Amount:        req.Amount,
 		PayableAmount: req.Amount,
 		Metadata: map[string]any{
-			// Reference + environment let the client launch the Duitku POP popup
-			// (checkout.process) with the right SDK instead of a redirect.
+			// Reference + environment untuk korelasi/dukungan (portal membuka
+			// paymentUrl sebagai halaman penuh, bukan popup checkout.process).
 			"reference":      strings.TrimSpace(out.Reference),
 			"duitku_sandbox": p.Sandbox,
 		},

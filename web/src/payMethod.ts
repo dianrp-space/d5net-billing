@@ -23,7 +23,7 @@ export const PORTAL_PAY_METHODS: PayMethodDef[] = [
   {
     id: PAY_METHOD_DUITKU,
     label: "Duitku Payment Gateway",
-    description: "Popup pembayaran Duitku (VA, e-wallet, retail, QRIS)",
+    description: "Halaman pembayaran Duitku (VA, e-wallet, retail, QRIS)",
   },
   {
     id: PAY_METHOD_DOKU,

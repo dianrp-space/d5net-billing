@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
-import { openDuitkuPopup } from "./duitkuPop";
 import { IconExternalLink, IconQrCode } from "./icons";
 import {
   getSavedPayMethod,
@@ -128,7 +127,7 @@ export function PortalPayHost({
   onClose: () => void;
   onPaid?: () => void;
 }) {
-  const [step, setStep] = useState<"method" | "qris" | "duitku">("method");
+  const [step, setStep] = useState<"method" | "qris">("method");
   const [intent, setIntent] = useState<QrisIntent | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -153,7 +152,7 @@ export function PortalPayHost({
   // Langsung bayar tanpa konfirmasi tambahan: 1 PG aktif → otomatis jalan;
   // beberapa PG + ada metode tersimpan → pakai yang tersimpan. Selain itu
   // tampilkan opsi, dan setiap opsi yang diklik langsung memproses bayar.
-  // Sandbox Duitku: jangan auto-buka popup supaya tester bisa tandai lunas lokal.
+  // Sandbox Duitku: jangan auto-redirect supaya tester bisa tandai lunas lokal.
   useEffect(() => {
     if (!invoice?.id || step !== "method" || busy) return;
     if (autoTriedFor.current === invoice.id) return;
@@ -182,14 +181,13 @@ export function PortalPayHost({
           return_url: portalPaymentReturnURL(),
         }),
       });
-      if (method === PAY_METHOD_DUITKU) {
-        await launchDuitku(next);
-        return;
-      }
-      if (method === PAY_METHOD_DOKU) {
+      if (method === PAY_METHOD_DUITKU || method === PAY_METHOD_DOKU) {
+        // Halaman penuh di tab yang sama (seperti DOKU) agar background/custom
+        // yang dipasang di dashboard PG terlihat. Kembali via return_url
+        // (?payment=success) lalu dialog sukses tampil otomatis.
         const url = String(next.checkout_url || "").trim();
         if (!url) {
-          throw new Error("Link pembayaran DOKU kosong");
+          throw new Error(`Link pembayaran ${method === PAY_METHOD_DOKU ? "DOKU" : "Duitku"} kosong`);
         }
         window.location.assign(url);
         return;
@@ -222,32 +220,6 @@ export function PortalPayHost({
       void toastError(msg);
     } finally {
       setBusy(false);
-    }
-  }
-
-  // Duitku POP renders its own overlay popup. Our Radix dialogs are modal and
-  // block outside pointer events, so we close them first and hand control to the
-  // Duitku SDK (checkout.process). Falls back to the hosted paymentUrl.
-  async function launchDuitku(next: QrisIntent) {
-    const meta = (next.metadata ?? {}) as Record<string, unknown>;
-    const reference = String(meta.reference || meta.transaction_id || "").trim();
-    const sandbox = meta.duitku_sandbox === true;
-    const url = String(next.checkout_url || "").trim();
-    setStep("duitku"); // hide our modals so the Duitku popup is clickable
-    if (!reference) {
-      if (url) window.open(url, "_blank", "noopener,noreferrer");
-      onClose();
-      return;
-    }
-    try {
-      await openDuitkuPopup(reference, sandbox, {
-        onSuccess: () => onPaid?.(),
-        onError: () => void toastError("Pembayaran Duitku gagal atau dibatalkan."),
-        onClose: () => onClose(),
-      });
-    } catch {
-      if (url) window.open(url, "_blank", "noopener,noreferrer");
-      onClose();
     }
   }
 

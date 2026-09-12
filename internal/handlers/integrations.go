@@ -994,8 +994,8 @@ func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payO
 		out = append(out, payOptionView{
 			Provider:    payment.ProviderDuitku,
 			Label:       "Duitku Payment Gateway",
-			Description: "Popup pembayaran Duitku (VA, e-wallet, retail, QRIS)",
-			Kind:        "popup",
+			Description: "Halaman pembayaran Duitku (VA, e-wallet, retail, QRIS)",
+			Kind:        "redirect",
 			Sandbox:     cfg.Sandbox,
 		})
 	}
