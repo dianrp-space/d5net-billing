@@ -645,11 +645,12 @@ function InvoiceFormPreview({
         Pratinjau status lunas (watermark)
       </label>
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-white text-[13px] leading-relaxed text-slate-800 shadow-sm">
+      <div className="h-1.5 bg-[#5a5a40]" aria-hidden />
       <div className="relative mx-auto max-w-[560px] p-6">
         {paidPreview ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden" aria-hidden>
             <span
-              className="select-none text-[84px] font-bold tracking-[0.28em] text-blue-800/15"
+              className="select-none text-[96px] font-bold tracking-[0.28em] text-blue-800/15"
               style={{ transform: "rotate(-35deg)" }}
             >
               LUNAS
@@ -679,11 +680,11 @@ function InvoiceFormPreview({
             </div>
           </div>
           <div className="shrink-0 text-right">
-            <p className="text-xl font-bold tracking-wide text-slate-900">INVOICE</p>
+            <p className="text-xl font-bold tracking-wide text-[#5a5a40]">INVOICE</p>
             <p className="text-[11px] text-slate-500">No: {invoiceNo}</p>
             <p className="text-[11px] text-slate-500">Terbit: {issuedAt}</p>
             <p className="text-[11px] text-slate-500">Jatuh tempo: {dueAt}</p>
-            <p className="text-[11px] font-semibold text-slate-700">
+            <p className={`text-[11px] font-semibold ${paidPreview ? "text-[#5a5a40]" : "text-slate-700"}`}>
               Status: {paidPreview ? "LUNAS" : "BELUM DIBAYAR"}
             </p>
           </div>
@@ -692,29 +693,29 @@ function InvoiceFormPreview({
         <div className="my-4 border-t border-slate-200" />
 
         {/* Bill to */}
-        <p className="text-[10px] font-semibold tracking-wide text-slate-500">DITAGIHKAN KEPADA</p>
+        <p className="text-[10px] font-semibold tracking-wide text-[#5a5a40]">DITAGIHKAN KEPADA</p>
         <p className="mt-1 font-semibold text-slate-900">Budi Santoso</p>
         <p className="text-[11px] text-slate-500">Kode: D5N-2026090001</p>
         <p className="text-[11px] text-slate-500">Jl. Kenanga No. 5</p>
         <p className="text-[11px] text-slate-500">Telp: 0812-3456-7890</p>
 
         {/* Items */}
-        <table className="mt-4 w-full border-collapse text-[12px]" style={{ border: "1px solid #5180b8" }}>
+        <table className="mt-4 w-full border-collapse text-[12px]" style={{ border: "1px solid #d8d5cc" }}>
           <thead>
-            <tr className="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600">
-              <th className="border border-[#5180b8] px-2 py-1.5 text-left font-semibold">Deskripsi</th>
-              <th className="w-12 border border-[#5180b8] px-2 py-1.5 text-right font-semibold">Qty</th>
-              <th className="w-24 border border-[#5180b8] px-2 py-1.5 text-right font-semibold">Harga</th>
-              <th className="w-28 border border-[#5180b8] px-2 py-1.5 text-right font-semibold">Jumlah</th>
+            <tr className="bg-[#5a5a40] text-[10px] uppercase tracking-wide text-white">
+              <th className="border border-[#d8d5cc] px-2 py-1.5 text-left font-semibold">Deskripsi</th>
+              <th className="w-12 border border-[#d8d5cc] px-2 py-1.5 text-right font-semibold">Qty</th>
+              <th className="w-24 border border-[#d8d5cc] px-2 py-1.5 text-right font-semibold">Harga</th>
+              <th className="w-28 border border-[#d8d5cc] px-2 py-1.5 text-right font-semibold">Jumlah</th>
             </tr>
           </thead>
           <tbody>
             {PREVIEW_ITEMS.map((it, i) => (
-              <tr key={i}>
-                <td className="border border-[#5180b8] px-2 py-1.5">{it.desc}</td>
-                <td className="border border-[#5180b8] px-2 py-1.5 text-right">{it.qty}</td>
-                <td className="border border-[#5180b8] px-2 py-1.5 text-right">{formatRp(it.price)}</td>
-                <td className="border border-[#5180b8] px-2 py-1.5 text-right">{formatRp(it.amount)}</td>
+              <tr key={i} className={i % 2 === 1 ? "bg-slate-50" : undefined}>
+                <td className="border border-[#d8d5cc] px-2 py-1.5">{it.desc}</td>
+                <td className="border border-[#d8d5cc] px-2 py-1.5 text-right">{it.qty}</td>
+                <td className="border border-[#d8d5cc] px-2 py-1.5 text-right">{formatRp(it.price)}</td>
+                <td className="border border-[#d8d5cc] px-2 py-1.5 text-right">{formatRp(it.amount)}</td>
               </tr>
             ))}
           </tbody>
@@ -730,16 +731,28 @@ function InvoiceFormPreview({
             <span>Pajak</span>
             <span>{formatRp(PREVIEW_TAX)}</span>
           </div>
-          <div className="mt-1 flex justify-between border-t border-slate-300 py-1 font-bold text-slate-900">
+          <div className="mt-1 flex justify-between border-t border-[#5a5a40] py-1 font-bold text-slate-900">
             <span>TOTAL</span>
             <span>{formatRp(PREVIEW_TOTAL)}</span>
           </div>
+          {paidPreview ? (
+            <>
+              <div className="flex justify-between py-0.5 text-slate-600">
+                <span>Terbayar</span>
+                <span>{formatRp(PREVIEW_TOTAL)}</span>
+              </div>
+              <div className="flex justify-between py-0.5 font-bold text-slate-900">
+                <span>Sisa tagihan</span>
+                <span>{formatRp(0)}</span>
+              </div>
+            </>
+          ) : null}
         </div>
 
         {/* Payment instructions */}
         {payLines.length ? (
           <div className="mt-5">
-            <p className="text-[10px] font-semibold tracking-wide text-slate-500">CARA PEMBAYARAN</p>
+            <p className="text-[10px] font-semibold tracking-wide text-[#5a5a40]">CARA PEMBAYARAN</p>
             {payLines.map((l, i) => (
               <p key={`pay-${i}`} className="text-[11px] text-slate-600">
                 {l}

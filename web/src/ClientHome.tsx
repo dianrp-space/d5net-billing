@@ -678,6 +678,7 @@ export function ClientHome({
     const unpaid = isInvoiceUnpaid(i);
     const paidSomething = i.status === "paid" || (i.paid_amount ?? 0) > 0;
     const itemLabel = (i.items_summary || "").trim() || "—";
+    const paidWhen = i.paid_at ? new Date(i.paid_at).toLocaleString("id-ID") : "—";
     const action = (
       <span className="flex flex-wrap items-center justify-end gap-1.5">
         {unpaid ? (
@@ -707,6 +708,7 @@ export function ClientHome({
           itemLabel,
           formatRp(i.total_amount),
           i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
+          paidWhen,
           invoiceStatusLabel(i.status),
           action,
         ]
@@ -715,6 +717,7 @@ export function ClientHome({
           itemLabel,
           formatRp(i.total_amount),
           i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
+          paidWhen,
           invoiceStatusLabel(i.status),
           action,
         ];
@@ -1062,7 +1065,7 @@ export function ClientHome({
             <Section title="Tagihan">
               <div className="portal-table-desktop">
                 <Table
-                  columns={multi ? ["Akun", "Nomor", "Item", "Total", "Jatuh tempo", "Status", "Aksi"] : ["Nomor", "Item", "Total", "Jatuh tempo", "Status", "Aksi"]}
+                  columns={multi ? ["Akun", "Nomor", "Item", "Total", "Jatuh tempo", "Dibayar", "Status", "Aksi"] : ["Nomor", "Item", "Total", "Jatuh tempo", "Dibayar", "Status", "Aksi"]}
                   rows={invoiceRows}
                 />
               </div>
@@ -1086,6 +1089,7 @@ export function ClientHome({
                         <p className="text-base font-bold">{formatRp(i.total_amount)}</p>
                         <p className="text-xs text-[var(--muted)]">
                           Jatuh tempo {i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—"}
+                          {i.paid_at ? ` · Dibayar ${new Date(i.paid_at).toLocaleString("id-ID")}` : ""}
                         </p>
                         <div className="flex flex-wrap items-center gap-1.5">
                           {unpaid ? (

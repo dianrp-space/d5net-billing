@@ -56,6 +56,8 @@ export type ClientPortalData = {
     paid_amount?: number;
     status: string;
     due_date?: string;
+    paid_at?: string | null;
+    issued_at?: string | null;
     customer_name?: string;
     customer_code?: string;
     items_summary?: string;

@@ -640,14 +640,14 @@ func (c *canvas) drawJPEG(x, y, w, h float64) {
 
 func (c *canvas) paidWatermark(cx, cy, contentH float64) {
 	c.watermark = true
-	size := 56.0
+	size := 64.0
 	if contentH > 0 && contentH < 520 {
 		size = contentH * 0.11
-		if size < 40 {
-			size = 40
+		if size < 44 {
+			size = 44
 		}
-		if size > 60 {
-			size = 60
+		if size > 68 {
+			size = 68
 		}
 	}
 	const (
@@ -690,7 +690,7 @@ func (c *canvas) build() []byte {
 	}
 	if c.watermark {
 		gs = fmt.Sprintf(" /ExtGState << /GS1 %d 0 R >>", next)
-		objects = append(objects, []byte("<< /Type /ExtGState /ca 0.08 /CA 0.08 >>"))
+		objects = append(objects, []byte("<< /Type /ExtGState /ca 0.14 /CA 0.14 >>"))
 	}
 	resources := fmt.Sprintf("<< %s%s%s >>", fontRes, xobj, gs)
 	mb := c.mediaBottom

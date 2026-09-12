@@ -4910,8 +4910,21 @@ func collectPortalInvoices(ctx context.Context, d *Deps, tenantID xid.ID, byID m
 			}
 		}
 	}
+	// Terbaru di atas: urutkan berdasarkan waktu terbit (fallback jatuh tempo
+	// bila issued_at kosong).
 	sort.Slice(list, func(i, j int) bool {
-		return list[i].DueDate.After(list[j].DueDate)
+		ti := list[i].DueDate
+		if list[i].IssuedAt != nil {
+			ti = *list[i].IssuedAt
+		}
+		tj := list[j].DueDate
+		if list[j].IssuedAt != nil {
+			tj = *list[j].IssuedAt
+		}
+		if ti.Equal(tj) {
+			return list[i].InvoiceNumber > list[j].InvoiceNumber
+		}
+		return ti.After(tj)
 	})
 	return list
 }
