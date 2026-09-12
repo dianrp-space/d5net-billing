@@ -156,7 +156,7 @@ func (p *DokuProvider) CreateIntent(ctx context.Context, req IntentRequest) (*In
 			"amount":         req.Amount,
 			"invoice_number": orderID,
 			"currency":       "IDR",
-			"callback_url":   strings.TrimSpace(req.ReturnURL),
+			"callback_url":   firstNonEmpty(strings.TrimSpace(req.CallbackURL), strings.TrimSpace(req.ReturnURL)),
 			"language":       "ID",
 			"auto_redirect":  true,
 		},

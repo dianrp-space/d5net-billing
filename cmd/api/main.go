@@ -78,6 +78,7 @@ func main() {
 	}
 	handlers.RegisterAll(srv.API, deps)
 	handlers.MountStaticAndUploads(srv.Router, deps)
+	handlers.MountPaymentReturnPages(srv.Router)
 	srv.Router.Get("/events/stream", monitor.SSEHandler(st))
 
 	// Live OpenAPI from huma (not a placeholder stub).

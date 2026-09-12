@@ -211,7 +211,6 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 func MountStaticAndUploads(r chi.Router, d *Deps) {
 	_ = os.MkdirAll(d.Config.UploadDir, 0o755)
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir(d.Config.UploadDir))))
-
 	r.Post("/api/settings/branding/logo", uploadHandler(d, "logo"))
 	r.Post("/api/settings/branding/favicon", uploadHandler(d, "favicon"))
 	r.Post("/api/settings/branding/map-pop", uploadHandler(d, "map-pop"))
@@ -226,6 +225,16 @@ func MountStaticAndUploads(r chi.Router, d *Deps) {
 	r.Post("/api/portal/account/photo", portalCustomerPhotoUpload(d))
 	r.Post("/api/me/avatar", meAvatarUpload(d))
 	MountDBBackupRoutes(r, d)
+}
+
+// MountPaymentReturnPages menangani browser customer yang di-redirect PG ke
+// callback URL via GET. DOKU memakai callback_url ganda: notifikasi server
+// (POST, ditangani webhook huma) sekaligus redirect browser customer setelah
+// bayar. Arahkan ke dashboard portal; guard login meneruskan yang belum login.
+func MountPaymentReturnPages(r chi.Router) {
+	r.Get("/api/webhooks/payment/doku", func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, "/client/dashboard", http.StatusFound)
+	})
 }
 
 // portalCustomerPhotoUpload lets a portal customer upload/remove their own

@@ -91,6 +91,31 @@ func TestDokuCreateIntent(t *testing.T) {
 	}
 }
 
+func TestDokuCallbackURLIsWebhookNotReturn(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":["SUCCESS"],"response":{"order":{"invoice_number":"INV-9"},"payment":{"url":"https://sandbox.doku.com/x","token_id":"t","expired_date":"20260911235959"}}}`))
+	}))
+	defer srv.Close()
+	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", "", "", "", "", true, 60)
+	p.baseOverride = srv.URL
+	_, err := p.CreateIntent(t.Context(), IntentRequest{
+		Amount:          50000,
+		MerchantOrderID: "INV-9",
+		ReturnURL:       "https://isp.example.id/client/dashboard",
+		CallbackURL:     "https://isp.example.id/api/webhooks/payment/doku",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, _ := gotBody["order"].(map[string]any)
+	if order["callback_url"] != "https://isp.example.id/api/webhooks/payment/doku" {
+		t.Fatalf("callback_url = %v (notifikasi lunas tidak akan sampai)", order["callback_url"])
+	}
+}
+
 func TestDokuCreateIntentError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
