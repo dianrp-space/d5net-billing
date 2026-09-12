@@ -634,6 +634,7 @@ export function ClientHome({
   const invoiceRows = invoices.map((i) => {
     const unpaid = isInvoiceUnpaid(i);
     const paidSomething = i.status === "paid" || (i.paid_amount ?? 0) > 0;
+    const itemLabel = (i.items_summary || "").trim() || "—";
     const action = (
       <span className="flex flex-wrap items-center justify-end gap-1.5">
         {unpaid ? (
@@ -660,6 +661,7 @@ export function ClientHome({
       ? [
           accountLabel(i.customer_code, i.customer_name),
           i.invoice_number,
+          itemLabel,
           formatRp(i.total_amount),
           i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
           invoiceStatusLabel(i.status),
@@ -667,6 +669,7 @@ export function ClientHome({
         ]
       : [
           i.invoice_number,
+          itemLabel,
           formatRp(i.total_amount),
           i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
           invoiceStatusLabel(i.status),
@@ -679,6 +682,7 @@ export function ClientHome({
       ? [
           accountLabel(p.customer_code, p.customer_name),
           p.invoice_number || "—",
+          (p.items_summary || "").trim() || "—",
           p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—",
           formatRp(p.amount),
           paymentMethodLabel(p.method),
@@ -686,6 +690,7 @@ export function ClientHome({
         ]
       : [
           p.invoice_number || "—",
+          (p.items_summary || "").trim() || "—",
           p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—",
           formatRp(p.amount),
           paymentMethodLabel(p.method),
@@ -958,11 +963,9 @@ export function ClientHome({
                             {subscriptionStatusLabel(s.status)}
                           </p>
                         </div>
-                        {canChangePortalPlan(s.status) && s.id ? (
-                          <button type="button" className="btn shrink-0" onClick={() => openChangePlan(s)}>
-                            Ganti paket
-                          </button>
-                        ) : null}
+                        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+                          Paket Anda
+                        </span>
                       </article>
                     ))}
                   </div>
@@ -997,7 +1000,7 @@ export function ClientHome({
             <Section title="Tagihan">
               <div className="portal-table-desktop">
                 <Table
-                  columns={multi ? ["Akun", "Nomor", "Total", "Jatuh tempo", "Status", "Aksi"] : ["Nomor", "Total", "Jatuh tempo", "Status", "Aksi"]}
+                  columns={multi ? ["Akun", "Nomor", "Item", "Total", "Jatuh tempo", "Status", "Aksi"] : ["Nomor", "Item", "Total", "Jatuh tempo", "Status", "Aksi"]}
                   rows={invoiceRows}
                 />
               </div>
@@ -1014,6 +1017,9 @@ export function ClientHome({
                           <p className="text-xs text-[var(--muted)]">{invoiceStatusLabel(i.status)}</p>
                         </div>
                         {multi ? <p className="text-xs text-[var(--muted)]">{accountLabel(i.customer_code, i.customer_name)}</p> : null}
+                        {(i.items_summary || "").trim() ? (
+                          <p className="text-xs text-[var(--muted)]">{i.items_summary}</p>
+                        ) : null}
                         <p className="text-base font-bold">{formatRp(i.total_amount)}</p>
                         <p className="text-xs text-[var(--muted)]">
                           Jatuh tempo {i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—"}
@@ -1035,7 +1041,7 @@ export function ClientHome({
             <Section title="Riwayat pembayaran">
               <div className="portal-table-desktop">
                 <Table
-                  columns={multi ? ["Akun", "Tagihan", "Tanggal", "Jumlah", "Metode", "Status"] : ["Tagihan", "Tanggal", "Jumlah", "Metode", "Status"]}
+                  columns={multi ? ["Akun", "Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status"] : ["Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status"]}
                   rows={paymentRows}
                 />
               </div>
@@ -1050,6 +1056,9 @@ export function ClientHome({
                         <p className="text-xs text-[var(--muted)]">{paymentStatusLabel(p.status)}</p>
                       </div>
                       {multi ? <p className="text-xs text-[var(--muted)]">{accountLabel(p.customer_code, p.customer_name)}</p> : null}
+                      {(p.items_summary || "").trim() ? (
+                        <p className="text-xs text-[var(--muted)]">{p.items_summary}</p>
+                      ) : null}
                       <p className="text-base font-bold">{formatRp(p.amount)}</p>
                       <p className="text-xs text-[var(--muted)]">
                         {paymentMethodLabel(p.method)}

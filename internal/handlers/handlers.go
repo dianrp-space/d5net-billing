@@ -4883,6 +4883,20 @@ func collectPortalInvoices(ctx context.Context, d *Deps, tenantID xid.ID, byID m
 	if list == nil {
 		list = []store.Invoice{}
 	}
+	// Lengkapi nama item yang ditagih agar portal bisa menampilkan "Paket X, Denda, ...".
+	if len(list) > 0 {
+		ids := make([]xid.ID, 0, len(list))
+		for _, inv := range list {
+			ids = append(ids, inv.ID)
+		}
+		if itemsMap, err := d.Store.InvoiceItemsMap(ctx, tenantID, ids); err == nil {
+			for i := range list {
+				items := itemsMap[list[i].ID]
+				list[i].Items = items
+				list[i].ItemsSummary = store.SummarizeInvoiceItems(items)
+			}
+		}
+	}
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].DueDate.After(list[j].DueDate)
 	})
@@ -4922,6 +4936,26 @@ func collectPortalPayments(ctx context.Context, d *Deps, tenantID xid.ID, custs 
 	}
 	if payments == nil {
 		payments = []store.Payment{}
+	}
+	// Lengkapi nama item dari invoice terkait agar riwayat pembayaran
+	// menampilkan apa yang dibayar, bukan cuma nomor invoice.
+	if len(payments) > 0 {
+		ids := make([]xid.ID, 0, len(payments))
+		for _, p := range payments {
+			if p.InvoiceID != nil && !xid.IsNil(*p.InvoiceID) {
+				ids = append(ids, *p.InvoiceID)
+			}
+		}
+		if itemsMap, err := d.Store.InvoiceItemsMap(ctx, tenantID, ids); err == nil {
+			for i := range payments {
+				if payments[i].InvoiceID == nil || xid.IsNil(*payments[i].InvoiceID) {
+					continue
+				}
+				items := itemsMap[*payments[i].InvoiceID]
+				payments[i].Items = items
+				payments[i].ItemsSummary = store.SummarizeInvoiceItems(items)
+			}
+		}
 	}
 	sort.Slice(payments, func(i, j int) bool {
 		ti := payments[i].PaidAt

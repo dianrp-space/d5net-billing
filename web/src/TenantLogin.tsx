@@ -58,6 +58,8 @@ export type ClientPortalData = {
     due_date?: string;
     customer_name?: string;
     customer_code?: string;
+    items_summary?: string;
+    items?: { description: string; quantity?: number; unit_price?: number; amount?: number }[];
   }[];
   payments?: {
     amount: number;
@@ -68,6 +70,8 @@ export type ClientPortalData = {
     customer_name?: string;
     customer_code?: string;
     invoice_number?: string;
+    items_summary?: string;
+    items?: { description: string; quantity?: number; unit_price?: number; amount?: number }[];
   }[];
   wallet_balance?: number;
   tenant_slug?: string;

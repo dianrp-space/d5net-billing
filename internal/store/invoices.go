@@ -12,24 +12,26 @@ import (
 )
 
 type Invoice struct {
-	ID             xid.ID     `json:"id"`
-	TenantID       xid.ID     `json:"tenant_id"`
-	CustomerID     xid.ID     `json:"customer_id"`
-	SubscriptionID *xid.ID    `json:"subscription_id,omitempty"`
-	InvoiceNumber  string     `json:"invoice_number"`
-	Subtotal       int64      `json:"subtotal"`
-	TaxAmount      int64      `json:"tax_amount"`
-	DiscountAmount int64      `json:"discount_amount"`
-	TotalAmount    int64      `json:"total_amount"`
-	PaidAmount     int64      `json:"paid_amount"`
-	Status         string     `json:"status"`
-	DueDate        time.Time  `json:"due_date"`
-	IssuedAt       *time.Time `json:"issued_at,omitempty"`
-	PaidAt         *time.Time `json:"paid_at,omitempty"`
-	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
-	CustomerName   string     `json:"customer_name,omitempty"`
-	CustomerCode   string     `json:"customer_code,omitempty"`
-	CustomerPhone  string     `json:"customer_phone,omitempty"`
+	ID             xid.ID        `json:"id"`
+	TenantID       xid.ID        `json:"tenant_id"`
+	CustomerID     xid.ID        `json:"customer_id"`
+	SubscriptionID *xid.ID       `json:"subscription_id,omitempty"`
+	InvoiceNumber  string        `json:"invoice_number"`
+	Subtotal       int64         `json:"subtotal"`
+	TaxAmount      int64         `json:"tax_amount"`
+	DiscountAmount int64         `json:"discount_amount"`
+	TotalAmount    int64         `json:"total_amount"`
+	PaidAmount     int64         `json:"paid_amount"`
+	Status         string        `json:"status"`
+	DueDate        time.Time     `json:"due_date"`
+	IssuedAt       *time.Time    `json:"issued_at,omitempty"`
+	PaidAt         *time.Time    `json:"paid_at,omitempty"`
+	DeletedAt      *time.Time    `json:"deleted_at,omitempty"`
+	CustomerName   string        `json:"customer_name,omitempty"`
+	CustomerCode   string        `json:"customer_code,omitempty"`
+	CustomerPhone  string        `json:"customer_phone,omitempty"`
+	ItemsSummary   string        `json:"items_summary,omitempty"`
+	Items          []InvoiceItem `json:"items,omitempty"`
 }
 
 type InvoiceItem struct {
@@ -41,20 +43,22 @@ type InvoiceItem struct {
 }
 
 type Payment struct {
-	ID            xid.ID     `json:"id"`
-	TenantID      xid.ID     `json:"tenant_id"`
-	CustomerID    xid.ID     `json:"customer_id"`
-	InvoiceID     *xid.ID    `json:"invoice_id,omitempty"`
-	Amount        int64      `json:"amount"`
-	Method        string     `json:"method"`
-	Reference     *string    `json:"reference,omitempty"`
-	Status        string     `json:"status"`
-	PaidAt        *time.Time `json:"paid_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
-	CustomerName  string     `json:"customer_name,omitempty"`
-	CustomerCode  string     `json:"customer_code,omitempty"`
-	InvoiceNumber string     `json:"invoice_number,omitempty"`
+	ID            xid.ID        `json:"id"`
+	TenantID      xid.ID        `json:"tenant_id"`
+	CustomerID    xid.ID        `json:"customer_id"`
+	InvoiceID     *xid.ID       `json:"invoice_id,omitempty"`
+	Amount        int64         `json:"amount"`
+	Method        string        `json:"method"`
+	Reference     *string       `json:"reference,omitempty"`
+	Status        string        `json:"status"`
+	PaidAt        *time.Time    `json:"paid_at,omitempty"`
+	CreatedAt     time.Time     `json:"created_at"`
+	DeletedAt     *time.Time    `json:"deleted_at,omitempty"`
+	CustomerName  string        `json:"customer_name,omitempty"`
+	CustomerCode  string        `json:"customer_code,omitempty"`
+	InvoiceNumber string        `json:"invoice_number,omitempty"`
+	ItemsSummary  string        `json:"items_summary,omitempty"`
+	Items         []InvoiceItem `json:"items,omitempty"`
 }
 
 func (s *Store) CreateInvoice(ctx context.Context, inv *Invoice, items []InvoiceItem) error {
@@ -688,6 +692,72 @@ func (s *Store) listInvoiceItems(ctx context.Context, invoiceID xid.ID) ([]Invoi
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// InvoiceItemsMap mengambil item untuk banyak invoice sekaligus (untuk portal).
+// Mengembalikan map invoiceID -> items. Invoice tanpa item dipetakan ke slice kosong.
+func (s *Store) InvoiceItemsMap(ctx context.Context, tenantID xid.ID, invoiceIDs []xid.ID) (map[xid.ID][]InvoiceItem, error) {
+	out := map[xid.ID][]InvoiceItem{}
+	if len(invoiceIDs) == 0 {
+		return out, nil
+	}
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	// pgx tidak expands slice otomatis untuk IN, jadi bangun query manual.
+	seen := map[xid.ID]bool{}
+	uniq := make([]xid.ID, 0, len(invoiceIDs))
+	for _, id := range invoiceIDs {
+		if xid.IsNil(id) || seen[id] {
+			continue
+		}
+		seen[id] = true
+		uniq = append(uniq, id)
+	}
+	if len(uniq) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(uniq)+1)
+	args = append(args, tenantID)
+	placeholders := make([]string, 0, len(uniq))
+	for i, id := range uniq {
+		args = append(args, id)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+		out[id] = []InvoiceItem{}
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT invoice_id, id, description, quantity, unit_price, amount
+		FROM invoice_items
+		WHERE tenant_id = $1 AND invoice_id IN (`+strings.Join(placeholders, ",")+`)
+		ORDER BY invoice_id, id
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var invID xid.ID
+		var item InvoiceItem
+		if err := rows.Scan(&invID, &item.ID, &item.Description, &item.Quantity, &item.UnitPrice, &item.Amount); err != nil {
+			return nil, err
+		}
+		out[invID] = append(out[invID], item)
+	}
+	return out, rows.Err()
+}
+
+// SummarizeInvoiceItems menggabungkan deskripsi item menjadi satu baris
+// ("Paket 10Mbps, Denda telat") untuk tampilan ringkas portal.
+func SummarizeInvoiceItems(items []InvoiceItem) string {
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		name := strings.TrimSpace(it.Description)
+		if name == "" {
+			continue
+		}
+		parts = append(parts, name)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (s *Store) SumOverdueUnpaidForSubscription(ctx context.Context, tenantID xid.ID, subscriptionID xid.ID) (int64, error) {	var sum int64
