@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { ListToolbar, matchesQuery } from "../ListToolbar";
-import { IconPencil, IconTrash, IconZap } from "../icons";
+import { IconPencil, IconSearch, IconTrash, IconZap } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
 import { FormDialog, IconButton, OnlineBadge, Section, SecretInput, StatusDialog, Table } from "../ui";
@@ -24,6 +24,7 @@ export function RoutersPage() {
     last_error?: string | null;
   };
   type ClusterOpt = { id: string; name: string; code: string };
+  type DriftRow = { username: string; field: string; desired: string; actual: string };
   type RouterForm = {
     name: string;
     address: string;
@@ -61,6 +62,36 @@ export function RoutersPage() {
   const [testMsg, setTestMsg] = useState<Record<string, { ok: boolean; text: string }>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
   const [popup, setPopup] = useState<{ ok: boolean; title: string; message: string } | null>(null);
+  const [driftRouter, setDriftRouter] = useState<RouterRow | null>(null);
+  const [driftList, setDriftList] = useState<DriftRow[] | null>(null);
+  const [driftErr, setDriftErr] = useState("");
+
+  function driftFieldLabel(field: string): string {
+    if (field === "session") return "Sesi / secret";
+    return field || "—";
+  }
+
+  function driftExpectedLabel(v: string): string {
+    if (v === "online-or-secret") return "online / secret ada";
+    return v || "—";
+  }
+
+  function driftActualLabel(v: string): string {
+    if (v === "missing") return "tidak ada di router";
+    return v || "—";
+  }
+
+  const driftMut = useMutation({
+    mutationFn: (r: RouterRow) =>
+      api<DriftRow[]>(`/api/routers/${r.id}/reconcile`, { method: "POST" }),
+    onMutate: (r) => {
+      setDriftRouter(r);
+      setDriftList(null);
+      setDriftErr("");
+    },
+    onSuccess: (rows) => setDriftList(Array.isArray(rows) ? rows : []),
+    onError: (e: Error) => setDriftErr(e.message || "Gagal cek drift"),
+  });
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["routers"] });
   const clusters = Array.isArray(clustersQ.data) ? clustersQ.data : [];
@@ -302,6 +333,14 @@ export function RoutersPage() {
               <IconButton label="Test koneksi" disabled={testingId === r.id} onClick={() => testMut.mutate(r.id)}>
                 <IconZap />
               </IconButton>
+              <IconButton
+                label="Cek drift (dry-run)"
+                title="Bandingkan langganan aktif vs kondisi router tanpa mengubah apa pun"
+                disabled={driftMut.isPending}
+                onClick={() => driftMut.mutate(r)}
+              >
+                <IconSearch />
+              </IconButton>
               <IconButton label="Edit router" onClick={() => startEdit(r)}>
                 <IconPencil />
               </IconButton>
@@ -335,6 +374,38 @@ export function RoutersPage() {
           Status ONLINE/OFFLINE dari hasil test koneksi (atau last seen / last error). Klik ikon petir untuk menguji.
         </p>
       )}
+
+      <FormDialog
+        open={Boolean(driftRouter)}
+        wide
+        title={driftRouter ? `Drift router "${driftRouter.name}"` : "Drift router"}
+        onClose={() => {
+          setDriftRouter(null);
+          setDriftList(null);
+          setDriftErr("");
+        }}
+      >
+        <p className="text-sm text-[var(--muted)]">
+          Dry-run: membandingkan langganan aktif dengan kondisi di router <strong>tanpa mengubah apa pun</strong>.
+        </p>
+        {driftMut.isPending ? (
+          <p className="text-sm text-[var(--muted)]">Memeriksa router…</p>
+        ) : driftErr ? (
+          <p className="text-sm text-[var(--danger)]">{driftErr}</p>
+        ) : driftList && driftList.length === 0 ? (
+          <p className="text-sm font-medium text-[var(--ok)]">Tidak ada drift. Semua langganan aktif cocok.</p>
+        ) : driftList ? (
+          <Table
+            columns={["Username", "Bagian", "Seharusnya", "Kondisi"]}
+            rows={driftList.map((d) => [
+              d.username || "—",
+              driftFieldLabel(d.field),
+              driftExpectedLabel(d.desired),
+              driftActualLabel(d.actual),
+            ])}
+          />
+        ) : null}
+      </FormDialog>
 
       <FormDialog open={dialogOpen} wide title={editId ? "Edit router" : "Tambah router"} onClose={closeForm}>
         <form

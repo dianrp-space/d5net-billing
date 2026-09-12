@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe, UserRound } from "lucide-react";
 import { api, apiUpload } from "./api";
@@ -679,14 +679,28 @@ function InvoiceFormPreview({
               {form.tax_id.trim() ? <p className="text-[11px] text-slate-500">NPWP: {form.tax_id.trim()}</p> : null}
             </div>
           </div>
-          <div className="shrink-0 text-right">
-            <p className="text-xl font-bold tracking-wide text-[#5a5a40]">INVOICE</p>
-            <p className="text-[11px] text-slate-500">No: {invoiceNo}</p>
-            <p className="text-[11px] text-slate-500">Terbit: {issuedAt}</p>
-            <p className="text-[11px] text-slate-500">Jatuh tempo: {dueAt}</p>
-            <p className={`text-[11px] font-semibold ${paidPreview ? "text-[#5a5a40]" : "text-slate-700"}`}>
-              Status: {paidPreview ? "LUNAS" : "BELUM DIBAYAR"}
-            </p>
+          <div className="shrink-0">
+            <p className="text-right text-xl font-bold tracking-wide text-[#5a5a40]">INVOICE</p>
+            <div className="my-1 border-t border-[#5a5a40]" aria-hidden />
+            <div className="grid w-[248px] grid-cols-[74px_1fr] gap-x-1.5 gap-y-0.5 text-[11px]">
+              {(
+                [
+                  ["Nomor", invoiceNo, "text-slate-800"],
+                  ["Terbit", issuedAt, "text-slate-800"],
+                  ["Jatuh tempo", dueAt, "text-slate-800"],
+                  [
+                    "Status",
+                    paidPreview ? "LUNAS" : "BELUM DIBAYAR",
+                    `font-semibold ${paidPreview ? "text-[#5a5a40]" : "text-slate-700"}`,
+                  ],
+                ] as [string, string, string][]
+              ).map(([label, value, cls]) => (
+                <Fragment key={label}>
+                  <span className="text-slate-500">{label}</span>
+                  <span className={`break-words ${cls}`}>{value}</span>
+                </Fragment>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -695,14 +709,14 @@ function InvoiceFormPreview({
         {/* Bill to */}
         <p className="text-[10px] font-semibold tracking-wide text-[#5a5a40]">DITAGIHKAN KEPADA</p>
         <p className="mt-1 font-semibold text-slate-900">Budi Santoso</p>
-        <p className="text-[11px] text-slate-500">Kode: D5N-2026090001</p>
+        <p className="text-[11px] text-slate-500">D5N-2026090001</p>
         <p className="text-[11px] text-slate-500">Jl. Kenanga No. 5</p>
-        <p className="text-[11px] text-slate-500">Telp: 0812-3456-7890</p>
+        <p className="text-[11px] text-slate-500">0812-3456-7890 · budi@mail.id</p>
 
         {/* Items */}
         <table className="mt-4 w-full border-collapse text-[12px]" style={{ border: "1px solid #d8d5cc" }}>
           <thead>
-            <tr className="bg-[#5a5a40] text-[10px] uppercase tracking-wide text-white">
+            <tr className="bg-[#5a5a40] text-[11px] text-white">
               <th className="border border-[#d8d5cc] px-2 py-1.5 text-left font-semibold">Deskripsi</th>
               <th className="w-12 border border-[#d8d5cc] px-2 py-1.5 text-right font-semibold">Qty</th>
               <th className="w-24 border border-[#d8d5cc] px-2 py-1.5 text-right font-semibold">Harga</th>
