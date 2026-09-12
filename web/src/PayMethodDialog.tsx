@@ -176,6 +176,17 @@ export function PortalPayHost({
     setSavedPayMethod(method, tenantSlug);
     setBusy(true);
     setError("");
+    // Halaman hosted (DOKU) tidak punya popup SDK. Buka tab kosong secara
+    // sinkron dari klik user agar tidak diblokir popup-blocker, lalu arahkan
+    // ke halaman PG begitu intent selesai dibuat.
+    let popup: Window | null = null;
+    if (method === PAY_METHOD_DOKU && typeof window !== "undefined") {
+      try {
+        popup = window.open("about:blank", "_blank");
+      } catch {
+        popup = null;
+      }
+    }
     try {
       const next = await api<QrisIntent>(`/api/portal/invoices/${invoice.id}/checkout`, {
         method: "POST",
@@ -189,9 +200,27 @@ export function PortalPayHost({
         await launchDuitku(next);
         return;
       }
+      if (method === PAY_METHOD_DOKU) {
+        const url = String(next.checkout_url || "").trim();
+        if (popup && !popup.closed) {
+          if (url) {
+            popup.location.href = url;
+            try {
+              popup.opener = null;
+            } catch {
+              /* abaikan */
+            }
+          } else {
+            void popup.close();
+          }
+        } else if (url) {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+      }
       setIntent(next);
       setStep("qris");
     } catch (err: unknown) {
+      if (popup && !popup.closed) void popup.close();
       const msg = err instanceof Error ? err.message : "Gagal membuat pembayaran";
       setError(msg);
       void toastError(msg);
