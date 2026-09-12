@@ -74,7 +74,7 @@ func main() {
 		Billing: billingEngine, Notify: notifySvc, Payments: payments,
 		Provisioner: provReg, Config: cfg, DBBackup: dbBackup,
 		Audit: audit.New(database.Pool),
-		Jobs: jobsWorker,
+		Jobs:  jobsWorker,
 	}
 	handlers.RegisterAll(srv.API, deps)
 	handlers.MountStaticAndUploads(srv.Router, deps)
