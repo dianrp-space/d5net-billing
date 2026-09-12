@@ -202,17 +202,33 @@ func (w *Worker) weeklyReconcile(ctx context.Context, tenantID xid.ID, now time.
 		if len(drifts) == 0 {
 			continue
 		}
+		// Cantumkan username yang drift agar alert bisa ditindaklanjuti
+		// (maks 10 nama + sisa hitungan).
+		names := make([]string, 0, len(drifts))
+		for _, dr := range drifts {
+			if n := strings.TrimSpace(dr.Username); n != "" {
+				names = append(names, n)
+			}
+		}
+		detail := strings.Join(names, ", ")
+		if len(names) > 10 {
+			detail = strings.Join(names[:10], ", ") + fmt.Sprintf(" (+%d lainnya)", len(names)-10)
+		}
+		if strings.TrimSpace(detail) == "" {
+			detail = "—"
+		}
 		et := "router"
 		eid := r.ID
 		_ = w.store.CreateAlert(ctx, &store.Alert{
 			TenantID: tenantID, Severity: "warn", Kind: "reconcile_drift",
 			Title:      fmt.Sprintf("Router drift: %s", r.Name),
-			Message:    fmt.Sprintf("%d drift(s) detected on dry-run reconcile for router %s", len(drifts), r.Name),
+			Message:    fmt.Sprintf("%d drift terdeteksi (dry-run) di router %s: %s", len(drifts), r.Name, detail),
 			EntityType: &et, EntityID: &eid,
 		})
 		_ = w.notify.QueueTenantTelegramOnce(ctx, tenantID, "reconcile_drift", notify.OpsWeekKey(r.ID, now),
 			notify.OpsMsg("reconcile", r.Name,
 				fmt.Sprintf("%d drift terdeteksi (dry-run)", len(drifts)),
+				fmt.Sprintf("User: %s", detail),
 			))
 	}
 }
