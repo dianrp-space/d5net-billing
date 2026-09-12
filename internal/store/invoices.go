@@ -710,6 +710,57 @@ func (s *Store) ListCustomerUnpaidInvoicesWithItems(ctx context.Context, tenantI
 	return list, rows.Err()
 }
 
+// LastPaidInvoice mengambil satu invoice lunas terakhir milik salah satu
+// customer (mis. untuk balasan bot /tagihan saat tidak ada tunggakan),
+// beserta item-nya. Mengembalikan ErrNotFound bila tidak ada yang lunas.
+func (s *Store) LastPaidInvoice(ctx context.Context, tenantID xid.ID, customerIDs []xid.ID) (*Invoice, []InvoiceItem, error) {
+	uniq := make([]xid.ID, 0, len(customerIDs))
+	seen := map[xid.ID]bool{}
+	for _, id := range customerIDs {
+		if xid.IsNil(id) || seen[id] {
+			continue
+		}
+		seen[id] = true
+		uniq = append(uniq, id)
+	}
+	if len(uniq) == 0 {
+		return nil, nil, ErrNotFound
+	}
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, nil, err
+	}
+	args := make([]any, 0, len(uniq)+1)
+	args = append(args, tenantID)
+	placeholders := make([]string, 0, len(uniq))
+	for i, id := range uniq {
+		args = append(args, id)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+	}
+	var inv Invoice
+	err := s.Pool.QueryRow(ctx, `
+		SELECT i.id, i.tenant_id, i.customer_id, i.subscription_id, i.invoice_number, i.subtotal, i.tax_amount,
+		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name
+		FROM invoices i JOIN customers c ON c.id = i.customer_id
+		WHERE i.tenant_id = $1 AND i.customer_id IN (`+strings.Join(placeholders, ",")+`)
+		  AND i.deleted_at IS NULL AND i.status = 'paid'
+		ORDER BY i.paid_at DESC NULLS LAST, i.issued_at DESC NULLS LAST, i.id DESC
+		LIMIT 1
+	`, args...).Scan(&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.SubscriptionID, &inv.InvoiceNumber,
+		&inv.Subtotal, &inv.TaxAmount, &inv.DiscountAmount, &inv.TotalAmount, &inv.PaidAmount,
+		&inv.Status, &inv.DueDate, &inv.IssuedAt, &inv.PaidAt, &inv.DeletedAt, &inv.CustomerName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	items, err := s.listInvoiceItems(ctx, inv.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &inv, items, nil
+}
+
 func (s *Store) listInvoiceItems(ctx context.Context, invoiceID xid.ID) ([]InvoiceItem, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id, description, quantity, unit_price, amount FROM invoice_items WHERE invoice_id = $1

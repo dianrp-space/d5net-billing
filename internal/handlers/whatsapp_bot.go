@@ -20,7 +20,8 @@ import (
 //
 // Incoming messages arrive from the GOWA gateway webhook (event "message").
 // The bot only reacts to /tagihan, /link, and /qris sent by a registered,
-// active customer that has an unpaid bill. Everything else stays silent.
+// active customer. /tagihan without an unpaid bill replies with the last
+// paid invoice instead. Everything else stays silent.
 // All replies are pushed straight from the configured bot number; the webhook
 // itself always answers with an empty reply.
 
@@ -299,6 +300,10 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 	}
 	unpaid := unpaidBotInvoices(ctx, d, tid, custs)
 	if len(unpaid) == 0 {
+		// /tagihan tanpa tunggakan: kirim invoice lunas terakhir + rinciannya.
+		if cmd == "/tagihan" && sendLastPaidInvoice(ctx, d, tid, client, phone, custs) {
+			return
+		}
 		all := collectPortalInvoices(ctx, d, tid, customerByID(custs))
 		if len(all) > 0 {
 			_ = client.SendText(ctx, phone,
@@ -367,6 +372,43 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 		}
 		_ = client.SendText(ctx, phone, text)
 	}
+}
+
+// sendLastPaidInvoice mengirim PDF invoice lunas terakhir beserta rinciannya
+// (nomor, item, jumlah, jatuh tempo, waktu dibayar, status) untuk balasan
+// /tagihan saat pelanggan tidak punya tunggakan. False bila tidak ada yang
+// lunas / gagal, agar pemanggil memakai teks fallback biasa.
+func sendLastPaidInvoice(ctx context.Context, d *Deps, tid xid.ID, client *wa.Client, phone string, custs []*store.Customer) bool {
+	ids := make([]xid.ID, 0, len(custs))
+	for _, c := range custs {
+		if c != nil {
+			ids = append(ids, c.ID)
+		}
+	}
+	inv, items, err := d.Store.LastPaidInvoice(ctx, tid, ids)
+	if err != nil {
+		return false
+	}
+	pdf := renderInvoicePDF(ctx, d, tid, inv, items)
+	if len(pdf) == 0 {
+		return false
+	}
+	planName := d.Store.PlanNameForSubscription(ctx, tid, inv.SubscriptionID)
+	item := store.SummarizeInvoiceItems(items)
+	if strings.TrimSpace(item) == "" {
+		item = store.NotificationItemName(planName, items)
+	}
+	paidWhen := "—"
+	if inv.PaidAt != nil && !inv.PaidAt.IsZero() {
+		paidWhen = inv.PaidAt.Format("02/01/2006 15:04")
+	}
+	caption := fmt.Sprintf("Tagihan terakhir (LUNAS)\nNo: %s\nItem: %s\nJumlah: %s\nJatuh tempo: %s\nDibayar: %s\nStatus: Lunas",
+		inv.InvoiceNumber, item, formatRupiahID(inv.TotalAmount), inv.DueDate.Format("02/01/2006"), paidWhen)
+	if err := client.SendFile(ctx, phone, caption, inv.InvoiceNumber+".pdf", "application/pdf", pdf); err != nil {
+		slog.Warn("wabot: kirim PDF lunas", "bot", BotName, "tenant_id", tid, "err", err)
+		return false
+	}
+	return true
 }
 
 // sendDokuQRIS mints a Direct-QRIS code via DOKU, records the payment intent,
