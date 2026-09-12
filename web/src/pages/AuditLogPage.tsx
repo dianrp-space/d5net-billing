@@ -29,6 +29,7 @@ const ACTION_LABELS: Record<string, string> = {
   "customer.delete": "Hapus pelanggan",
   "customer.dismantle": "Cabut pelanggan",
   "notification.broadcast": "Broadcast",
+  "notification.purge": "Hapus log notifikasi",
   "role.create": "Buat role",
   "role.update": "Ubah role",
   "role.delete": "Hapus role",
@@ -58,6 +59,8 @@ function metaSummary(meta?: Record<string, unknown> | null): string {
   push("audience");
   push("queued", "antre");
   push("batch_id", "batch");
+  push("retention_days", "retensi");
+  push("deleted", "dihapus");
   push("slug");
   push("role");
   push("is_active", "aktif");

@@ -38,6 +38,7 @@ const (
 	AuditCustomerDelete    = "customer.delete"
 	AuditCustomerDismantle = "customer.dismantle"
 	AuditBroadcast         = "notification.broadcast"
+	AuditNotifPurge        = "notification.purge"
 	AuditRoleCreate        = "role.create"
 	AuditRoleUpdate        = "role.update"
 	AuditRoleDelete        = "role.delete"

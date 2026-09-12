@@ -24,6 +24,10 @@ type JobScheduleSettings struct {
 	MonthlyReportDay       int   `json:"monthly_report_day"`  // 1–28
 	MonthlyReportHour      int   `json:"monthly_report_hour"` // 0–23 local
 	NotifyBatchSize        int   `json:"notify_batch_size"`
+	// NotifLogRetentionDays adalah retensi log notifikasi (riwayat) dalam hari.
+	// 0 = nonaktif (jangan hapus otomatis). Worker menghapus otomatis tiap hari
+	// hanya untuk log final (sent/failed); antrean pending tidak pernah dihapus.
+	NotifLogRetentionDays int `json:"notif_log_retention_days,omitempty"`
 	// CycleIntervalSeconds is how often this tenant's worker tasks run (billing, isolir, dunning).
 	CycleIntervalSeconds int `json:"cycle_interval_seconds"`
 	// PollerIntervalSeconds is how often the worker logs into MikroTik API for sessions/metrics.
@@ -44,6 +48,7 @@ func DefaultJobScheduleSettings() JobScheduleSettings {
 		MonthlyReportDay:       1,
 		MonthlyReportHour:      8,
 		NotifyBatchSize:        100,
+		NotifLogRetentionDays:  0, // nonaktif secara bawaan; user mengaktifkan dari Riwayat notifikasi
 		CycleIntervalSeconds:   60,
 		PollerIntervalSeconds:  300,
 	}
@@ -87,6 +92,13 @@ func NormalizeJobScheduleSettings(cfg JobScheduleSettings) JobScheduleSettings {
 	}
 	if cfg.NotifyBatchSize > 500 {
 		cfg.NotifyBatchSize = 500
+	}
+	// 0 = retensi otomatis nonaktif; selain itu clamp 1–365 hari.
+	if cfg.NotifLogRetentionDays < 0 {
+		cfg.NotifLogRetentionDays = def.NotifLogRetentionDays
+	}
+	if cfg.NotifLogRetentionDays > 365 {
+		cfg.NotifLogRetentionDays = 365
 	}
 	if cfg.CycleIntervalSeconds < 60 {
 		cfg.CycleIntervalSeconds = def.CycleIntervalSeconds

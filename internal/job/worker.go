@@ -160,6 +160,7 @@ func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.Jo
 	if cfg.DunningEnabled {
 		w.processDunning(ctx, t.ID, cfg.DunningOffsets)
 	}
+	w.processNotifRetention(ctx, t.ID, cfg.NotifLogRetentionDays)
 	if cfg.WeeklyReconcileEnabled {
 		w.weeklyReconcile(ctx, t.ID, now, cfg.WeeklyReconcileWeekday, cfg.WeeklyReconcileHour)
 	}
@@ -628,6 +629,27 @@ func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, offsets []
 			_ = w.notify.SendInvoiceReminder(ctx, tenantID, inv.CustomerPhone, inv.CustomerName, planName, itemName, inv.InvoiceNumber, inv.TotalAmount, due.Format("02/01/2006"))
 			break
 		}
+	}
+}
+
+// processNotifRetention menghapus otomatis log notifikasi final (sent/failed)
+// yang lebih tua dari retentionDays hari, sekali sehari per tenant.
+// retentionDays <= 0 berarti nonaktif. Antrean pending tidak pernah dihapus.
+func (w *Worker) processNotifRetention(ctx context.Context, tenantID xid.ID, retentionDays int) {
+	if retentionDays <= 0 {
+		return
+	}
+	ok, err := w.store.ClaimJob(ctx, tenantID, "notif_retention", time.Now().Format("2006-01-02"))
+	if err != nil || !ok {
+		return
+	}
+	n, err := w.store.PurgeNotificationHistory(ctx, tenantID, retentionDays)
+	if err != nil {
+		slog.Warn("notif retention purge failed", "tenant", tenantID, "err", err)
+		return
+	}
+	if n > 0 {
+		slog.Info("purged notification logs", "tenant", tenantID, "count", n, "retention_days", retentionDays)
 	}
 }
 

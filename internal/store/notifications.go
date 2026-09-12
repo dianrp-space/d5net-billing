@@ -210,3 +210,45 @@ func (s *Store) NotificationHistoryStats(ctx context.Context, tenantID xid.ID) (
 	`, tenantID).Scan(&pending, &sent, &failed)
 	return pending, sent, failed, err
 }
+
+// CountPurgeableNotificationHistory menghitung log final (sent/failed) yang lebih
+// tua dari retentionDays hari — dipakai untuk konfirmasi sebelum hapus.
+func (s *Store) CountPurgeableNotificationHistory(ctx context.Context, tenantID xid.ID, retentionDays int) (int64, error) {
+	if retentionDays < 1 {
+		return 0, fmt.Errorf("retensi minimal 1 hari")
+	}
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return 0, err
+	}
+	var n int64
+	err := s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM notification_queue
+		WHERE tenant_id = $1
+		  AND status IN ('sent','failed')
+		  AND created_at < NOW() - make_interval(days => $2)
+	`, tenantID, retentionDays).Scan(&n)
+	return n, err
+}
+
+// PurgeNotificationHistory menghapus log notifikasi final (sent/failed) yang lebih
+// tua dari retentionDays hari. Antrean pending tidak pernah dihapus agar
+// pengiriman yang belum diproses worker tetap aman.
+func (s *Store) PurgeNotificationHistory(ctx context.Context, tenantID xid.ID, retentionDays int) (int64, error) {
+	if retentionDays < 1 {
+		return 0, fmt.Errorf("retensi minimal 1 hari")
+	}
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return 0, err
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		DELETE FROM notification_queue
+		WHERE tenant_id = $1
+		  AND status IN ('sent','failed')
+		  AND created_at < NOW() - make_interval(days => $2)
+	`, tenantID, retentionDays)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}

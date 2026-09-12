@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { useConfirm } from "./confirm";
 import { IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { Button, IconButton, Input, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table } from "./ui";
@@ -475,6 +476,8 @@ function formatDateTime(s?: string | null): string {
 }
 
 function NotificationHistoryTab() {
+  const qc = useQueryClient();
+  const confirm = useConfirm();
   const [status, setStatus] = useState("");
   const [channel, setChannel] = useState("");
   const [search, setSearch] = useState("");
@@ -500,12 +503,114 @@ function NotificationHistoryTab() {
   const total = q.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / limit));
 
+  function clampRetentionDays(n: unknown): number {
+    const v = Math.floor(Number(n));
+    if (!Number.isFinite(v) || v < 0) return 0;
+    return Math.min(365, v);
+  }
+
+  const retentionQ = useQuery({
+    queryKey: ["notification-retention"],
+    queryFn: () => api<{ retention_days: number }>("/api/notifications/retention"),
+  });
+  const [retentionDays, setRetentionDays] = useState(0);
+  useEffect(() => {
+    if (retentionQ.data) setRetentionDays(clampRetentionDays(retentionQ.data.retention_days));
+  }, [retentionQ.data]);
+
+  const saveRetention = useMutation({
+    mutationFn: (days: number) =>
+      api<{ retention_days: number }>("/api/notifications/retention", {
+        method: "PUT",
+        body: JSON.stringify({ retention_days: days }),
+      }),
+    onSuccess: (r) => {
+      setRetentionDays(clampRetentionDays(r.retention_days));
+      void qc.invalidateQueries({ queryKey: ["notification-retention"] });
+      void toastSuccess(
+        clampRetentionDays(r.retention_days) === 0
+          ? "Retensi otomatis dimatikan"
+          : `Log otomatis dihapus setelah ${clampRetentionDays(r.retention_days)} hari`,
+      );
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const purgeNow = useMutation({
+    mutationFn: (days: number) =>
+      api<{ deleted: number; retention_days: number }>("/api/notifications/history/purge", {
+        method: "POST",
+        body: JSON.stringify({ retention_days: days }),
+      }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ["notification-history"] });
+      void toastSuccess(`${r.deleted} log lebih dari ${r.retention_days} hari dihapus`);
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  async function onPurgeNow() {
+    const days = clampRetentionDays(retentionDays);
+    if (days < 1) {
+      void toastError("Isi retensi minimal 1 hari untuk hapus manual.");
+      return;
+    }
+    const ok = await confirm({
+      title: `Hapus log Terkirim/Gagal lebih dari ${days} hari?`,
+      description: "Log Menunggu tidak ikut dihapus. Aksi ini permanen dan tercatat di audit.",
+      confirmLabel: "Hapus",
+      danger: true,
+    });
+    if (!ok) return;
+    purgeNow.mutate(days);
+  }
+
   return (
     <div className="grid gap-3">
       <p className="text-sm text-[var(--muted)]">
         Riwayat semua pengiriman (dunning, konfirmasi bayar, broadcast, alert ops, laporan). Pakai kolom Keterangan
         untuk menelusuri kiriman yang gagal atau ganda.
       </p>
+      <div className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel)] p-4">
+        <h3 className="text-sm font-semibold">Retensi log otomatis</h3>
+        <p className="text-xs text-[var(--muted)]">
+          Worker menghapus otomatis tiap hari untuk log Terkirim/Gagal yang lebih tua dari retensi. Log Menunggu
+          tidak pernah dihapus. Isi 0 untuk menonaktifkan hapus otomatis.
+          {retentionQ.data ? (
+            <>
+              {" "}Status:{" "}
+              <strong>
+                {clampRetentionDays(retentionQ.data.retention_days) === 0
+                  ? "nonaktif"
+                  : `hapus log > ${clampRetentionDays(retentionQ.data.retention_days)} hari`}
+              </strong>
+            </>
+          ) : null}
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="grid gap-1 text-sm">
+            <span>Simpan log (hari)</span>
+            <Input
+              type="number"
+              min={0}
+              max={365}
+              className="w-28"
+              value={retentionDays}
+              onChange={(e) => setRetentionDays(clampRetentionDays(e.target.value))}
+            />
+          </label>
+          <Button
+            type="button"
+            onClick={() => saveRetention.mutate(clampRetentionDays(retentionDays))}
+            disabled={saveRetention.isPending}
+          >
+            {saveRetention.isPending ? "Menyimpan…" : "Simpan retensi"}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => void onPurgeNow()} disabled={purgeNow.isPending}>
+            {purgeNow.isPending ? "Menghapus…" : "Hapus sekarang"}
+          </Button>
+        </div>
+      </div>
       <div className="flex flex-wrap gap-2 text-xs">
         <span className="rounded-full border border-[var(--border)] px-2.5 py-1">
           ⏳ Menunggu: <strong>{q.data?.pending ?? 0}</strong>

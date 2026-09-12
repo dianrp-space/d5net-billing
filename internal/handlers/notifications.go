@@ -252,4 +252,105 @@ func registerNotifications(api huma.API, d *Deps) {
 		out.Body.Failed = failed
 		return out, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-notification-retention", Method: http.MethodGet, Path: "/api/notifications/retention",
+		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Body struct {
+			RetentionDays int `json:"retention_days"`
+		}
+	}, error) {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		cfg, err := d.Store.GetJobScheduleSettings(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := &struct {
+			Body struct {
+				RetentionDays int `json:"retention_days"`
+			}
+		}{}
+		out.Body.RetentionDays = cfg.NotifLogRetentionDays
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "put-notification-retention", Method: http.MethodPut, Path: "/api/notifications/retention",
+		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			RetentionDays int `json:"retention_days"`
+		}
+	}) (*struct {
+		Body struct {
+			RetentionDays int `json:"retention_days"`
+		}
+	}, error) {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		days := input.Body.RetentionDays
+		if days < 0 || days > 365 {
+			return nil, httpx.BadRequest("retensi 0 (nonaktif) sampai 365 hari")
+		}
+		cfg, err := d.Store.GetJobScheduleSettings(ctx, tid)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		cfg.NotifLogRetentionDays = days
+		if err := d.Store.UpsertJobScheduleSettings(ctx, tid, cfg); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := &struct {
+			Body struct {
+				RetentionDays int `json:"retention_days"`
+			}
+		}{}
+		out.Body.RetentionDays = store.NormalizeJobScheduleSettings(cfg).NotifLogRetentionDays
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "purge-notification-history", Method: http.MethodPost, Path: "/api/notifications/history/purge",
+		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			RetentionDays int `json:"retention_days"`
+		}
+	}) (*struct {
+		Body struct {
+			Deleted       int64 `json:"deleted"`
+			RetentionDays int   `json:"retention_days"`
+		}
+	}, error) {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		days := input.Body.RetentionDays
+		if days < 1 || days > 365 {
+			return nil, httpx.BadRequest("retensi hapus 1 sampai 365 hari")
+		}
+		n, err := d.Store.PurgeNotificationHistory(ctx, tid, days)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		auditEvent(ctx, d, AuditNotifPurge, "notification", nil, map[string]any{
+			"retention_days": days, "deleted": n,
+		})
+		out := &struct {
+			Body struct {
+				Deleted       int64 `json:"deleted"`
+				RetentionDays int   `json:"retention_days"`
+			}
+		}{}
+		out.Body.Deleted = n
+		out.Body.RetentionDays = days
+		return out, nil
+	})
 }
