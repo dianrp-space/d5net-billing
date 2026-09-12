@@ -25,6 +25,17 @@ func invoiceRemaining(inv *store.Invoice) int64 {
 	return amount
 }
 
+// intentCallbackURL membaca callback webhook PG yang dipakai saat intent dibuat.
+func intentCallbackURL(pi *store.PaymentIntent) string {
+	if pi == nil || len(pi.Metadata) == 0 {
+		return ""
+	}
+	if s, ok := pi.Metadata["callback_url"].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
 func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoice, providerName, returnURL, origin string) (*store.PaymentIntent, error) {
 	if inv == nil {
 		return nil, httpx.NotFound("invoice not found")
@@ -41,12 +52,24 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	if providerName == payment.ProviderManual {
 		return nil, httpx.BadRequest("gunakan pembayaran online (Duitku)")
 	}
+	// Target callback webhook PG untuk order ini. Dipakai untuk memutuskan
+	// reuse intent: callback yang berubah wajib order baru ke PG.
+	wantCallback := ""
+	if origin != "" {
+		wantCallback = strings.TrimRight(origin, "/") + paymentWebhookPathFor(providerName)
+	}
 	if existing, err := d.Store.GetLatestPendingPaymentIntent(ctx, tid, inv.ID, providerName); err == nil && existing != nil && existing.Amount == amount {
 		if existing.QRString != "" || strings.TrimSpace(existing.CheckoutURL) != "" {
 			// Reuse the current checkout for this provider and cancel any other
-			// pending intents (e.g. a different gateway picked earlier).
-			_ = d.Store.CancelPendingPaymentIntentsExcept(ctx, tid, inv.ID, existing.ExternalID)
-			return existing, nil
+			// pending intents (e.g. a different gateway picked earlier) — but
+			// only if the PG callback target is unchanged. A stale callback
+			// (e.g. fixed webhook URL after a bugfix) requires a fresh order.
+			if storedCB := intentCallbackURL(existing); wantCallback == "" || storedCB == "" || storedCB == wantCallback {
+				_ = d.Store.CancelPendingPaymentIntentsExcept(ctx, tid, inv.ID, existing.ExternalID)
+				return existing, nil
+			}
+			slog.Info("payment intent not reused: callback changed",
+				"invoice", inv.InvoiceNumber, "provider", providerName)
 		}
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, httpx.Internal(err)
@@ -66,7 +89,7 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 		ten = t
 	}
 	if origin != "" {
-		req.CallbackURL = strings.TrimRight(origin, "/") + paymentWebhookPathFor(providerName)
+		req.CallbackURL = wantCallback
 		if req.ReturnURL == "" {
 			req.ReturnURL = origin
 		}
@@ -113,6 +136,9 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	meta := map[string]any{}
 	if res.TransactionID != "" {
 		meta["transaction_id"] = res.TransactionID
+	}
+	if cb := strings.TrimSpace(req.CallbackURL); cb != "" {
+		meta["callback_url"] = cb
 	}
 	for k, v := range res.Metadata {
 		meta[k] = v

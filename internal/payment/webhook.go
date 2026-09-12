@@ -69,13 +69,32 @@ func ParseWebhookEvent(provider string, body map[string]any) (*WebhookEvent, err
 		}
 	}
 
-	// Nested DOKU-style payload: { "order": { ... } }
+	// Nested DOKU-style payload: { "order": { ... }, "transaction": { ... } }
 	if order, ok := body["order"].(map[string]any); ok {
 		if ev.ExternalID == "" {
 			ev.ExternalID = firstString(order, "invoice_number", "merchantOrderId", "merchant_order_id", "reference", "external_id", "order_id")
 		}
 		if ev.Amount == 0 {
 			ev.Amount = firstAmount(order, "amount", "total_amount", "gross_amount")
+		}
+	}
+	if tx, ok := body["transaction"].(map[string]any); ok {
+		if ev.Reference == "" {
+			ev.Reference = firstString(tx, "original_request_id", "reference", "transaction_id")
+		}
+		if st := firstString(tx, "status"); st != "" {
+			switch strings.ToUpper(st) {
+			case "SUCCESS":
+				ev.Status = "paid"
+			case "PENDING":
+				ev.Status = "pending"
+			case "EXPIRED":
+				ev.Status = "expired"
+			case "FAILED", "VOID", "REFUND", "REFUNDED":
+				ev.Status = "failed"
+			default:
+				ev.Status = st
+			}
 		}
 	}
 

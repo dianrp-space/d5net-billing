@@ -66,3 +66,26 @@ func TestManualProvider(t *testing.T) {
 		t.Fatal(err, res)
 	}
 }
+
+func TestParseWebhookEventDokuNested(t *testing.T) {
+	body := map[string]any{
+		"order":       map[string]any{"invoice_number": "INV-D5N-1", "amount": float64(150000)},
+		"transaction": map[string]any{"status": "SUCCESS", "original_request_id": "req-7"},
+	}
+	ev, err := ParseWebhookEvent("doku", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.ExternalID != "INV-D5N-1" {
+		t.Fatalf("external_id = %q", ev.ExternalID)
+	}
+	if ev.Status != "paid" {
+		t.Fatalf("status = %q", ev.Status)
+	}
+	if ev.Amount != 150000 {
+		t.Fatalf("amount = %d", ev.Amount)
+	}
+	if ev.Reference != "req-7" {
+		t.Fatalf("reference = %q", ev.Reference)
+	}
+}
