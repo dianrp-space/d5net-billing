@@ -962,6 +962,57 @@ func registerCustomers(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "batch-customer-status", Method: http.MethodPost, Path: "/api/customers/batch-status",
+		Tags: []string{"Customers"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Body struct {
+			IDs      []xid.ID `json:"ids"`
+			IsActive bool     `json:"is_active"`
+		}
+	}) (*struct {
+		Body struct {
+			Updated           int `json:"updated"`
+			SkippedDismantled int `json:"skipped_dismantled"`
+			Failed            int `json:"failed"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(input.Body.IDs) == 0 {
+			return nil, httpx.BadRequest("minimal satu pelanggan")
+		}
+		if len(input.Body.IDs) > 500 {
+			return nil, httpx.BadRequest("maksimal 500 pelanggan per batch")
+		}
+		out := &struct {
+			Body struct {
+				Updated           int `json:"updated"`
+				SkippedDismantled int `json:"skipped_dismantled"`
+				Failed            int `json:"failed"`
+			}
+		}{}
+		for _, id := range input.Body.IDs {
+			cust, gerr := d.Store.GetCustomer(ctx, tid, id)
+			if gerr != nil {
+				out.Body.Failed++
+				continue
+			}
+			if cust.IsDismantled() {
+				out.Body.SkippedDismantled++
+				continue
+			}
+			cust.IsActive = input.Body.IsActive
+			if uerr := d.Store.UpdateCustomer(ctx, cust); uerr != nil {
+				out.Body.Failed++
+				continue
+			}
+			out.Body.Updated++
+		}
+		return out, nil
+	})
+	huma.Register(api, huma.Operation{
 		OperationID: "delete-customer", Method: http.MethodDelete, Path: "/api/customers/{id}",
 		Tags: []string{"Customers"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {

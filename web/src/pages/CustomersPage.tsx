@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
 import { IconDownload, IconImage, IconLock, IconPencil, IconTrash, IconUnplug, IconUpload } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
-import { FormDialog, IconButton, Section, Table } from "../ui";
+import { Button, FormDialog, IconButton, Section, Table } from "../ui";
 import { AttributionSelects, CommissionBasisSelect } from "../AdminExtra";
 
 const IDENTITY_TYPES: { id: string; label: string }[] = [
@@ -347,6 +347,108 @@ export function CustomersPage({
   const total = q.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / limit));
 
+  // Batch select: ubah status aktif, cabut, hapus permanen.
+  const [selected, setSelected] = useState<string[]>([]);
+  useEffect(() => {
+    setSelected([]);
+  }, [debouncedSearch, clusterFilter, statusFilter, page]);
+  const isSelected = (id: string) => selected.includes(id);
+  function toggleSelect(id: string) {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+  function toggleSelectPage() {
+    setSelected((prev) => {
+      const pageIds = rows.map((r) => r.id);
+      const allIn = pageIds.length > 0 && pageIds.every((id) => prev.includes(id));
+      if (allIn) return prev.filter((id) => !pageIds.includes(id));
+      return Array.from(new Set([...prev, ...pageIds]));
+    });
+  }
+  const [batchBusy, setBatchBusy] = useState("");
+
+  function refreshCustomers() {
+    qc.invalidateQueries({ queryKey: ["customers"] });
+    qc.invalidateQueries({ queryKey: ["ftth-map"] });
+  }
+
+  async function runCustomerStatus(isActive: boolean) {
+    const label = isActive ? "Aktifkan" : "Nonaktifkan";
+    const ok = await confirm({
+      title: `${label} ${selected.length} pelanggan?`,
+      description: isActive
+        ? "Pelanggan yang dipilih menjadi aktif (kecuali yang sudah cabut)."
+        : "Pelanggan yang dipilih menjadi nonaktif.",
+      confirmLabel: label,
+    });
+    if (!ok) return;
+    setBatchBusy("status");
+    try {
+      const res = await api<{ updated: number; skipped_dismantled: number; failed: number }>(
+        "/api/customers/batch-status",
+        { method: "POST", body: JSON.stringify({ ids: selected, is_active: isActive }) },
+      );
+      setSelected([]);
+      refreshCustomers();
+      void toastSuccess(
+        `${label}: ${res.updated} berhasil` +
+          (res.skipped_dismantled > 0 ? `, ${res.skipped_dismantled} dilewati (sudah cabut)` : "") +
+          (res.failed > 0 ? `, ${res.failed} gagal` : ""),
+      );
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Gagal ubah status");
+    } finally {
+      setBatchBusy("");
+    }
+  }
+
+  async function runCustomerBatch(kind: "cabut" | "delete") {
+    let ids = selected;
+    if (kind === "cabut") {
+      ids = selected.filter((id) => {
+        const r = rows.find((x) => x.id === id);
+        return r && !isCabut(r);
+      });
+      if (ids.length === 0) {
+        void toastError("Tidak ada pelanggan yang bisa dicabut dalam pilihan");
+        return;
+      }
+    }
+    const label = kind === "cabut" ? "Cabut" : "Hapus permanen";
+    const ok = await confirm({
+      title: `${label} ${ids.length} pelanggan?`,
+      description:
+        kind === "cabut"
+          ? "Secret di router dilepas, port ODP dikosongkan, status menjadi cabut. Data tetap tersimpan."
+          : "PERMANEN: data pelanggan, langganan, tagihan, dan pembayaran ikut terhapus. Tidak bisa dikembalikan.",
+      confirmLabel: label,
+      ...(kind === "delete" ? { danger: true } : {}),
+    });
+    if (!ok) return;
+    setBatchBusy(kind);
+    let done = 0;
+    let firstErr = "";
+    for (const id of ids) {
+      try {
+        if (kind === "cabut") {
+          await api(`/api/customers/${id}/dismantle`, { method: "POST" });
+        } else {
+          await api(`/api/customers/${id}`, { method: "DELETE" });
+        }
+        done++;
+      } catch (e: unknown) {
+        if (!firstErr) firstErr = e instanceof Error ? e.message : "gagal";
+      }
+    }
+    setBatchBusy("");
+    setSelected([]);
+    refreshCustomers();
+    if (done === ids.length) {
+      void toastSuccess(`${label}: ${done} berhasil`);
+    } else {
+      void toastError(`${label}: ${done}/${ids.length} berhasil${firstErr ? ` — ${firstErr}` : ""}`);
+    }
+  }
+
   return (
     <Section
       title="Pelanggan"
@@ -414,11 +516,66 @@ export function CustomersPage({
         pageCount={pageCount}
         onPageChange={setPage}
         total={total}
-      />
+      >
+        <label className="flex cursor-pointer items-center gap-1.5 text-sm text-[var(--muted)]">
+          <input
+            type="checkbox"
+            checked={rows.length > 0 && rows.every((r) => selected.includes(r.id))}
+            onChange={toggleSelectPage}
+            title="Pilih semua di halaman ini"
+          />
+          Pilih halaman
+        </label>
+      </ListToolbar>
+      {selected.length > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-sm">
+          <strong>{selected.length} dipilih</strong>
+          <Button type="button" size="sm" disabled={batchBusy !== ""} onClick={() => void runCustomerStatus(true)}>
+            {batchBusy === "status" ? "Memproses…" : "Aktifkan"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={batchBusy !== ""}
+            onClick={() => void runCustomerStatus(false)}
+          >
+            Nonaktifkan
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={batchBusy !== ""}
+            onClick={() => void runCustomerBatch("cabut")}
+          >
+            {batchBusy === "cabut" ? "Memproses…" : "Cabut"}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={batchBusy !== ""}
+            onClick={() => void runCustomerBatch("delete")}
+          >
+            {batchBusy === "delete" ? "Memproses…" : "Hapus"}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" disabled={batchBusy !== ""} onClick={() => setSelected([])}>
+            Batal
+          </Button>
+        </div>
+      ) : null}
       <Table
         rowNumberStart={page * limit + 1}
-        columns={["Kode", "Cluster", "Nama", "Telepon", "Atribusi", "Status", "Aksi"]}
+        columns={["", "Kode", "Cluster", "Nama", "Telepon", "Atribusi", "Status", "Aksi"]}
         rows={rows.map((c) => [
+          <input
+            key={`sel-${c.id}`}
+            type="checkbox"
+            checked={isSelected(c.id)}
+            onChange={() => toggleSelect(c.id)}
+            title={`Pilih ${c.customer_code}`}
+          />,
           c.customer_code,
           c.cluster_name || c.cluster_code || "—",
           c.full_name,

@@ -61,6 +61,77 @@ export function InvoicesPage() {
   const rows = q.data?.data ?? [];
   const total = q.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / limit));
+  const trashed = status === "trashed";
+
+  // Batch select: hapus / tandai bayar (tunai) / pulihkan (di sampah).
+  const [selected, setSelected] = useState<string[]>([]);
+  useEffect(() => {
+    setSelected([]);
+  }, [status, debouncedSearch, page]);
+  const isSelected = (id: string) => selected.includes(id);
+  function toggleSelect(id: string) {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+  function toggleSelectPage() {
+    setSelected((prev) => {
+      const pageIds = rows.map((r) => r.id);
+      const allIn = pageIds.length > 0 && pageIds.every((id) => prev.includes(id));
+      if (allIn) return prev.filter((id) => !pageIds.includes(id));
+      return Array.from(new Set([...prev, ...pageIds]));
+    });
+  }
+  const [batchBusy, setBatchBusy] = useState("");
+
+  async function runInvoiceBatch(kind: "pay" | "delete" | "restore") {
+    let ids = selected;
+    if (kind === "pay") {
+      ids = selected.filter((id) => {
+        const r = rows.find((x) => x.id === id);
+        return r && ["issued", "partial", "overdue"].includes(r.status);
+      });
+      if (ids.length === 0) {
+        void toastError("Tidak ada tagihan belum lunas yang dipilih");
+        return;
+      }
+    }
+    const label = kind === "pay" ? "Tandai lunas (tunai)" : kind === "delete" ? "Hapus ke sampah" : "Pulihkan";
+    const ok = await confirm({
+      title: `${label} ${ids.length} tagihan?`,
+      description:
+        kind === "pay"
+          ? "Mencatat pembayaran tunai penuh untuk tagihan yang dipilih."
+          : kind === "delete"
+            ? "Tagihan yang dipilih dipindah ke sampah (bisa dipulihkan)."
+            : "Tagihan yang dipilih dikembalikan dari sampah.",
+      confirmLabel: label,
+    });
+    if (!ok) return;
+    setBatchBusy(kind);
+    let done = 0;
+    let firstErr = "";
+    for (const id of ids) {
+      try {
+        if (kind === "pay") {
+          await api(`/api/invoices/${id}/pay`, { method: "POST", body: JSON.stringify({ method: "tunai" }) });
+        } else if (kind === "delete") {
+          await api(`/api/invoices/${id}`, { method: "DELETE" });
+        } else {
+          await api(`/api/invoices/${id}/restore`, { method: "POST" });
+        }
+        done++;
+      } catch (e: unknown) {
+        if (!firstErr) firstErr = e instanceof Error ? e.message : "gagal";
+      }
+    }
+    setBatchBusy("");
+    setSelected([]);
+    qc.invalidateQueries({ queryKey: ["invoices"] });
+    if (done === ids.length) {
+      void toastSuccess(`${label}: ${done} berhasil`);
+    } else {
+      void toastError(`${label}: ${done}/${ids.length} berhasil${firstErr ? ` — ${firstErr}` : ""}`);
+    }
+  }
 
   const [issueOpen, setIssueOpen] = useState(false);
   const [issueErr, setIssueErr] = useState("");
@@ -222,11 +293,66 @@ export function InvoicesPage() {
         <Button type="button" variant="outline" onClick={() => void exportCsv()}>
           Export CSV
         </Button>
+        <label className="flex cursor-pointer items-center gap-1.5 text-sm text-[var(--muted)]">
+          <input
+            type="checkbox"
+            checked={rows.length > 0 && rows.every((r) => selected.includes(r.id))}
+            onChange={toggleSelectPage}
+            title="Pilih semua di halaman ini"
+          />
+          Pilih halaman
+        </label>
       </ListToolbar>
+      {selected.length > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-sm">
+          <strong>{selected.length} dipilih</strong>
+          {!trashed ? (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                disabled={batchBusy !== ""}
+                onClick={() => void runInvoiceBatch("pay")}
+              >
+                {batchBusy === "pay" ? "Memproses…" : "Tandai bayar"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={batchBusy !== ""}
+                onClick={() => void runInvoiceBatch("delete")}
+              >
+                {batchBusy === "delete" ? "Memproses…" : "Hapus"}
+              </Button>
+            </>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              disabled={batchBusy !== ""}
+              onClick={() => void runInvoiceBatch("restore")}
+            >
+              {batchBusy === "restore" ? "Memproses…" : "Pulihkan"}
+            </Button>
+          )}
+          <Button type="button" variant="ghost" size="sm" disabled={batchBusy !== ""} onClick={() => setSelected([])}>
+            Batal
+          </Button>
+        </div>
+      ) : null}
       <Table
         rowNumberStart={page * limit + 1}
-        columns={["Nomor", "Pelanggan", "Jatuh tempo", "Total", "Terbayar", "Status", "Aksi"]}
+        columns={["", "Nomor", "Pelanggan", "Jatuh tempo", "Total", "Terbayar", "Status", "Aksi"]}
         rows={rows.map((i) => [
+          <input
+            key={`sel-${i.id}`}
+            type="checkbox"
+            checked={isSelected(i.id)}
+            onChange={() => toggleSelect(i.id)}
+            onClick={(e) => e.stopPropagation()}
+            title={`Pilih ${i.invoice_number}`}
+          />,
           i.invoice_number,
           i.customer_name,
           i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
