@@ -147,6 +147,38 @@ func TestRenderPDFAlwaysShowsTax(t *testing.T) {
 	}
 }
 
+func TestRenderPDFMetaIsLabeled(t *testing.T) {
+	issued := time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)
+	inv := &store.Invoice{
+		InvoiceNumber: "INV-BTC-2026090001-0920265633L9",
+		CustomerName:  "Budi Santoso",
+		TotalAmount:   34232,
+		PaidAmount:    34232,
+		Status:        "paid",
+		DueDate:       issued.AddDate(0, 0, 27),
+		IssuedAt:      &issued,
+	}
+	out := RenderPDF(inv, []store.InvoiceItem{
+		{Description: "Tes 3", Quantity: 1, UnitPrice: 34232, Amount: 34232},
+	}, RenderOptions{
+		Settings: store.InvoiceSettings{
+			CompanyName:         "Delima Net",
+			Address:             "Villa Tamansari Raudha Blok D 5",
+			PaymentInstructions: "Login portal https://delimanet.dianrp.com",
+			FooterNote:          "Terima kasih telah menjadi pelanggan Delima Net.",
+		},
+		FallbackCompany: "Delima Net",
+	})
+	for _, want := range []string{"(Nomor)", "(Terbit)", "(Jatuh tempo)", "(Status)", "(Deskripsi)", "(INVOICE)"} {
+		if !bytes.Contains(out, []byte(want)) {
+			t.Fatalf("missing %s", want)
+		}
+	}
+	if !bytes.Contains(out, []byte("INV-BTC-2026090001")) || !bytes.Contains(out, []byte("0920265633L9")) {
+		t.Fatal("long invoice number must not be truncated")
+	}
+}
+
 func TestRupiahGrouping(t *testing.T) {
 	cases := map[int64]string{
 		0:       "Rp 0",
