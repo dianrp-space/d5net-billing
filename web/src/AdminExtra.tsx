@@ -1003,6 +1003,14 @@ export function InvoiceActions({
     },
     onError: (e: Error) => void toastError(e.message || "Gagal pulihkan tagihan"),
   });
+  const purge = useMutation({
+    mutationFn: () => api(`/api/invoices/${id}/purge`, { method: "DELETE" }),
+    onSuccess: () => {
+      void toastSuccess("Tagihan dihapus permanen");
+      refreshBilling();
+    },
+    onError: (e: Error) => void toastError(e.message || "Gagal hapus permanen"),
+  });
   const [pdfBusy, setPdfBusy] = useState(false);
 
   return (
@@ -1037,21 +1045,40 @@ export function InvoiceActions({
         <IconDownload />
       </IconButton>
       {trashed ? (
-        <IconButton
-          label="Pulihkan tagihan"
-          disabled={restore.isPending}
-          onClick={() => {
-            void confirm({
-              title: "Pulihkan tagihan",
-              description: `Kembalikan tagihan ${invoiceNumber || id} beserta pembayaran yang ikut terhapus?`,
-              confirmLabel: "Pulihkan",
-            }).then((ok) => {
-              if (ok) restore.mutate();
-            });
-          }}
-        >
-          <IconUndo />
-        </IconButton>
+        <>
+          <IconButton
+            label="Pulihkan tagihan"
+            disabled={restore.isPending}
+            onClick={() => {
+              void confirm({
+                title: "Pulihkan tagihan",
+                description: `Kembalikan tagihan ${invoiceNumber || id} beserta pembayaran yang ikut terhapus?`,
+                confirmLabel: "Pulihkan",
+              }).then((ok) => {
+                if (ok) restore.mutate();
+              });
+            }}
+          >
+            <IconUndo />
+          </IconButton>
+          <IconButton
+            label="Hapus permanen"
+            danger
+            disabled={purge.isPending}
+            onClick={() => {
+              void confirm({
+                title: "Hapus permanen?",
+                description: `Tagihan ${invoiceNumber || id} dihapus SELAMANYA beserta item-nya. Hanya bisa untuk yang belum dibayar. Tidak bisa dikembalikan.`,
+                confirmLabel: "Hapus permanen",
+                danger: true,
+              }).then((ok) => {
+                if (ok) purge.mutate();
+              });
+            }}
+          >
+            <IconTrash />
+          </IconButton>
+        </>
       ) : (
         <IconButton
           label="Hapus tagihan"

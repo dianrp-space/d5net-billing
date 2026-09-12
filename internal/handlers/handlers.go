@@ -3399,6 +3399,25 @@ func registerInvoices(api huma.API, d *Deps) {
 		}
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "restored"}}, nil
 	})
+	huma.Register(api, huma.Operation{
+		OperationID: "purge-invoice", Method: http.MethodDelete, Path: "/api/invoices/{id}/purge",
+		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body map[string]string }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.PurgeInvoice(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("tagihan tidak ditemukan")
+		} else if errors.Is(err, store.ErrInvoiceNotTrashed) || errors.Is(err, store.ErrInvoiceHasPaid) {
+			return nil, httpx.BadRequest(err.Error())
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "purged"}}, nil
+	})
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-payments", Method: http.MethodGet, Path: "/api/payments",

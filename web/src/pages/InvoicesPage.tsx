@@ -82,7 +82,7 @@ export function InvoicesPage() {
   }
   const [batchBusy, setBatchBusy] = useState("");
 
-  async function runInvoiceBatch(kind: "pay" | "delete" | "restore") {
+  async function runInvoiceBatch(kind: "pay" | "delete" | "restore" | "purge") {
     let ids = selected;
     if (kind === "pay") {
       ids = selected.filter((id) => {
@@ -94,7 +94,14 @@ export function InvoicesPage() {
         return;
       }
     }
-    const label = kind === "pay" ? "Tandai lunas (tunai)" : kind === "delete" ? "Hapus ke sampah" : "Pulihkan";
+    const label =
+      kind === "pay"
+        ? "Tandai lunas (tunai)"
+        : kind === "delete"
+          ? "Hapus ke sampah"
+          : kind === "purge"
+            ? "Hapus permanen"
+            : "Pulihkan";
     const ok = await confirm({
       title: `${label} ${ids.length} tagihan?`,
       description:
@@ -102,8 +109,11 @@ export function InvoicesPage() {
           ? "Mencatat pembayaran tunai penuh untuk tagihan yang dipilih."
           : kind === "delete"
             ? "Tagihan yang dipilih dipindah ke sampah (bisa dipulihkan)."
-            : "Tagihan yang dipilih dikembalikan dari sampah.",
+            : kind === "purge"
+              ? "PERMANEN: tagihan yang dipilih hilang selamanya beserta item-nya. Hanya yang belum dibayar."
+              : "Tagihan yang dipilih dikembalikan dari sampah.",
       confirmLabel: label,
+      ...(kind === "purge" ? { danger: true } : {}),
     });
     if (!ok) return;
     setBatchBusy(kind);
@@ -115,6 +125,8 @@ export function InvoicesPage() {
           await api(`/api/invoices/${id}/pay`, { method: "POST", body: JSON.stringify({ method: "tunai" }) });
         } else if (kind === "delete") {
           await api(`/api/invoices/${id}`, { method: "DELETE" });
+        } else if (kind === "purge") {
+          await api(`/api/invoices/${id}/purge`, { method: "DELETE" });
         } else {
           await api(`/api/invoices/${id}/restore`, { method: "POST" });
         }
@@ -327,14 +339,25 @@ export function InvoicesPage() {
               </Button>
             </>
           ) : (
-            <Button
-              type="button"
-              size="sm"
-              disabled={batchBusy !== ""}
-              onClick={() => void runInvoiceBatch("restore")}
-            >
-              {batchBusy === "restore" ? "Memproses…" : "Pulihkan"}
-            </Button>
+            <>
+              <Button
+                type="button"
+                size="sm"
+                disabled={batchBusy !== ""}
+                onClick={() => void runInvoiceBatch("restore")}
+              >
+                {batchBusy === "restore" ? "Memproses…" : "Pulihkan"}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={batchBusy !== ""}
+                onClick={() => void runInvoiceBatch("purge")}
+              >
+                {batchBusy === "purge" ? "Memproses…" : "Hapus permanen"}
+              </Button>
+            </>
           )}
           <Button type="button" variant="ghost" size="sm" disabled={batchBusy !== ""} onClick={() => setSelected([])}>
             Batal

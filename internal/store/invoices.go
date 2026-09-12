@@ -534,6 +534,46 @@ func (s *Store) RestoreInvoice(ctx context.Context, tenantID, id xid.ID) error {
 	return tx.Commit(ctx)
 }
 
+var (
+	ErrInvoiceNotTrashed = errors.New("hanya tagihan di sampah yang bisa dihapus permanen")
+	ErrInvoiceHasPaid    = errors.New("tagihan sudah memiliki pembayaran, tidak bisa dihapus permanen")
+)
+
+// PurgeInvoice menghapus permanen tagihan yang sudah di sampah dan belum
+// dibayar. Item ikut terhapus (CASCADE); payment & intent terlepas (SET NULL).
+func (s *Store) PurgeInvoice(ctx context.Context, tenantID, id xid.ID) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	var paid int64
+	var deletedAt *time.Time
+	err := s.Pool.QueryRow(ctx, `
+		SELECT paid_amount, deleted_at FROM invoices WHERE tenant_id=$1 AND id=$2
+	`, tenantID, id).Scan(&paid, &deletedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if deletedAt == nil {
+		return ErrInvoiceNotTrashed
+	}
+	if paid > 0 {
+		return ErrInvoiceHasPaid
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		DELETE FROM invoices WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NOT NULL
+	`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListDunningInvoices(ctx context.Context, tenantID xid.ID) ([]Invoice, error) {
 	// Unpaid invoices due within 7 days or overdue up to 3 days (H-7 … H+3).
 	rows, err := s.Pool.Query(ctx, `
