@@ -14,20 +14,31 @@ export function clearToken() {
 }
 
 export function getClientSession<T = unknown>(): T | null {
-  const raw = sessionStorage.getItem(CLIENT_SESSION);
+  // localStorage agar sesi tetap ada saat kembali dari tab baru payment gateway.
+  const raw =
+    localStorage.getItem(CLIENT_SESSION) ?? sessionStorage.getItem(CLIENT_SESSION);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as T;
+    const data = JSON.parse(raw) as T;
+    // Migrasi sekali jalan: pindahkan sesi lama ke localStorage.
+    if (!localStorage.getItem(CLIENT_SESSION)) {
+      localStorage.setItem(CLIENT_SESSION, raw);
+      sessionStorage.removeItem(CLIENT_SESSION);
+    }
+    return data;
   } catch {
     return null;
   }
 }
 
 export function setClientSession(data: unknown) {
-  sessionStorage.setItem(CLIENT_SESSION, JSON.stringify(data));
+  const raw = JSON.stringify(data);
+  localStorage.setItem(CLIENT_SESSION, raw);
+  sessionStorage.removeItem(CLIENT_SESSION);
 }
 
 export function clearClientSession() {
+  localStorage.removeItem(CLIENT_SESSION);
   sessionStorage.removeItem(CLIENT_SESSION);
 }
 
