@@ -3203,6 +3203,35 @@ func registerInvoices(api huma.API, d *Deps) {
 		return out, nil
 	})
 	huma.Register(api, huma.Operation{
+		OperationID: "list-customer-unpaid-invoices", Method: http.MethodGet, Path: "/api/customers/{id}/unpaid-invoices",
+		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct {
+		Body struct {
+			Data []store.UnpaidInvoiceWithItems `json:"data"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		list, err := d.Store.ListCustomerUnpaidInvoicesWithItems(ctx, tid, input.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.UnpaidInvoiceWithItems{}
+		}
+		out := &struct {
+			Body struct {
+				Data []store.UnpaidInvoiceWithItems `json:"data"`
+			}
+		}{}
+		out.Body.Data = list
+		return out, nil
+	})
+	huma.Register(api, huma.Operation{
 		OperationID: "list-invoices", Method: http.MethodGet, Path: "/api/invoices",
 		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {

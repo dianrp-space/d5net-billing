@@ -590,8 +590,67 @@ func (s *Store) ListOverdueInvoices(ctx context.Context, tenantID xid.ID) ([]Inv
 	return list, rows.Err()
 }
 
-func (s *Store) SumOverdueUnpaidForSubscription(ctx context.Context, tenantID xid.ID, subscriptionID xid.ID) (int64, error) {
-	var sum int64
+// UnpaidInvoiceWithItems adalah tagihan belum lunas beserta item-nya,
+// dipakai untuk prefill penerbitan tagihan manual pengganti.
+type UnpaidInvoiceWithItems struct {
+	Invoice Invoice       `json:"invoice"`
+	Items   []InvoiceItem `json:"items"`
+}
+
+func (s *Store) ListCustomerUnpaidInvoicesWithItems(ctx context.Context, tenantID, customerID xid.ID) ([]UnpaidInvoiceWithItems, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT i.id, i.tenant_id, i.customer_id, i.subscription_id, i.invoice_number, i.subtotal, i.tax_amount,
+		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name
+		FROM invoices i JOIN customers c ON c.id = i.customer_id
+		WHERE i.tenant_id = $1 AND i.customer_id = $2 AND i.deleted_at IS NULL
+		  AND i.status IN ('issued','partial','overdue')
+		ORDER BY i.issued_at, i.id
+	`, tenantID, customerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []UnpaidInvoiceWithItems
+	for rows.Next() {
+		var u UnpaidInvoiceWithItems
+		if err := rows.Scan(&u.Invoice.ID, &u.Invoice.TenantID, &u.Invoice.CustomerID, &u.Invoice.SubscriptionID, &u.Invoice.InvoiceNumber,
+			&u.Invoice.Subtotal, &u.Invoice.TaxAmount, &u.Invoice.DiscountAmount, &u.Invoice.TotalAmount, &u.Invoice.PaidAmount,
+			&u.Invoice.Status, &u.Invoice.DueDate, &u.Invoice.IssuedAt, &u.Invoice.PaidAt, &u.Invoice.DeletedAt, &u.Invoice.CustomerName); err != nil {
+			return nil, err
+		}
+		items, err := s.listInvoiceItems(ctx, u.Invoice.ID)
+		if err != nil {
+			return nil, err
+		}
+		u.Items = items
+		list = append(list, u)
+	}
+	return list, rows.Err()
+}
+
+func (s *Store) listInvoiceItems(ctx context.Context, invoiceID xid.ID) ([]InvoiceItem, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, description, quantity, unit_price, amount FROM invoice_items WHERE invoice_id = $1
+	`, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InvoiceItem
+	for rows.Next() {
+		var item InvoiceItem
+		if err := rows.Scan(&item.ID, &item.Description, &item.Quantity, &item.UnitPrice, &item.Amount); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) SumOverdueUnpaidForSubscription(ctx context.Context, tenantID xid.ID, subscriptionID xid.ID) (int64, error) {	var sum int64
 	err := s.Pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(total_amount - paid_amount), 0)
 		FROM invoices

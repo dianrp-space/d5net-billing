@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
@@ -13,6 +13,11 @@ type CustomerLookup = {
   customer_code: string;
   full_name: string;
   phone: string;
+};
+
+type UnpaidSource = {
+  invoice: { invoice_number: string; total_amount: number; paid_amount: number };
+  items: { description: string; quantity: number; unit_price: number }[];
 };
 
 type IssueItem = { description: string; quantity: number; unit_price: number };
@@ -76,20 +81,49 @@ export function InvoicesPage() {
     keywords: `${c.full_name} ${c.customer_code} ${c.phone}`,
   }));
 
-  const subtotal = items.reduce((s, it) => s + Math.max(0, Math.floor(Number(it.quantity) || 0)) * Math.max(0, Math.floor(Number(it.unit_price) || 0)), 0);
-  const discountClamped = Math.max(0, Math.min(subtotal, Math.floor(Number(discount) || 0)));
-  const tax = Math.round((subtotal - discountClamped) * Math.max(0, Number(taxPct) || 0) / 100);
-  const grandTotal = subtotal - discountClamped + tax;
+  // Tagihan belum lunas pelanggan → item terisi otomatis (pengganti tagihan
+  // yang terhapus/salah). Hanya diisi ulang saat pelanggan berganti.
+  const unpaidQ = useQuery({
+    queryKey: ["customer-unpaid", customerId],
+    queryFn: () => api<{ data: UnpaidSource[] }>(`/api/customers/${customerId}/unpaid-invoices`),
+    enabled: issueOpen && Boolean(customerId),
+  });
+  const filledFor = useRef("");
+  const unpaidSources = unpaidQ.data?.data ?? [];
+  useEffect(() => {
+    if (!issueOpen || !customerId || filledFor.current === customerId) return;
+    if (unpaidQ.isLoading || unpaidQ.isError || !unpaidQ.data) return;
+    filledFor.current = customerId;
+    const prefill: IssueItem[] = [];
+    for (const src of unpaidSources) {
+      for (const it of src.items) {
+        prefill.push({ description: it.description, quantity: it.quantity, unit_price: it.unit_price });
+      }
+      if (src.items.length === 0) {
+        const remaining = Math.max(0, src.invoice.total_amount - src.invoice.paid_amount);
+        if (remaining > 0) {
+          prefill.push({ description: `Sisa ${src.invoice.invoice_number}`, quantity: 1, unit_price: remaining });
+        }
+      }
+    }
+    if (prefill.length > 0) setItems(prefill);
+  }, [issueOpen, customerId, unpaidQ.data, unpaidQ.isLoading, unpaidQ.isError, unpaidSources]);
 
   function openIssue() {
     setIssueErr("");
     setCustomerId("");
+    filledFor.current = "";
     setItems([{ description: "", quantity: 1, unit_price: 0 }]);
     setDiscount(0);
     setTaxPct(0);
     setDueDate("");
     setIssueOpen(true);
   }
+
+  const subtotal = items.reduce((s, it) => s + Math.max(0, Math.floor(Number(it.quantity) || 0)) * Math.max(0, Math.floor(Number(it.unit_price) || 0)), 0);
+  const discountClamped = Math.max(0, Math.min(subtotal, Math.floor(Number(discount) || 0)));
+  const tax = Math.round((subtotal - discountClamped) * Math.max(0, Number(taxPct) || 0) / 100);
+  const grandTotal = subtotal - discountClamped + tax;
 
   function closeIssue() {
     setIssueOpen(false);
@@ -234,6 +268,23 @@ export function InvoicesPage() {
 
           <div className="flex flex-col gap-2">
             <Label>Item tagihan</Label>
+            {customerId && unpaidQ.isLoading ? (
+              <p className="text-xs text-[var(--muted)]">Memeriksa tagihan belum lunas pelanggan…</p>
+            ) : unpaidSources.length > 0 ? (
+              <p className="text-xs text-[var(--muted)]">
+                Otomatis dari {unpaidSources.length} tagihan belum lunas:{" "}
+                {unpaidSources
+                  .map(
+                    (s) =>
+                      `${s.invoice.invoice_number} (sisa ${formatRp(Math.max(0, s.invoice.total_amount - s.invoice.paid_amount))})`,
+                  )
+                  .join(", ")}
+                . Bebas diubah/dihapus.
+                {unpaidSources.some((s) => s.invoice.paid_amount > 0)
+                  ? " Sebagian sudah dibayar — sesuaikan nominal bila perlu."
+                  : null}
+              </p>
+            ) : null}
             {items.map((it, idx) => (
               <div key={idx} className="grid grid-cols-[1fr_72px_130px_auto] items-center gap-2">
                 <Input
