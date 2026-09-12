@@ -59,6 +59,14 @@ export async function swalAlert(opts: { title?: string; description: string; ico
   });
 }
 
+export function alertPaymentSuccess() {
+  return swalAlert({
+    title: "Pembayaran sukses",
+    description: "Pembayaran diterima. Status tagihan akan diperbarui otomatis.",
+    icon: "success",
+  });
+}
+
 export function toastSuccess(title: string) {
   return Swal.fire({
     toast: true,

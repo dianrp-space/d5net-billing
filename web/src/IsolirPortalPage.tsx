@@ -4,7 +4,8 @@ import { applyBrandingMeta } from "./branding";
 import { formatRp, LoginShell, SecretInput } from "./ui";
 import { AuthThemeCorner } from "./ThemeToggle";
 import { PortalPayHost } from "./PayMethodDialog";
-import { isInvoiceUnpaid, type PayableInvoice } from "./payMethod";
+import { consumePaymentReturnSuccess, isInvoiceUnpaid, notePaymentReturnFromLocation, type PayableInvoice } from "./payMethod";
+import { alertPaymentSuccess } from "./swal";
 
 type PublicTenant = {
   name: string;
@@ -39,6 +40,16 @@ export function IsolirPortalPage() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [payInv, setPayInv] = useState<PayableInvoice | null>(null);
+
+  useEffect(() => {
+    notePaymentReturnFromLocation();
+  }, []);
+
+  useEffect(() => {
+    if (!session?.portal_token) return;
+    if (!consumePaymentReturnSuccess()) return;
+    void alertPaymentSuccess();
+  }, [session?.portal_token]);
 
   useEffect(() => {
     if (!session?.portal_token) return;
@@ -188,6 +199,7 @@ export function IsolirPortalPage() {
               invoices: session.invoices.filter((i) => i.id !== payInv.id),
             });
             setPayInv(null);
+            void alertPaymentSuccess();
           }}
         />
       </AuthThemeCorner>

@@ -150,3 +150,49 @@ export function isIsolirStatus(status?: string | null) {
   const s = String(status || "").trim().toLowerCase();
   return s === "suspended" || s === "isolir";
 }
+
+export const PAYMENT_RETURN_PARAM = "payment";
+export const PAYMENT_RETURN_SUCCESS = "success";
+const PAYMENT_RETURN_STORAGE = "drp_payment_return";
+
+/** Return URL ke portal setelah hosted checkout (DOKU / fallback Duitku). */
+export function portalPaymentReturnURL(): string {
+  if (typeof window === "undefined") return "";
+  const u = new URL(window.location.href);
+  u.searchParams.set(PAYMENT_RETURN_PARAM, PAYMENT_RETURN_SUCCESS);
+  return u.toString();
+}
+
+/** Simpan flag callback sebelum guard login membuang query string. */
+export function notePaymentReturnFromLocation() {
+  if (typeof window === "undefined") return;
+  try {
+    const u = new URL(window.location.href);
+    if (u.searchParams.get(PAYMENT_RETURN_PARAM) === PAYMENT_RETURN_SUCCESS) {
+      sessionStorage.setItem(PAYMENT_RETURN_STORAGE, "1");
+    }
+  } catch {
+    /* private mode */
+  }
+}
+
+/** True sekali saat customer kembali dari PG. Membersihkan query + sessionStorage. */
+export function consumePaymentReturnSuccess(): boolean {
+  notePaymentReturnFromLocation();
+  let hit = false;
+  try {
+    hit = sessionStorage.getItem(PAYMENT_RETURN_STORAGE) === "1";
+    if (hit) sessionStorage.removeItem(PAYMENT_RETURN_STORAGE);
+  } catch {
+    /* ignore */
+  }
+  if (typeof window === "undefined") return hit;
+  const u = new URL(window.location.href);
+  if (u.searchParams.get(PAYMENT_RETURN_PARAM) === PAYMENT_RETURN_SUCCESS) {
+    hit = true;
+    u.searchParams.delete(PAYMENT_RETURN_PARAM);
+    const next = `${u.pathname}${u.search}${u.hash}`;
+    window.history.replaceState(window.history.state, "", next);
+  }
+  return hit;
+}

@@ -66,16 +66,6 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 			// (e.g. fixed webhook URL after a bugfix) requires a fresh order.
 			if storedCB := intentCallbackURL(existing); wantCallback == "" || storedCB == "" || storedCB == wantCallback {
 				_ = d.Store.CancelPendingPaymentIntentsExcept(ctx, tid, inv.ID, existing.ExternalID)
-				// #region agent log
-				agentDebugLog("checkout.go:checkoutInvoice", "reused pending intent", "A", map[string]any{
-					"provider":      providerName,
-					"external_id":   existing.ExternalID,
-					"invoice":       inv.InvoiceNumber,
-					"callback_url":  storedCB,
-					"want_callback": wantCallback,
-					"origin":        origin,
-				})
-				// #endregion
 				return existing, nil
 			}
 			slog.Info("payment intent not reused: callback changed",
@@ -176,27 +166,7 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	// Only one active checkout per invoice: cancel any older pending intents
 	// (e.g. a QR from a different gateway the customer started but abandoned).
 	_ = d.Store.CancelPendingPaymentIntentsExcept(ctx, tid, inv.ID, out.ExternalID)
-	// #region agent log
-	agentDebugLog("checkout.go:checkoutInvoice", "checkout intent created", "A", map[string]any{
-		"provider":      providerName,
-		"external_id":   out.ExternalID,
-		"invoice":       inv.InvoiceNumber,
-		"amount":        amount,
-		"callback_url":  req.CallbackURL,
-		"return_url":    req.ReturnURL,
-		"origin":        origin,
-		"checkout_host": checkoutURLHost(out.CheckoutURL),
-	})
-	// #endregion
 	return out, nil
-}
-
-func checkoutURLHost(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return ""
-	}
-	return u.Host
 }
 
 func latestInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoice) (*store.PaymentIntent, error) {
@@ -241,15 +211,6 @@ func latestInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 					}
 					pi.Status = "paid"
 				}
-				// #region agent log
-				agentDebugLog("checkout.go:latestInvoicePaymentIntent", "CheckStatus backup", "F", map[string]any{
-					"provider":      pi.Provider,
-					"external_id":   pi.ExternalID,
-					"local_status":  pi.Status,
-					"remote_status": status,
-					"remote_paid":   payment.WebhookIsPaid(status),
-				})
-				// #endregion
 			}
 		}
 	}

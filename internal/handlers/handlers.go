@@ -5505,30 +5505,6 @@ func registerPortal(api huma.API, d *Deps) {
 			byID[c.ID] = c
 		}
 		list := collectPortalInvoices(ctx, d, ten.ID, byID)
-		// #region agent log
-		invSummaries := make([]map[string]any, 0, len(list))
-		unpaid := 0
-		for _, inv := range list {
-			remain := inv.TotalAmount - inv.PaidAmount
-			if remain < 0 {
-				remain = 0
-			}
-			if strings.ToLower(strings.TrimSpace(inv.Status)) != "paid" && remain > 0 {
-				unpaid++
-			}
-			invSummaries = append(invSummaries, map[string]any{
-				"number": inv.InvoiceNumber,
-				"status": inv.Status,
-				"paid":   inv.PaidAmount,
-				"total":  inv.TotalAmount,
-			})
-		}
-		agentDebugLog("handlers.go:portal-list-invoices", "portal invoice list", "F", map[string]any{
-			"count":    len(list),
-			"unpaid":   unpaid,
-			"invoices": invSummaries,
-		})
-		// #endregion
 		return &struct {
 			Body struct {
 				Data []store.Invoice `json:"data"`
@@ -5976,23 +5952,6 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		"user_agent", input.UserAgent,
 		"parse_error", parseErrStr,
 	)
-	// #region agent log
-	agentDebugLog("handlers.go:processPaymentWebhook:received", "payment webhook POST received", "A", map[string]any{
-		"provider":           providerName,
-		"content_type":       input.ContentType,
-		"bytes":              len(raw),
-		"external_id":        parsed.ExternalID,
-		"event_status":       parsed.Status,
-		"amount":             parsed.Amount,
-		"has_client_id":      strings.TrimSpace(input.ClientID) != "",
-		"has_doku_signature": strings.TrimSpace(input.Signature) != "",
-		"has_x_signature":    strings.TrimSpace(input.XSignature) != "",
-		"has_partner_id":     strings.TrimSpace(input.XPartnerID) != "",
-		"user_agent":         input.UserAgent,
-		"parse_error":        parseErrStr,
-		"body_keys":          webhookBodyKeys(bodyMap),
-	})
-	// #endregion
 
 	if providerName == payment.ProviderManual {
 		slog.Warn("payment webhook ignored", "provider", providerName, "reason", "manual provider has no webhook")
@@ -6066,14 +6025,6 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		}
 		slog.Warn("payment webhook accepted but not processed",
 			"provider", providerName, "external_id", parsed.ExternalID, "tenant", input.Tenant, "reason", reason)
-		// #region agent log
-		agentDebugLog("handlers.go:processPaymentWebhook:no-provider", "webhook accepted but not processed", "B", map[string]any{
-			"provider":    providerName,
-			"external_id": parsed.ExternalID,
-			"reason":      reason,
-			"tenant":      input.Tenant,
-		})
-		// #endregion
 		return webhookAck("received", reason), nil
 	}
 
@@ -6086,18 +6037,6 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		} else {
 			slog.Warn("payment webhook rejected: invalid signature",
 				"provider", providerName, "external_id", parsed.ExternalID, "err", verr)
-			// #region agent log
-			appEnv := ""
-			if d.Config != nil {
-				appEnv = d.Config.AppEnv
-			}
-			agentDebugLog("handlers.go:processPaymentWebhook:sig-fail", "webhook rejected invalid signature", "C", map[string]any{
-				"provider":    providerName,
-				"external_id": parsed.ExternalID,
-				"err":         verr.Error(),
-				"app_env":     appEnv,
-			})
-			// #endregion
 			return nil, httpx.Unauthorized("invalid webhook signature")
 		}
 	} else {
@@ -6118,27 +6057,9 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		}
 	}
 
-	willComplete := payment.WebhookIsPaid(event.Status) && event.ExternalID != ""
-	// #region agent log
-	agentDebugLog("handlers.go:processPaymentWebhook:decide", "webhook verify+paid decision", "D", map[string]any{
-		"provider":      providerName,
-		"external_id":   event.ExternalID,
-		"event_status":  event.Status,
-		"is_paid":       payment.WebhookIsPaid(event.Status),
-		"will_complete": willComplete,
-		"amount":        event.Amount,
-	})
-	// #endregion
-	if willComplete {
+	if payment.WebhookIsPaid(event.Status) && event.ExternalID != "" {
 		if err := completePaidWebhook(ctx, d, providerName, event); err != nil {
 			slog.Error("complete paid webhook", "external_id", event.ExternalID, "err", err)
-			// #region agent log
-			agentDebugLog("handlers.go:processPaymentWebhook:complete-err", "completePaidWebhook failed", "E", map[string]any{
-				"provider":    providerName,
-				"external_id": event.ExternalID,
-				"err":         err.Error(),
-			})
-			// #endregion
 			return nil, httpx.Internal(err)
 		}
 	}

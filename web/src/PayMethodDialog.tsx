@@ -12,6 +12,7 @@ import {
   PAY_METHOD_QRIS,
   payMethodToProvider,
   payOptionsToMethods,
+  portalPaymentReturnURL,
   setSavedPayMethod,
   type PayableInvoice,
   type PayMethodDef,
@@ -155,24 +156,13 @@ export function PortalPayHost({
     setSavedPayMethod(method, tenantSlug);
     setBusy(true);
     setError("");
-    // Halaman hosted (DOKU) tidak punya popup SDK. Buka tab kosong secara
-    // sinkron dari klik user agar tidak diblokir popup-blocker, lalu arahkan
-    // ke halaman PG begitu intent selesai dibuat.
-    let popup: Window | null = null;
-    if (method === PAY_METHOD_DOKU && typeof window !== "undefined") {
-      try {
-        popup = window.open("about:blank", "_blank");
-      } catch {
-        popup = null;
-      }
-    }
     try {
       const next = await api<QrisIntent>(`/api/portal/invoices/${invoice.id}/checkout`, {
         method: "POST",
         headers,
         body: JSON.stringify({
           provider: payMethodToProvider(method),
-          return_url: typeof window !== "undefined" ? window.location.href : "",
+          return_url: portalPaymentReturnURL(),
         }),
       });
       if (method === PAY_METHOD_DUITKU) {
@@ -181,25 +171,15 @@ export function PortalPayHost({
       }
       if (method === PAY_METHOD_DOKU) {
         const url = String(next.checkout_url || "").trim();
-        if (popup && !popup.closed) {
-          if (url) {
-            popup.location.href = url;
-            try {
-              popup.opener = null;
-            } catch {
-              /* abaikan */
-            }
-          } else {
-            void popup.close();
-          }
-        } else if (url) {
-          window.open(url, "_blank", "noopener,noreferrer");
+        if (!url) {
+          throw new Error("Link pembayaran DOKU kosong");
         }
+        window.location.assign(url);
+        return;
       }
       setIntent(next);
       setStep("qris");
     } catch (err: unknown) {
-      if (popup && !popup.closed) void popup.close();
       const msg = err instanceof Error ? err.message : "Gagal membuat pembayaran";
       setError(msg);
       void toastError(msg);
@@ -224,24 +204,7 @@ export function PortalPayHost({
     }
     try {
       await openDuitkuPopup(reference, sandbox, {
-        onSuccess: () => {
-          // #region agent log
-          fetch("http://127.0.0.1:7813/ingest/d5ceb638-f02e-4b79-b49c-b843ba23dc69", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f19e18" },
-            body: JSON.stringify({
-              sessionId: "f19e18",
-              runId: "pre-fix",
-              hypothesisId: "F",
-              location: "PayMethodDialog.tsx:duitkuOnSuccess",
-              message: "Duitku popup onSuccess fired (UI only, no RecordPayment)",
-              data: { invoice: invoice.invoice_number, invoiceId: invoice.id },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
-          onPaid?.();
-        },
+        onSuccess: () => onPaid?.(),
         onError: () => void toastError("Pembayaran Duitku gagal atau dibatalkan."),
         onClose: () => onClose(),
       });

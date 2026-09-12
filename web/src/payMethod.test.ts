@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  consumePaymentReturnSuccess,
   getSavedPayMethod,
   invoiceRemaining,
   isInvoiceUnpaid,
   isIsolirStatus,
   isPayMethodId,
+  notePaymentReturnFromLocation,
   PAY_METHOD_DUITKU,
   paymentMethodLabel,
+  portalPaymentReturnURL,
   setSavedPayMethod,
 } from "./payMethod";
 
@@ -38,5 +41,15 @@ describe("payMethod", () => {
     expect(paymentMethodLabel("doku")).toBe("DOKU");
     expect(paymentMethodLabel("")).toBe("—");
     expect(paymentMethodLabel("midtrans")).toBe("midtrans");
+  });
+
+  it("marks and consumes payment return from query", () => {
+    sessionStorage.clear();
+    window.history.replaceState(null, "", "/client/dashboard?payment=success&x=1");
+    expect(portalPaymentReturnURL()).toContain("payment=success");
+    notePaymentReturnFromLocation();
+    expect(consumePaymentReturnSuccess()).toBe(true);
+    expect(window.location.search).not.toContain("payment=success");
+    expect(consumePaymentReturnSuccess()).toBe(false);
   });
 });

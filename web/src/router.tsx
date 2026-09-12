@@ -23,6 +23,7 @@ import { TenantLogin, type ClientPortalData } from "./TenantLogin";
 import { IsolirPortalPage } from "./IsolirPortalPage";
 import { getLastAdminPage, setLastAdminPage } from "./navPersist";
 import { TenantAccent } from "./theme";
+import { notePaymentReturnFromLocation } from "./payMethod";
 
 /** Admin is authenticated when an access token is present. */
 function isAdmin(): boolean {
@@ -74,6 +75,7 @@ function RootLayout() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    notePaymentReturnFromLocation();
     const onExpired = () => {
       void navigate({ to: "/admin/login" });
     };
@@ -311,6 +313,7 @@ function ClientHomeView() {
 }
 
 function clientGuard() {
+  notePaymentReturnFromLocation();
   if (isAdmin()) throw redirect({ to: "/admin/dashboard" });
   if (!hasClientSession()) throw redirect({ to: "/login" });
 }

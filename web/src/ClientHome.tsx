@@ -7,7 +7,7 @@ import type { ClientPortalData, PortalCustomer } from "./TenantLogin";
 import { ClientIdCard } from "./ClientIdCard";
 import { ClientBell } from "./ClientBell";
 import { ChatwootWidget } from "./ChatwootWidget";
-import { toastError, toastSuccess } from "./swal";
+import { alertPaymentSuccess, toastError, toastSuccess } from "./swal";
 import { ThemeToggle } from "./ThemeToggle";
 import {
   Breadcrumb,
@@ -19,7 +19,7 @@ import {
 import { formatRp, IconButton, invoiceStatusLabel, paymentStatusLabel, Section, SecretInput, subscriptionStatusLabel, Table, ticketStatusHint, ticketStatusLabel, ticketStatusTone } from "./ui";
 import { IconBan, IconBanknote, IconChart, IconDownload, IconGauge, IconLock, IconLogout, IconShield, IconTicket } from "./icons";
 import { PortalPayHost } from "./PayMethodDialog";
-import { clearSavedPayMethod, hasSavedPayMethod, invoiceRemaining, isInvoiceUnpaid, isIsolirStatus, paymentMethodLabel, type PayableInvoice } from "./payMethod";
+import { clearSavedPayMethod, consumePaymentReturnSuccess, hasSavedPayMethod, invoiceRemaining, isInvoiceUnpaid, isIsolirStatus, paymentMethodLabel, type PayableInvoice } from "./payMethod";
 import { canChangePortalPlan, PortalChangePlanDialog, PortalPlanCatalog, type PortalPlan, type PortalSub } from "./PortalChangePlan";
 import { getSidebarOpen, setSidebarOpen, usePersistedTab } from "./navPersist";
 
@@ -294,6 +294,7 @@ export function ClientHome({
   const multi = accounts.length > 1;
   const [pwAccount, setPwAccount] = useState("");
   const [payInv, setPayInv] = useState<PayableInvoice | null>(null);
+  const paymentReturnHandled = useRef(false);
   const [changePlanSub, setChangePlanSub] = useState<PortalSub | null>(null);
   const [changePlanInitialId, setChangePlanInitialId] = useState("");
   const [ticketAccount, setTicketAccount] = useState("");
@@ -434,34 +435,6 @@ export function ClientHome({
     refetchInterval: 15000,
   });
   const invoices = invoicesQ.isSuccess ? (invoicesQ.data?.data ?? []) : (data.invoices ?? []);
-  useEffect(() => {
-    if (!invoicesQ.isSuccess) return;
-    const rows = invoicesQ.data?.data ?? [];
-    // #region agent log
-    fetch("http://127.0.0.1:7813/ingest/d5ceb638-f02e-4b79-b49c-b843ba23dc69", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f19e18" },
-      body: JSON.stringify({
-        sessionId: "f19e18",
-        runId: "pre-fix",
-        hypothesisId: "F",
-        location: "ClientHome.tsx:invoicesQ",
-        message: "client dashboard invoices loaded",
-        data: {
-          count: rows.length,
-          unpaid: rows.filter((i) => String(i.status || "").toLowerCase() !== "paid" && Number(i.total_amount || 0) - Number(i.paid_amount || 0) > 0).length,
-          invoices: rows.map((i) => ({
-            number: i.invoice_number,
-            status: i.status,
-            paid: i.paid_amount,
-            total: i.total_amount,
-          })),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [invoicesQ.isSuccess, invoicesQ.data]);
 
   const paymentsQ = useQuery({
     queryKey: ["portal-payments", data.tenant_slug],
@@ -473,6 +446,39 @@ export function ClientHome({
     refetchInterval: 15000,
   });
   const payments = paymentsQ.isSuccess ? (paymentsQ.data?.data ?? []) : (data.payments ?? []);
+
+  useEffect(() => {
+    if (paymentReturnHandled.current) return;
+    if (!consumePaymentReturnSuccess()) return;
+    paymentReturnHandled.current = true;
+    setPage("invoices");
+    void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
+    void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
+    void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
+    void (async () => {
+      try {
+        const res = await api<{ data: NonNullable<ClientPortalData["invoices"]> }>("/api/portal/invoices", {
+          headers: portalHeaders,
+        });
+        for (const inv of res.data ?? []) {
+          if (!inv.id || !isInvoiceUnpaid(inv)) continue;
+          try {
+            await api(`/api/portal/invoices/${inv.id}/payment-intent`, { headers: portalHeaders });
+          } catch {
+            /* belum ada intent / belum lunas di PG */
+          }
+        }
+        void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
+        void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
+        void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
+      } catch {
+        /* daftar tagihan tetap di-refresh interval */
+      }
+    })();
+    void alertPaymentSuccess();
+    // Sekali saat kembali dari PG; jangan ikut re-render query.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const session = getClientSession<ClientPortalData>() || data;
@@ -1342,10 +1348,10 @@ export function ClientHome({
         onClose={() => setPayInv(null)}
         onPaid={() => {
           setPayInv(null);
-          void toastSuccess("Pembayaran diterima");
           void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
           void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
           void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
+          void alertPaymentSuccess();
         }}
       />
     </div>

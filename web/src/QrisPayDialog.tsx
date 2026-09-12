@@ -104,21 +104,6 @@ export function QrisPayDialog({
     if (!pollPath) return null;
     const next = await api<QrisIntent>(pollPath, { headers: pollHeaders });
     setCurrent(next);
-    // #region agent log
-    fetch("http://127.0.0.1:7813/ingest/d5ceb638-f02e-4b79-b49c-b843ba23dc69", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f19e18" },
-      body: JSON.stringify({
-        sessionId: "f19e18",
-        runId: "pre-fix",
-        hypothesisId: "F",
-        location: "QrisPayDialog.tsx:refreshStatus",
-        message: "payment-intent poll result",
-        data: { invoiceNumber, status: next.status, provider: next.provider, paid: isPaid(next.status) },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     if (isPaid(next.status)) onPaid?.();
     if (!opts?.silent && !isPaid(next.status) && !isCancelled(next.status) && !isExpired(next.status)) {
       void toastError("Belum terdeteksi. Jika sudah transfer, tunggu sebentar lalu cek lagi.");
@@ -192,7 +177,7 @@ export function QrisPayDialog({
 
   function openCheckout() {
     if (!checkoutURL) return;
-    window.open(checkoutURL, "_blank", "noopener,noreferrer");
+    window.location.assign(checkoutURL);
   }
 
   async function onDownloadQris() {
