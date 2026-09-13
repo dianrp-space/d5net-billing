@@ -19,7 +19,7 @@ import {
 import { formatRp, IconButton, invoiceStatusLabel, paymentStatusLabel, Section, SecretInput, subscriptionStatusLabel, Table, ticketStatusHint, ticketStatusLabel, ticketStatusTone } from "./ui";
 import { IconBan, IconBanknote, IconChart, IconDownload, IconGauge, IconLock, IconLogout, IconShield, IconTicket } from "./icons";
 import { PortalPayHost } from "./PayMethodDialog";
-import { clearSavedPayMethod, consumePaymentReturnSuccess, hasSavedPayMethod, invoiceRemaining, isInvoiceUnpaid, isIsolirStatus, paymentMethodLabel, type PayableInvoice } from "./payMethod";
+import { clearSavedPayMethod, consumePaymentReturn, confirmPaymentAfterReturn, hasSavedPayMethod, invoiceRemaining, isInvoiceUnpaid, isIsolirStatus, paymentMethodLabel, type PayableInvoice } from "./payMethod";
 import { canChangePortalPlan, PortalChangePlanDialog, PortalPlanCatalog, type PortalPlan, type PortalSub } from "./PortalChangePlan";
 import { getSidebarOpen, setSidebarOpen, usePersistedTab } from "./navPersist";
 
@@ -449,38 +449,39 @@ export function ClientHome({
 
   useEffect(() => {
     if (paymentReturnHandled.current) return;
-    if (!consumePaymentReturnSuccess()) return;
+    const ret = consumePaymentReturn();
+    if (!ret.returned) return;
     paymentReturnHandled.current = true;
     setPage("invoices");
-    void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
-    void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
-    void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
     void (async () => {
-      try {
-        const before = await api<{ data: NonNullable<ClientPortalData["invoices"]> }>("/api/portal/invoices", {
-          headers: portalHeaders,
-        });
-        const unpaidBefore = (before.data ?? []).filter(isInvoiceUnpaid);
-        for (const inv of unpaidBefore) {
-          if (!inv.id) continue;
+      const confirmed = await confirmPaymentAfterReturn({
+        resultCode: ret.resultCode,
+        fetchInvoices: async () => {
+          const res = await api<{ data: NonNullable<ClientPortalData["invoices"]> }>("/api/portal/invoices", {
+            headers: portalHeaders,
+          });
+          return res.data ?? [];
+        },
+        fetchPaymentIntent: async (invoiceId) => {
           try {
-            await api(`/api/portal/invoices/${inv.id}/payment-intent`, { headers: portalHeaders });
+            return await api<{ status?: string }>(`/api/portal/invoices/${invoiceId}/payment-intent`, {
+              headers: portalHeaders,
+            });
           } catch {
-            /* belum ada intent / belum lunas di PG */
+            return null;
           }
-        }
-        const after = await api<{ data: NonNullable<ClientPortalData["invoices"]> }>("/api/portal/invoices", {
-          headers: portalHeaders,
-        });
-        void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
-        void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
-        void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
-        const unpaidAfterIds = new Set((after.data ?? []).filter(isInvoiceUnpaid).map((i) => i.id).filter(Boolean));
-        const paidNow = unpaidBefore.some((inv) => inv.id && !unpaidAfterIds.has(inv.id));
-        if (paidNow) void alertPaymentSuccess();
-      } catch {
-        /* daftar tagihan tetap di-refresh interval */
-      }
+        },
+        fetchPayments: async () => {
+          const res = await api<{ data: NonNullable<ClientPortalData["payments"]> }>("/api/portal/payments", {
+            headers: portalHeaders,
+          });
+          return res.data ?? [];
+        },
+      });
+      void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
+      void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
+      void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
+      if (confirmed) void alertPaymentSuccess();
     })();
     // Sekali saat kembali dari PG; jangan ikut re-render query.
     // eslint-disable-next-line react-hooks/exhaustive-deps

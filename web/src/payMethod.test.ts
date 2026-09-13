@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  confirmPaymentAfterReturn,
+  consumePaymentReturn,
   consumePaymentReturnSuccess,
   getSavedPayMethod,
   invoiceRemaining,
@@ -17,6 +19,7 @@ import {
 describe("payMethod", () => {
   afterEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
   });
 
   it("persists last method", () => {
@@ -54,7 +57,6 @@ describe("payMethod", () => {
   });
 
   it("marks and consumes payment return from query", () => {
-    sessionStorage.clear();
     window.history.replaceState(null, "", "/client/dashboard?payment=return&x=1");
     expect(portalPaymentReturnURL()).toContain("payment=return");
     expect(portalPaymentReturnURL()).not.toContain("payment=success");
@@ -65,9 +67,41 @@ describe("payMethod", () => {
   });
 
   it("still consumes legacy payment=success return marker", () => {
-    sessionStorage.clear();
     window.history.replaceState(null, "", "/client/dashboard?payment=success");
     expect(consumePaymentReturnSuccess()).toBe(true);
     expect(window.location.search).not.toContain("payment=success");
+  });
+
+  it("reads Duitku resultCode and confirms paid after webhook already settled", async () => {
+    window.history.replaceState(null, "", "/client/dashboard?payment=return&resultCode=00&merchantOrderId=INV-1");
+    const info = consumePaymentReturn();
+    expect(info.returned).toBe(true);
+    expect(info.resultCode).toBe("00");
+    expect(window.location.search).not.toContain("resultCode");
+
+    const confirmed = await confirmPaymentAfterReturn({
+      resultCode: info.resultCode,
+      attempts: 1,
+      delayMs: 1,
+      fetchInvoices: async () => [
+        { id: "1", invoice_number: "INV-1", status: "paid", total_amount: 100, paid_amount: 100 },
+      ],
+      fetchPaymentIntent: async () => null,
+      fetchPayments: async () => [{ status: "paid", paid_at: new Date().toISOString() }],
+    });
+    expect(confirmed).toBe(true);
+  });
+
+  it("does not confirm when Duitku resultCode is canceled", async () => {
+    const confirmed = await confirmPaymentAfterReturn({
+      resultCode: "02",
+      attempts: 2,
+      delayMs: 1,
+      fetchInvoices: async () => [
+        { id: "1", invoice_number: "INV-1", status: "issued", total_amount: 100, paid_amount: 0 },
+      ],
+      fetchPaymentIntent: async () => ({ status: "pending" }),
+    });
+    expect(confirmed).toBe(false);
   });
 });

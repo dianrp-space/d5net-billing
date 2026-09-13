@@ -4,7 +4,7 @@ import { applyBrandingMeta } from "./branding";
 import { formatRp, LoginShell, SecretInput } from "./ui";
 import { AuthThemeCorner } from "./ThemeToggle";
 import { PortalPayHost } from "./PayMethodDialog";
-import { consumePaymentReturnSuccess, isInvoiceUnpaid, notePaymentReturnFromLocation, type PayableInvoice } from "./payMethod";
+import { consumePaymentReturn, confirmPaymentAfterReturn, isInvoiceUnpaid, notePaymentReturnFromLocation, type PayableInvoice } from "./payMethod";
 import { alertPaymentSuccess } from "./swal";
 
 type PublicTenant = {
@@ -47,36 +47,49 @@ export function IsolirPortalPage() {
 
   useEffect(() => {
     if (!session?.portal_token) return;
-    if (!consumePaymentReturnSuccess()) return;
+    const ret = consumePaymentReturn();
+    if (!ret.returned) return;
     const token = session.portal_token;
     void (async () => {
-      try {
-        const before = await api<{ data: Invoice[] }>("/api/portal/invoices", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const unpaidBefore = (before.data || []).filter(isInvoiceUnpaid);
-        for (const inv of unpaidBefore) {
-          if (!inv.id) continue;
+      const confirmed = await confirmPaymentAfterReturn({
+        resultCode: ret.resultCode,
+        fetchInvoices: async () => {
+          const res = await api<{ data: Invoice[] }>("/api/portal/invoices", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          return res.data || [];
+        },
+        fetchPaymentIntent: async (invoiceId) => {
           try {
-            await api(`/api/portal/invoices/${inv.id}/payment-intent`, {
+            return await api<{ status?: string }>(`/api/portal/invoices/${invoiceId}/payment-intent`, {
               headers: { Authorization: `Bearer ${token}` },
             });
           } catch {
-            /* belum lunas */
+            return null;
           }
-        }
-        const after = await api<{ data: Invoice[] }>("/api/portal/invoices", {
+        },
+        fetchPayments: async () => {
+          try {
+            const res = await api<{ data: Array<{ status?: string; paid_at?: string | null; created_at?: string | null }> }>(
+              "/api/portal/payments",
+              { headers: { Authorization: `Bearer ${token}` } },
+            );
+            return res.data || [];
+          } catch {
+            return [];
+          }
+        },
+      });
+      try {
+        const res = await api<{ data: Invoice[] }>("/api/portal/invoices", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const next = (after.data || []).filter(isInvoiceUnpaid);
+        const next = (res.data || []).filter(isInvoiceUnpaid);
         setSession((prev) => (prev ? { ...prev, invoices: next } : prev));
-        const unpaidAfterIds = new Set(next.map((i) => i.id).filter(Boolean));
-        if (unpaidBefore.some((inv) => inv.id && !unpaidAfterIds.has(inv.id))) {
-          void alertPaymentSuccess();
-        }
       } catch {
         /* keep snapshot */
       }
+      if (confirmed) void alertPaymentSuccess();
     })();
   }, [session?.portal_token]);
 

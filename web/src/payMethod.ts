@@ -224,9 +224,15 @@ export const PAYMENT_RETURN_VALUE = "return";
 /** @deprecated alias lama — masih dikenali saat consume. */
 export const PAYMENT_RETURN_SUCCESS = "success";
 const PAYMENT_RETURN_STORAGE = "drp_payment_return";
+const PAYMENT_RESULT_CODE_STORAGE = "drp_payment_result_code";
 
 function isPaymentReturnValue(v: string | null): boolean {
   return v === PAYMENT_RETURN_VALUE || v === PAYMENT_RETURN_SUCCESS;
+}
+
+function isPaidStatus(status?: string | null): boolean {
+  const s = String(status || "").trim().toLowerCase();
+  return s === "paid" || s === "success" || s === "settlement" || s === "completed";
 }
 
 /** Return URL ke portal setelah hosted checkout (DOKU / Duitku). */
@@ -245,29 +251,151 @@ export function notePaymentReturnFromLocation() {
     if (isPaymentReturnValue(u.searchParams.get(PAYMENT_RETURN_PARAM))) {
       sessionStorage.setItem(PAYMENT_RETURN_STORAGE, "1");
     }
+    // Duitku menyisipkan resultCode di return URL (00 sukses / 01 pending / 02 batal).
+    const rc = u.searchParams.get("resultCode") || u.searchParams.get("result_code");
+    if (rc) sessionStorage.setItem(PAYMENT_RESULT_CODE_STORAGE, rc);
   } catch {
     /* private mode */
   }
 }
 
+export type PaymentReturnInfo = {
+  returned: boolean;
+  /** Kode hasil Duitku bila ada (00/01/02). */
+  resultCode: string;
+};
+
 /** True sekali saat customer kembali dari PG. Membersihkan query + sessionStorage.
- * Tidak berarti pembayaran sukses — pemanggil harus cek status tagihan/intent. */
-export function consumePaymentReturnSuccess(): boolean {
+ * Tidak berarti pembayaran sukses — pakai confirmPaymentAfterReturn untuk verifikasi. */
+export function consumePaymentReturn(): PaymentReturnInfo {
   notePaymentReturnFromLocation();
-  let hit = false;
+  let returned = false;
+  let resultCode = "";
   try {
-    hit = sessionStorage.getItem(PAYMENT_RETURN_STORAGE) === "1";
-    if (hit) sessionStorage.removeItem(PAYMENT_RETURN_STORAGE);
+    returned = sessionStorage.getItem(PAYMENT_RETURN_STORAGE) === "1";
+    if (returned) sessionStorage.removeItem(PAYMENT_RETURN_STORAGE);
+    resultCode = String(sessionStorage.getItem(PAYMENT_RESULT_CODE_STORAGE) || "").trim();
+    if (resultCode) sessionStorage.removeItem(PAYMENT_RESULT_CODE_STORAGE);
   } catch {
     /* ignore */
   }
-  if (typeof window === "undefined") return hit;
-  const u = new URL(window.location.href);
-  if (isPaymentReturnValue(u.searchParams.get(PAYMENT_RETURN_PARAM))) {
-    hit = true;
-    u.searchParams.delete(PAYMENT_RETURN_PARAM);
-    const next = `${u.pathname}${u.search}${u.hash}`;
-    window.history.replaceState(window.history.state, "", next);
+  if (typeof window !== "undefined") {
+    const u = new URL(window.location.href);
+    if (isPaymentReturnValue(u.searchParams.get(PAYMENT_RETURN_PARAM))) {
+      returned = true;
+      u.searchParams.delete(PAYMENT_RETURN_PARAM);
+    }
+    const rc = u.searchParams.get("resultCode") || u.searchParams.get("result_code");
+    if (rc) {
+      if (!resultCode) resultCode = rc;
+      u.searchParams.delete("resultCode");
+      u.searchParams.delete("result_code");
+    }
+    u.searchParams.delete("merchantOrderId");
+    u.searchParams.delete("reference");
+    if (returned || rc) {
+      const next = `${u.pathname}${u.search}${u.hash}`;
+      window.history.replaceState(window.history.state, "", next);
+    }
   }
-  return hit;
+  return { returned, resultCode };
+}
+
+/** @deprecated gunakan consumePaymentReturn(). */
+export function consumePaymentReturnSuccess(): boolean {
+  return consumePaymentReturn().returned;
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isRecentPaidAt(when?: string | null, withinMs = 30 * 60 * 1000): boolean {
+  if (!when) return true; // tanpa timestamp, anggap kandidat (baru dari list)
+  const t = Date.parse(when);
+  if (!Number.isFinite(t)) return true;
+  return Date.now() - t <= withinMs;
+}
+
+/**
+ * Setelah kembali dari PG: poll status sampai lunas terkonfirmasi, atau batal.
+ * Menangani kasus webhook sudah menandai lunas sebelum redirect (unpaid kosong).
+ */
+export async function confirmPaymentAfterReturn(opts: {
+  resultCode?: string;
+  fetchInvoices: () => Promise<PayableInvoice[]>;
+  fetchPaymentIntent: (invoiceId: string) => Promise<{ status?: string } | null>;
+  fetchPayments?: () => Promise<Array<{ status?: string; paid_at?: string | null; created_at?: string | null }>>;
+  attempts?: number;
+  delayMs?: number;
+}): Promise<boolean> {
+  const rc = String(opts.resultCode || "").trim();
+  // Duitku: 02 = dibatalkan / gagal — jangan tampilkan sukses.
+  if (rc === "02") return false;
+
+  const attempts = Math.max(1, opts.attempts ?? 6);
+  const delayMs = Math.max(200, opts.delayMs ?? 1500);
+
+  let unpaidAtStart: string[] | null = null;
+
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await sleep(delayMs);
+
+    let invoices: PayableInvoice[] = [];
+    try {
+      invoices = await opts.fetchInvoices();
+    } catch {
+      continue;
+    }
+
+    const unpaid = invoices.filter(isInvoiceUnpaid);
+    if (unpaidAtStart === null) {
+      unpaidAtStart = unpaid.map((inv) => String(inv.id || "")).filter(Boolean);
+    }
+
+    for (const inv of unpaid) {
+      if (!inv.id) continue;
+      try {
+        const pi = await opts.fetchPaymentIntent(inv.id);
+        if (pi && isPaidStatus(pi.status)) return true;
+      } catch {
+        /* belum ada intent / belum lunas */
+      }
+    }
+
+    let invoicesAfter: PayableInvoice[] = invoices;
+    try {
+      invoicesAfter = await opts.fetchInvoices();
+    } catch {
+      /* pakai snapshot sebelumnya */
+    }
+    const unpaidAfterIds = new Set(
+      invoicesAfter.filter(isInvoiceUnpaid).map((inv) => String(inv.id || "")).filter(Boolean),
+    );
+    if (unpaidAtStart.some((id) => !unpaidAfterIds.has(id))) return true;
+
+    // Webhook sudah selesai sebelum return → tidak ada unpaid di awal.
+    if (unpaidAtStart.length === 0) {
+      if (opts.fetchPayments) {
+        try {
+          const payments = await opts.fetchPayments();
+          if (
+            payments.some(
+              (p) => isPaidStatus(p.status) && isRecentPaidAt(p.paid_at || p.created_at),
+            )
+          ) {
+            return true;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      // Petunjuk Duitku sukses + tidak ada tunggakan → anggap OK untuk UX.
+      if (rc === "00" && invoicesAfter.some((inv) => inv.status === "paid" || !isInvoiceUnpaid(inv))) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
