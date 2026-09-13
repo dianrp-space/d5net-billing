@@ -109,6 +109,7 @@ export function ClientBell({
   onNavigatePage: (page: ClientPageId) => void;
 }) {
   const [read, setRead] = useState<string[]>(loadRead);
+  const [open, setOpen] = useState(false);
 
   const items = useMemo<Item[]>(() => {
     const out: Item[] = [];
@@ -180,10 +181,11 @@ export function ClientBell({
   function openItem(it: Item) {
     markRead([it.key]);
     onNavigatePage(it.page);
+    setOpen(false);
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <span className="relative inline-flex">
           <IconButton label={unread > 0 ? `Notifikasi (${unread} belum dibaca)` : "Notifikasi"}>
@@ -206,7 +208,10 @@ export function ClientBell({
             <button
               type="button"
               className="text-xs font-medium text-[var(--accent)] underline-offset-2 hover:underline"
-              onClick={() => markRead(items.map((i) => i.key))}
+              onClick={() => {
+                markRead(items.map((i) => i.key));
+                setOpen(false);
+              }}
             >
               Tandai semua dibaca
             </button>

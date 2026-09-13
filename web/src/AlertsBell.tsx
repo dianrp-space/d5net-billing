@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { IconBell } from "./icons";
@@ -50,6 +51,7 @@ function severityColor(sev: string): string {
 /** Bell notifikasi header: badge unread + dropdown daftar alert. */
 export function AlertsBell({ onNavigatePage }: { onNavigatePage?: (page: AdminPage) => void }) {
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
   const q = useQuery({
     queryKey: ["alerts"],
     queryFn: () =>
@@ -85,10 +87,11 @@ export function AlertsBell({ onNavigatePage }: { onNavigatePage?: (page: AdminPa
     } else if (a.entity_type === "lead" && onNavigatePage) {
       onNavigatePage("leads");
     }
+    setOpen(false);
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <span className="relative inline-flex">
           <IconButton label={unread > 0 ? `Notifikasi (${unread} belum dibaca)` : "Notifikasi"}>
@@ -112,7 +115,10 @@ export function AlertsBell({ onNavigatePage }: { onNavigatePage?: (page: AdminPa
               type="button"
               className="text-xs font-medium text-[var(--accent)] underline-offset-2 hover:underline"
               disabled={ackAll.isPending}
-              onClick={() => ackAll.mutate()}
+              onClick={() => {
+                ackAll.mutate();
+                setOpen(false);
+              }}
             >
               Tandai semua dibaca
             </button>
