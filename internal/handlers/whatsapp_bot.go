@@ -9,11 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dianrp-space/d5net-billing/internal/payment"
 	"github.com/dianrp-space/d5net-billing/internal/store"
 	"github.com/dianrp-space/d5net-billing/internal/wa"
 	"github.com/dianrp-space/d5net-billing/internal/xid"
-	"github.com/skip2/go-qrcode"
 )
 
 // WhatsApp customer bot.
@@ -346,56 +344,13 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 			return
 		}
 		origin := appPublicOrigin(ctx, d, tid, "", "", "", "", "")
-		if cmd == "/qris" {
-			if sendDokuQRIS(ctx, d, tid, phone, &target, remaining, extra, origin) {
-				return
-			}
-			_ = client.SendText(ctx, phone,
-				"QRIS belum tersedia. Admin perlu mengisi private key + merchant ID + terminal ID + kode pos di Integrasi → DOKU, lalu aktifkan channel QRIS.")
-			return
-		}
 		providerName := opts[0].Provider
-		channel := ""
 		returnURL := origin
-		if providerName == payment.ProviderDoku {
-			if len(opts[0].Channels) == 0 {
-				_ = client.SendText(ctx, phone, "Metode DOKU belum dikonfigurasi. Hubungi admin.")
-				return
-			}
-			channel = pickDokuBotChannel(opts[0].Channels)
-			if channel == "" {
-				_ = client.SendText(ctx, phone, "Tidak ada channel DOKU yang siap dipakai. Hubungi admin.")
-				return
-			}
-		}
-		pi, err := checkoutInvoice(ctx, d, tid, &target, providerName, channel, returnURL, origin)
+		pi, err := checkoutInvoice(ctx, d, tid, &target, providerName, "", returnURL, origin)
 		if err != nil {
-			slog.Warn("wabot: checkout", "bot", BotName, "tenant_id", tid, "provider", providerName, "channel", channel, "err", err)
+			slog.Warn("wabot: checkout", "bot", BotName, "tenant_id", tid, "provider", providerName, "err", err)
 			_ = client.SendText(ctx, phone, waCheckoutFailMsg(err))
 			return
-		}
-		// Direct: tampilkan nomor VA / kode gerai / QR bila ada; e-wallet butuh URL.
-		if pi.Metadata != nil {
-			if code := strings.TrimSpace(fmt.Sprint(pi.Metadata["va_number"])); code != "" && code != "<nil>" {
-				_ = client.SendText(ctx, phone, fmt.Sprintf("Transfer VA %s:\n%s\nNominal %s%s",
-					fmt.Sprint(pi.Metadata["va_bank"]), code, formatRupiahID(pi.Amount), extra))
-				return
-			}
-			if code := strings.TrimSpace(fmt.Sprint(pi.Metadata["payment_code"])); code != "" && code != "<nil>" {
-				_ = client.SendText(ctx, phone, fmt.Sprintf("Bayar di %s dengan kode:\n%s\nNominal %s%s",
-					fmt.Sprint(pi.Metadata["retail_label"]), code, formatRupiahID(pi.Amount), extra))
-				return
-			}
-		}
-		if pi.QRString != "" {
-			png, err := qrcode.Encode(pi.QRString, qrcode.Medium, 512)
-			if err == nil && len(png) > 0 {
-				caption := fmt.Sprintf("Scan QRIS untuk membayar %s (%s).%s",
-					target.InvoiceNumber, formatRupiahID(pi.Amount), extra)
-				if err := client.SendImage(ctx, phone, caption, png); err == nil {
-					return
-				}
-			}
 		}
 		if strings.TrimSpace(pi.CheckoutURL) == "" {
 			_ = client.SendText(ctx, phone, "Link bayar belum tersedia. Hubungi admin.")
@@ -413,23 +368,6 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 	}
 }
 
-// pickDokuBotChannel memilih channel yang paling cocok untuk WhatsApp:
-// QRIS → VA → retail → e-wallet (redirect kurang nyaman di chat).
-func pickDokuBotChannel(channels []dokuChannelFeeView) string {
-	prefer := []string{"qr", "va", "retail", "ewallet"}
-	for _, kind := range prefer {
-		for _, ch := range channels {
-			if strings.EqualFold(ch.Kind, kind) && ch.Enabled {
-				return ch.ID
-			}
-		}
-	}
-	if len(channels) > 0 {
-		return channels[0].ID
-	}
-	return ""
-}
-
 func waCheckoutFailMsg(err error) string {
 	if err == nil {
 		return "Gagal membuat pembayaran. Coba lagi atau hubungi admin."
@@ -438,14 +376,6 @@ func waCheckoutFailMsg(err error) string {
 	switch {
 	case strings.Contains(s, "URL publik"):
 		return "Pembayaran online belum tersedia saat ini. Hubungi admin."
-	case strings.Contains(s, "return URL"):
-		return "E-wallet butuh URL portal publik. Isi Portal base URL (pengaturan Isolir/Jaringan), atau aktifkan QRIS / VA / retail."
-	case strings.Contains(s, "BIN") || strings.Contains(s, "partner service"):
-		return "VA DOKU belum siap. Admin perlu mengisi BIN (partner service ID) di Integrasi → DOKU."
-	case strings.Contains(s, "private key") || strings.Contains(s, "QRIS") || strings.Contains(s, "SNAP"):
-		return "QRIS DOKU belum siap. Admin perlu mengisi private key + merchant/terminal/kode pos."
-	case strings.Contains(s, "channel"):
-		return "Metode pembayaran belum dikonfigurasi. Hubungi admin."
 	default:
 		return "Gagal membuat pembayaran. Coba lagi atau hubungi admin."
 	}
@@ -483,57 +413,6 @@ func sendLastPaidInvoice(ctx context.Context, d *Deps, tid xid.ID, client *wa.Cl
 		inv.InvoiceNumber, item, formatRupiahID(inv.TotalAmount), inv.DueDate.Format("02/01/2006"), paidWhen)
 	if err := client.SendFile(ctx, phone, caption, inv.InvoiceNumber+".pdf", "application/pdf", pdf); err != nil {
 		slog.Warn("wabot: kirim PDF lunas", "bot", BotName, "tenant_id", tid, "err", err)
-		return false
-	}
-	return true
-}
-
-// sendDokuQRIS membuat intent Direct QRIS (dengan fee channel) lalu kirim gambar QR.
-// False bila channel QRIS tidak ditawarkan / gagal mint.
-func sendDokuQRIS(ctx context.Context, d *Deps, tid xid.ID, phone string, inv *store.Invoice, remaining int64, extra, origin string) bool {
-	opts := listEnabledPayOptions(ctx, d, tid)
-	ready := false
-	for _, o := range opts {
-		if o.Provider != payment.ProviderDoku {
-			continue
-		}
-		for _, ch := range o.Channels {
-			if ch.ID == "qris" {
-				ready = true
-				break
-			}
-		}
-	}
-	if !ready {
-		return false
-	}
-	pi, err := checkoutInvoice(ctx, d, tid, inv, payment.ProviderDoku, "qris", origin, origin)
-	if err != nil {
-		slog.Warn("wabot: doku QRIS checkout", "bot", BotName, "tenant_id", tid, "err", err)
-		return false
-	}
-	if strings.TrimSpace(pi.QRString) == "" {
-		return false
-	}
-	png, err := qrcode.Encode(pi.QRString, qrcode.Medium, 512)
-	if err != nil || len(png) == 0 {
-		return false
-	}
-	client, err := botClientForTenant(ctx, d, tid)
-	if err != nil {
-		return false
-	}
-	payAmt := pi.PayableAmount
-	if payAmt <= 0 {
-		payAmt = pi.Amount
-	}
-	if payAmt <= 0 {
-		payAmt = remaining
-	}
-	caption := fmt.Sprintf("Scan QRIS untuk membayar %s (%s).%s",
-		strings.TrimSpace(inv.InvoiceNumber), formatRupiahID(payAmt), extra)
-	if err := client.SendImage(ctx, phone, caption, png); err != nil {
-		slog.Warn("wabot: kirim QRIS", "bot", BotName, "tenant_id", tid, "err", err)
 		return false
 	}
 	return true

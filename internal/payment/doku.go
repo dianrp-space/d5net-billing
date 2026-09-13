@@ -1,6 +1,7 @@
 package payment
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -144,26 +145,94 @@ func (p *DokuProvider) CreateIntent(ctx context.Context, req IntentRequest) (*In
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("nominal pembayaran harus > 0")
 	}
-	channelID := strings.ToLower(strings.TrimSpace(req.Channel))
-	if channelID == "" {
-		return nil, fmt.Errorf("pilih metode pembayaran DOKU (channel)")
+	orderID := strings.TrimSpace(req.MerchantOrderID)
+	if orderID == "" {
+		orderID = fmt.Sprintf("inv-%s", req.InvoiceID)
 	}
-	ch, ok := LookupDokuChannel(channelID)
-	if !ok {
-		return nil, fmt.Errorf("channel DOKU tidak dikenali: %s", channelID)
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		email = "noreply@localhost"
 	}
-	switch ch.Kind {
-	case DokuKindQR:
-		return p.createQRIntent(ctx, req)
-	case DokuKindVA:
-		return p.createVAIntent(ctx, req, ch)
-	case DokuKindEwallet:
-		return p.createEwalletIntent(ctx, req, ch)
-	case DokuKindRetail:
-		return p.createRetailIntent(ctx, req, ch)
-	default:
-		return nil, fmt.Errorf("jenis channel DOKU tidak didukung: %s", ch.Kind)
+	name := strings.TrimSpace(req.CustomerName)
+	if name == "" {
+		name = "Pelanggan"
 	}
+	expiry := ClampDokuExpiryMinutes(p.ExpiresInMinutes)
+	payload, err := json.Marshal(map[string]any{
+		"order": map[string]any{
+			"amount":         req.Amount,
+			"invoice_number": orderID,
+			"currency":       "IDR",
+			"callback_url":   firstNonEmpty(strings.TrimSpace(req.CallbackURL), strings.TrimSpace(req.ReturnURL)),
+			"language":       "ID",
+			"auto_redirect":  true,
+		},
+		"payment": map[string]any{
+			"payment_due_date": expiry,
+			"type":             "SALE",
+		},
+		"customer": map[string]any{
+			"id":      truncateRunes(firstNonEmpty(strings.TrimSpace(req.CustomerName), name), 50),
+			"name":    truncateRunes(name, 255),
+			"phone":   dokuPhone(req.Phone),
+			"email":   email,
+			"country": "ID",
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	requestID := xid.New().String()
+	timestamp := dokuTimestamp(time.Now())
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL()+DokuCheckoutPath, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Client-Id", p.ClientID)
+	httpReq.Header.Set("Request-Id", requestID)
+	httpReq.Header.Set("Request-Timestamp", timestamp)
+	httpReq.Header.Set("Signature", dokuSignature(p.SecretKey, p.ClientID, requestID, timestamp, DokuCheckoutPath, payload))
+
+	resp, err := p.client().Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("DOKU: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("DOKU %d: %s", resp.StatusCode, dokuErrMessage(body))
+	}
+	var out struct {
+		Message  []string `json:"message"`
+		Response struct {
+			Payment struct {
+				URL         string `json:"url"`
+				TokenID     string `json:"token_id"`
+				ExpiredDate string `json:"expired_date"`
+			} `json:"payment"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("DOKU: parse response: %w", err)
+	}
+	url := strings.TrimSpace(out.Response.Payment.URL)
+	if url == "" {
+		return nil, fmt.Errorf("DOKU: payment url kosong (%s)", strings.Join(out.Message, "; "))
+	}
+	return &IntentResult{
+		ExternalID:    orderID,
+		TransactionID: strings.TrimSpace(out.Response.Payment.TokenID),
+		CheckoutURL:   url,
+		Status:        "pending",
+		ExpiresAt:     dokuExpiredDate(out.Response.Payment.ExpiredDate, expiry),
+		Amount:        req.Amount,
+		PayableAmount: req.Amount,
+		Metadata: map[string]any{
+			"doku_sandbox": p.Sandbox,
+			"doku_kind":    "checkout",
+		},
+	}, nil
 }
 
 // dokuExpiredDate parses DOKU's yyyyMMddHHmmss (UTC+7), falling back to now+expiry.

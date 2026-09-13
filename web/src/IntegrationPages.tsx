@@ -45,32 +45,16 @@ type DuitkuIntegration = {
   webhook_base_hint: string;
 };
 
-type DokuChannelFee = {
-  id: string;
-  label: string;
-  kind: string;
-  enabled: boolean;
-  fee_flat: number;
-  fee_percent: number;
-  partner_service_id?: string;
-};
-
 type DokuIntegration = {
   configured: boolean;
   enabled: boolean;
   sandbox: boolean;
   client_id: string;
   secret_key?: string;
-  has_private_key: boolean;
-  merchant_id: string;
-  terminal_id: string;
-  postal_code: string;
-  partner_service_id?: string;
   expires_in_minutes: number;
-  qr_enabled: boolean;
-  snap_auth_ready?: boolean;
   fee_mode?: string;
-  channels?: DokuChannelFee[];
+  fee_flat?: number;
+  fee_percent?: number;
   webhook_path: string;
   webhook_url: string;
   webhook_base_hint: string;
@@ -279,14 +263,10 @@ export function PaymentGWPage() {
     sandbox: true,
     client_id: "",
     secret_key: "",
-    private_key: "",
-    merchant_id: "",
-    terminal_id: "",
-    postal_code: "",
-    partner_service_id: "",
     expires_in_minutes: 60,
     fee_mode: "merchant",
-    channels: [] as DokuChannelFee[],
+    fee_flat: 0,
+    fee_percent: 0,
   });
 
   useEffect(() => {
@@ -307,22 +287,10 @@ export function PaymentGWPage() {
       sandbox: dokuQ.data.configured ? dokuQ.data.sandbox : true,
       client_id: dokuQ.data.client_id || "",
       secret_key: dokuQ.data.secret_key || "",
-      private_key: "",
-      merchant_id: dokuQ.data.merchant_id || "",
-      terminal_id: dokuQ.data.terminal_id || "",
-      postal_code: dokuQ.data.postal_code || "",
-      partner_service_id: dokuQ.data.partner_service_id || "",
       expires_in_minutes: dokuQ.data.expires_in_minutes || 60,
       fee_mode: dokuQ.data.fee_mode === "customer" ? "customer" : "merchant",
-      channels: (dokuQ.data.channels || []).map((c) => ({
-        id: c.id,
-        label: c.label,
-        kind: c.kind,
-        enabled: Boolean(c.enabled),
-        fee_flat: c.fee_flat || 0,
-        fee_percent: c.fee_percent || 0,
-        partner_service_id: c.partner_service_id || "",
-      })),
+      fee_flat: dokuQ.data.fee_flat || 0,
+      fee_percent: dokuQ.data.fee_percent || 0,
     });
   }, [dokuQ.data]);
 
@@ -382,20 +350,10 @@ export function PaymentGWPage() {
           sandbox: dokuForm.sandbox,
           client_id: dokuForm.client_id.trim(),
           secret_key: dokuForm.secret_key.trim() || undefined,
-          private_key: dokuForm.private_key.trim() || undefined,
-          merchant_id: dokuForm.merchant_id.trim() || undefined,
-          terminal_id: dokuForm.terminal_id.trim() || undefined,
-          postal_code: dokuForm.postal_code.trim() || undefined,
-          partner_service_id: dokuForm.partner_service_id.trim() || undefined,
           expires_in_minutes: Math.min(1440, Math.max(1, dokuForm.expires_in_minutes || 60)),
           fee_mode: dokuForm.fee_mode === "customer" ? "customer" : "merchant",
-          channels: dokuForm.channels.map((c) => ({
-            id: c.id,
-            enabled: Boolean(c.enabled),
-            fee_flat: Math.max(0, Math.floor(Number(c.fee_flat) || 0)),
-            fee_percent: Math.min(100, Math.max(0, Number(c.fee_percent) || 0)),
-            partner_service_id: String(c.partner_service_id || "").trim() || undefined,
-          })),
+          fee_flat: Math.max(0, Math.floor(Number(dokuForm.fee_flat) || 0)),
+          fee_percent: Math.min(100, Math.max(0, Number(dokuForm.fee_percent) || 0)),
         }),
       }),
     onSuccess: (data) => {
@@ -405,22 +363,10 @@ export function PaymentGWPage() {
         sandbox: data.sandbox,
         client_id: data.client_id || "",
         secret_key: data.secret_key || dokuForm.secret_key,
-        private_key: "",
-        merchant_id: data.merchant_id || "",
-        terminal_id: data.terminal_id || "",
-        postal_code: data.postal_code || "",
-        partner_service_id: data.partner_service_id || "",
         expires_in_minutes: data.expires_in_minutes || dokuForm.expires_in_minutes,
         fee_mode: data.fee_mode === "customer" ? "customer" : "merchant",
-        channels: (data.channels || []).map((c) => ({
-          id: c.id,
-          label: c.label,
-          kind: c.kind,
-          enabled: Boolean(c.enabled),
-          fee_flat: c.fee_flat || 0,
-          fee_percent: c.fee_percent || 0,
-          partner_service_id: c.partner_service_id || "",
-        })),
+        fee_flat: data.fee_flat || 0,
+        fee_percent: data.fee_percent || 0,
       });
       void qc.invalidateQueries({ queryKey: ["integration-doku"] });
       void toastSuccess("DOKU disimpan");
@@ -428,19 +374,16 @@ export function PaymentGWPage() {
     onError: (e: Error) => void toastError(e.message),
   });
 
-  function patchDokuChannel(id: string, patch: Partial<DokuChannelFee>) {
-    setDokuForm((prev) => ({
-      ...prev,
-      channels: prev.channels.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-    }));
-  }
+  const dokuFeePreview =
+    dokuForm.fee_mode === "customer" && dokuForm.fee_flat > 0
+      ? Math.round((dokuForm.fee_flat * ((dokuForm.fee_percent || 0) > 0 ? dokuForm.fee_percent : 100)) / 100)
+      : 0;
 
   return (
     <Section title="Payment Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Aktifkan <strong>Duitku</strong> untuk pembayaran online (VA, e-wallet, retail, QRIS) atau{" "}
-        <strong>DOKU Direct</strong> (QRIS, VA, e-wallet, Alfamart/Indomaret di portal). Kredensial disimpan
-        terenkripsi.
+        Aktifkan <strong>Duitku</strong> atau <strong>DOKU Checkout</strong> untuk pembayaran online (VA, e-wallet,
+        retail, QRIS). Kredensial disimpan terenkripsi.
       </p>
       {loading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
@@ -600,25 +543,9 @@ export function PaymentGWPage() {
               </div>
               <div className="grid gap-2">
             <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-              Pelanggan memilih channel di portal lalu bayar via <strong>DOKU Direct API</strong> (QRIS, VA, e-wallet,
-              Alfamart/Indomaret). Untuk QRIS, lengkapi private key + merchant ID + terminal ID + kode pos. Untuk VA,
-              isi Partner Service ID SNAP <strong>per bank</strong> di daftar channel di bawah.
+              Pelanggan diarahkan ke <strong>halaman bayar DOKU Checkout</strong> (VA, e-wallet, QRIS, retail) di tab
+              yang sama. Cukup Client ID + Secret Key dari dashboard DOKU.
             </p>
-            {!dokuQ.data?.qr_enabled ? (
-              <p className="rounded-lg border border-[var(--warn)]/40 bg-[var(--warn)]/10 px-3 py-2 text-[11px] leading-relaxed text-[var(--warn)]">
-                Channel <strong>QRIS</strong> tidak muncul di portal pelanggan sampai private key + merchant ID +
-                terminal ID + kode pos lengkap.
-              </p>
-            ) : null}
-            {dokuForm.channels.some(
-              (c) => c.kind === "va" && c.enabled && !String(c.partner_service_id || "").trim(),
-            ) ? (
-              <p className="rounded-lg border border-[var(--warn)]/40 bg-[var(--warn)]/10 px-3 py-2 text-[11px] leading-relaxed text-[var(--warn)]">
-                Channel <strong>VA</strong> memakai API <strong>SNAP</strong>. Isi{" "}
-                <strong>Partner Service ID</strong> dari halaman VA SNAP di DOKU BO (bukan Company Code Non-SNAP).
-                Tanpa itu channel tidak muncul di portal.
-              </p>
-            ) : null}
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -647,80 +574,6 @@ export function PaymentGWPage() {
                 autoComplete="new-password"
               />
             </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">RSA private key merchant (PEM — SNAP)</span>
-              <textarea
-                className="input font-mono text-xs"
-                rows={4}
-                placeholder="-----BEGIN PRIVATE KEY-----"
-                value={dokuForm.private_key}
-                onChange={(e) => setDokuForm({ ...dokuForm, private_key: e.target.value })}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <div className="grid gap-1.5 text-[11px] leading-relaxed text-[var(--muted)]">
-                <p>
-                  Dashboard DOKU <strong>tidak punya private key</strong>. Kamu generate sendiri, lalu upload public-nya ke
-                  DOKU.
-                </p>
-                <p className="font-medium text-[var(--fg,inherit)]">Cara buat (di komputer / server):</p>
-                <pre className="overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel-muted,rgba(0,0,0,0.04))] p-2 font-mono text-[10px] leading-snug">{`openssl genrsa -out doku-private.pem 2048
-openssl pkcs8 -topk8 -nocrypt -in doku-private.pem -out doku-private-pkcs8.pem
-openssl rsa -in doku-private.pem -pubout -out doku-public.pem`}</pre>
-                <ol className="list-decimal space-y-0.5 pl-4">
-                  <li>
-                    Isi / upload isi <code>doku-public.pem</code> ke DOKU → Settings → API Keys →{" "}
-                    <strong>Merchant Public Key</strong> (sandbox & production terpisah).
-                  </li>
-                  <li>
-                    Tempel isi <code>doku-private-pkcs8.pem</code> (atau <code>doku-private.pem</code>) ke kolom ini — simpan
-                    file itu aman, jangan hilang.
-                  </li>
-                  <li>
-                    Jangan tempel DOKU Public Key / Merchant Public Key / Secret Key ke sini.
-                  </li>
-                </ol>
-                <p>
-                  {dokuQ.data?.snap_auth_ready
-                    ? "Private key tersimpan & valid."
-                    : dokuQ.data?.has_private_key
-                      ? "Ada key tersimpan tapi bukan private key RSA yang valid — ganti."
-                      : "Tanpa langkah di atas, VA / e-wallet / QRIS SNAP tidak bisa dipakai."}
-                </p>
-              </div>
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              <label className="grid gap-1 text-sm">
-                <span className="text-[var(--muted)]">Merchant ID</span>
-                <input
-                  className="input"
-                  placeholder="mall ID QRIS"
-                  value={dokuForm.merchant_id}
-                  onChange={(e) => setDokuForm({ ...dokuForm, merchant_id: e.target.value })}
-                  autoComplete="off"
-                />
-              </label>
-              <label className="grid gap-1 text-sm">
-                <span className="text-[var(--muted)]">Terminal ID</span>
-                <input
-                  className="input"
-                  placeholder="T001"
-                  value={dokuForm.terminal_id}
-                  onChange={(e) => setDokuForm({ ...dokuForm, terminal_id: e.target.value })}
-                  autoComplete="off"
-                />
-              </label>
-              <label className="grid gap-1 text-sm">
-                <span className="text-[var(--muted)]">Kode pos</span>
-                <input
-                  className="input"
-                  placeholder="28111"
-                  value={dokuForm.postal_code}
-                  onChange={(e) => setDokuForm({ ...dokuForm, postal_code: e.target.value })}
-                  autoComplete="off"
-                />
-              </label>
-            </div>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
               <input
@@ -770,116 +623,42 @@ openssl rsa -in doku-private.pem -pubout -out doku-public.pem`}</pre>
                   50% → admin Rp2.000. Kosongkan persen = 100% (customer bayar penuh biaya dasar).
                 </span>
               </label>
-              <div className="grid gap-2">
-                <p className="text-sm font-medium">Channel Direct</p>
-                <p className="text-[11px] text-[var(--muted)]">
-                  VA bank = Direct API <strong>SNAP</strong>. Isi Partner Service ID dari konfigurasi SNAP tiap bank
-                  (bukan popup Non-SNAP yang hanya punya Company Code). Merchant BIN di SNAP biasanya identitas merchant;
-                  yang kita kirim ke API create-VA adalah Partner Service ID.
-                </p>
-                {dokuForm.channels.length === 0 ? (
-                  <p className="text-xs text-[var(--muted)]">Memuat katalog channel…</p>
-                ) : (
-                  <div className="grid gap-2 lg:grid-cols-2">
-                  {dokuForm.channels.map((ch) => {
-                    const snapOk = Boolean(dokuQ.data?.snap_auth_ready);
-                    const blockedQR = ch.kind === "qr" && !dokuQ.data?.qr_enabled;
-                    const blockedSnap = (ch.kind === "va" || ch.kind === "ewallet") && !snapOk;
-                    const blockedVA = ch.kind === "va" && !String(ch.partner_service_id || "").trim();
-                    const blocked = blockedQR || blockedSnap || blockedVA;
-                    const mdr = Math.max(0, Math.floor(ch.fee_flat || 0));
-                    const share = (ch.fee_percent || 0) > 0 ? ch.fee_percent : 100;
-                    const feePreview =
-                      dokuForm.fee_mode === "customer" && mdr > 0 ? Math.round((mdr * share) / 100) : 0;
-                    return (
-                    <div
-                      key={ch.id}
-                      className={`grid gap-2 rounded-lg border p-2 ${
-                        blocked ? "border-[var(--warn)]/35 opacity-80" : "border-[var(--border)]"
-                      }`}
-                    >
-                      <label className="flex items-start gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          className="mt-0.5"
-                          checked={ch.enabled}
-                          onChange={(e) => patchDokuChannel(ch.id, { enabled: e.target.checked })}
-                        />
-                        <span>
-                          <span className="font-medium">{ch.label}</span>
-                          <span className="ml-1 text-[11px] text-[var(--muted)]">({ch.kind})</span>
-                          {blocked ? (
-                            <span className="mt-0.5 block text-[10px] text-[var(--warn)]">
-                              {blockedQR
-                                ? "belum siap · private key + merchant/terminal/kode pos"
-                                : blockedSnap
-                                  ? "belum siap · RSA private key SNAP belum valid"
-                                  : "belum siap · isi Partner Service ID SNAP"}
-                            </span>
-                          ) : null}
-                        </span>
-                      </label>
-                      {ch.kind === "va" ? (
-                        <label className="grid gap-0.5 text-[11px]">
-                          <span className="text-[var(--muted)]">Partner Service ID (SNAP)</span>
-                          <input
-                            className="input font-mono"
-                            placeholder="dari VA SNAP · bukan Company Code Non-SNAP"
-                            disabled={!ch.enabled}
-                            value={ch.partner_service_id || ""}
-                            onChange={(e) => patchDokuChannel(ch.id, { partner_service_id: e.target.value })}
-                            autoComplete="off"
-                          />
-                        </label>
-                      ) : null}
-                      {dokuForm.fee_mode === "customer" ? (
-                        <div className="grid gap-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <label className="grid gap-0.5 text-[11px]">
-                              <span className="text-[var(--muted)]">Biaya dasar MDR (Rp)</span>
-                              <input
-                                className="input"
-                                type="number"
-                                min={0}
-                                step={500}
-                                disabled={!ch.enabled}
-                                value={ch.fee_flat}
-                                onChange={(e) =>
-                                  patchDokuChannel(ch.id, { fee_flat: Number(e.target.value) || 0 })
-                                }
-                              />
-                            </label>
-                            <label className="grid gap-0.5 text-[11px]">
-                              <span className="text-[var(--muted)]">% ke customer</span>
-                              <input
-                                className="input"
-                                type="number"
-                                min={0}
-                                max={100}
-                                step={1}
-                                disabled={!ch.enabled}
-                                value={ch.fee_percent}
-                                onChange={(e) =>
-                                  patchDokuChannel(ch.id, { fee_percent: Number(e.target.value) || 0 })
-                                }
-                              />
-                            </label>
-                          </div>
-                          <span className="text-[10px] text-[var(--muted)]">
-                            {mdr > 0
-                              ? `Customer bayar admin ${formatRp(feePreview)} (${share}% × dasar ${formatRp(mdr)}) · ditambah ke tagihan`
-                              : "Isi biaya dasar MDR dulu (mis. 4000)."}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-[var(--muted)]">Merchant menanggung MDR</span>
-                      )}
-                    </div>
-                    );
-                  })}
+              {dokuForm.fee_mode === "customer" ? (
+                <div className="grid gap-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="grid gap-0.5 text-sm">
+                      <span className="text-[var(--muted)]">Biaya dasar MDR (Rp)</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        step={500}
+                        value={dokuForm.fee_flat}
+                        onChange={(e) => setDokuForm({ ...dokuForm, fee_flat: Number(e.target.value) || 0 })}
+                      />
+                    </label>
+                    <label className="grid gap-0.5 text-sm">
+                      <span className="text-[var(--muted)]">% ke customer</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={dokuForm.fee_percent}
+                        onChange={(e) => setDokuForm({ ...dokuForm, fee_percent: Number(e.target.value) || 0 })}
+                      />
+                    </label>
                   </div>
-                )}
-              </div>
+                  <span className="text-[11px] text-[var(--muted)]">
+                    {dokuForm.fee_flat > 0
+                      ? `Customer bayar admin ${formatRp(dokuFeePreview)} · ditambah ke tagihan`
+                      : "Isi biaya dasar MDR dulu (mis. 4000)."}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-[11px] text-[var(--muted)]">Merchant menanggung MDR</span>
+              )}
             </div>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Callback URL DOKU · /api/webhooks/payment/doku</span>
@@ -890,8 +669,7 @@ openssl rsa -in doku-private.pem -pubout -out doku-public.pem`}</pre>
                 </IconButton>
               </div>
               <span className="text-[11px] text-[var(--muted)]">
-                Daftarkan URL ini sebagai Notification URL di dashboard DOKU (per channel). Domain harus publik.
-                {dokuQ.data?.qr_enabled ? "" : " QRIS langsung butuh private key + merchant/terminal/kode pos."}
+                Daftarkan URL ini sebagai Notification URL di dashboard DOKU. Domain harus publik.
               </span>
             </label>
             <button type="button" className="btn w-fit" disabled={saveDoku.isPending} onClick={() => saveDoku.mutate()}>

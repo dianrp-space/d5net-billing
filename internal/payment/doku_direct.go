@@ -249,9 +249,26 @@ func dokuSnapDo(ctx context.Context, p *DokuProvider, path string, payload map[s
 		return nil, err
 	}
 	if code != http.StatusOK {
-		return nil, fmt.Errorf("DOKU %d: %v", code, m["responseMessage"])
+		msg := strings.TrimSpace(fmt.Sprint(m["responseMessage"]))
+		if msg == "" || msg == "<nil>" {
+			msg = dokuErrMessage(mustJSON(m))
+		}
+		rcode := strings.TrimSpace(fmt.Sprint(m["responseCode"]))
+		if rcode == "" || rcode == "<nil>" {
+			rcode = strconv.Itoa(code)
+		}
+		low := strings.ToLower(msg)
+		if strings.Contains(low, "feature not allowed") || rcode == "4032701" || (code == 403 && strings.Contains(low, "feature")) {
+			return nil, fmt.Errorf("DOKU %s: Feature Not Allowed — channel VA SNAP belum diizinkan untuk Client ID ini, atau Partner Service ID tidak cocok dengan yang terdaftar di BO (bukan Merchant BIN). Cek Settings→VA SNAP Mandiri field Partner Service ID, atau minta Care aktifkan create-VA Mandiri di sandbox. Detail: %s", rcode, msg)
+		}
+		return nil, fmt.Errorf("DOKU %s: %s", rcode, msg)
 	}
 	return m, nil
+}
+
+func mustJSON(m map[string]any) []byte {
+	b, _ := json.Marshal(m)
+	return b
 }
 
 // DokuQR is a generated QRIS code ready to render/send.

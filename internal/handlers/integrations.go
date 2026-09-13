@@ -97,7 +97,9 @@ type dokuIntegrationView struct {
 	QREnabled        bool                 `json:"qr_enabled"`
 	SnapAuthReady    bool                 `json:"snap_auth_ready"`
 	FeeMode          string               `json:"fee_mode"`
-	Channels         []dokuChannelFeeView `json:"channels"`
+	FeeFlat          int64                `json:"fee_flat"`
+	FeePercent       float64              `json:"fee_percent"`
+	Channels         []dokuChannelFeeView `json:"channels,omitempty"`
 	WebhookPath      string               `json:"webhook_path"`
 	WebhookURL       string               `json:"webhook_url"`
 	WebhookBaseHint  string               `json:"webhook_base_hint"`
@@ -123,6 +125,8 @@ type dokuIntegrationPut struct {
 	PartnerServiceID string              `json:"partner_service_id,omitempty"`
 	ExpiresInMinutes int                 `json:"expires_in_minutes,omitempty"`
 	FeeMode          string              `json:"fee_mode,omitempty"`
+	FeeFlat          int64               `json:"fee_flat,omitempty"`
+	FeePercent       float64             `json:"fee_percent,omitempty"`
 	Channels         []dokuChannelFeePut `json:"channels,omitempty"`
 }
 
@@ -152,8 +156,11 @@ type payOptionView struct {
 	Description string `json:"description"`
 	Kind        string `json:"kind"`
 	Sandbox     bool   `json:"sandbox"`
-	// FeeMode: merchant/customer. Channels berisi metode Direct + fee masing-masing.
-	FeeMode  string               `json:"fee_mode,omitempty"`
+	// FeeMode/fee_flat/fee_percent: biaya admin DOKU Checkout (MDR dasar × %).
+	FeeMode    string  `json:"fee_mode,omitempty"`
+	FeeFlat    int64   `json:"fee_flat,omitempty"`
+	FeePercent float64 `json:"fee_percent,omitempty"`
+	// Channels hanya untuk Direct API (legacy); Checkout tidak mengisinya.
 	Channels []dokuChannelFeeView `json:"channels,omitempty"`
 }
 
@@ -422,6 +429,12 @@ func registerIntegrations(api huma.API, d *Deps) {
 			cur.ExpiresInMinutes = payment.ClampDokuExpiryMinutes(input.Body.ExpiresInMinutes)
 		}
 		cur.FeeMode = normalizeDokuFeeMode(input.Body.FeeMode)
+		if input.Body.FeeFlat < 0 {
+			cur.FeeFlat = 0
+		} else {
+			cur.FeeFlat = input.Body.FeeFlat
+		}
+		cur.FeePercent = clampFeePercent(input.Body.FeePercent)
 		if len(input.Body.Channels) > 0 {
 			cur.Channels = make(map[string]dokuChannelFeeStored, len(input.Body.Channels))
 			for _, ch := range input.Body.Channels {
@@ -440,9 +453,6 @@ func registerIntegrations(api huma.API, d *Deps) {
 					PartnerServiceID: strings.TrimSpace(ch.PartnerServiceID),
 				}
 			}
-			// Hapus fee global legacy setelah channel tersimpan.
-			cur.FeeFlat = 0
-			cur.FeePercent = 0
 		}
 		if err := d.Store.UpsertSettingJSON(ctx, tid, settingDoku, cur); err != nil {
 			return nil, httpx.Internal(err)
@@ -973,6 +983,8 @@ func dokuView(ctx context.Context, d *Deps, tid xid.ID, s dokuIntegrationStored,
 		QREnabled:        dokuQRReady(s, d),
 		SnapAuthReady:    dokuSNAPAuthReady(s, d),
 		FeeMode:          normalizeDokuFeeMode(s.FeeMode),
+		FeeFlat:          s.FeeFlat,
+		FeePercent:       s.FeePercent,
 		Channels:         dokuChannelViews(s),
 		WebhookPath:      paymentWebhookPathFor(payment.ProviderDoku),
 		WebhookURL:       webhookURL,
@@ -1095,40 +1107,19 @@ func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payO
 		})
 	}
 	if cfg, _ := loadDokuIntegration(ctx, d, tenantID); dokuCredentialsReady(d, cfg) {
-		channels := make([]dokuChannelFeeView, 0)
-		for _, ch := range dokuChannelViews(cfg) {
-			if !ch.Enabled {
-				continue
-			}
-			cat, _ := payment.LookupDokuChannel(ch.ID)
-			if cat.NeedsSNAP {
-				if cat.Kind == payment.DokuKindQR {
-					if !dokuQRReady(cfg, d) {
-						continue
-					}
-				} else if !dokuSNAPAuthReady(cfg, d) {
-					continue
-				}
-			}
-			if cat.NeedsVABin && dokuVABinForChannel(cfg, ch.ID) == "" {
-				continue
-			}
-			channels = append(channels, ch)
-		}
 		opt := payOptionView{
 			Provider:    payment.ProviderDoku,
 			Label:       "DOKU",
-			Description: "Bayar langsung: QRIS, VA, e-wallet, Alfamart/Indomaret",
-			Kind:        "direct",
+			Description: "Halaman bayar DOKU (VA, e-wallet, QRIS, retail)",
+			Kind:        "redirect",
 			Sandbox:     cfg.Sandbox,
-			Channels:    channels,
 		}
 		if normalizeDokuFeeMode(cfg.FeeMode) == DokuFeeModeCustomer {
 			opt.FeeMode = DokuFeeModeCustomer
+			opt.FeeFlat = cfg.FeeFlat
+			opt.FeePercent = cfg.FeePercent
 		}
-		if len(channels) > 0 {
-			out = append(out, opt)
-		}
+		out = append(out, opt)
 	}
 	return out
 }

@@ -16,17 +16,15 @@ import (
 )
 
 // paymentCustomerFee mengembalikan biaya admin yang dibebankan ke customer untuk
-// provider+channel tertentu (0 bila merchant menanggung / tidak berlaku).
-func paymentCustomerFee(ctx context.Context, d *Deps, tid xid.ID, providerName, channel string, base int64) int64 {
+// provider tertentu (0 bila merchant menanggung / tidak berlaku).
+// Fee DOKU Checkout memakai rumus global: biaya dasar MDR × % ke customer.
+func paymentCustomerFee(ctx context.Context, d *Deps, tid xid.ID, providerName, _ string, base int64) int64 {
 	if providerName != payment.ProviderDoku || base <= 0 {
 		return 0
 	}
 	cfg, err := loadDokuIntegration(ctx, d, tid)
 	if err != nil {
 		return 0
-	}
-	if ch := strings.TrimSpace(channel); ch != "" {
-		return dokuCustomerFeeForChannel(cfg, ch, base)
 	}
 	return dokuCustomerFee(cfg, base)
 }
@@ -98,18 +96,10 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	if providerName == payment.ProviderManual {
 		return nil, httpx.BadRequest("gunakan pembayaran online (Duitku)")
 	}
-	channel = strings.ToLower(strings.TrimSpace(channel))
-	if providerName == payment.ProviderDoku {
-		if channel == "" {
-			return nil, httpx.BadRequest("pilih metode pembayaran DOKU (QRIS / VA / e-wallet / retail)")
-		}
-		if _, ok := payment.LookupDokuChannel(channel); !ok {
-			return nil, httpx.BadRequest("channel DOKU tidak dikenali")
-		}
-	}
-	// Biaya admin yang dibebankan ke customer (khusus DOKU per channel).
+	_ = channel // Checkout DOKU tidak memakai channel Direct; parameter tetap untuk kompatibel API.
+	// Biaya admin yang dibebankan ke customer (DOKU Checkout: MDR dasar × %).
 	baseAmount := amount
-	feeAmount := paymentCustomerFee(ctx, d, tid, providerName, channel, baseAmount)
+	feeAmount := paymentCustomerFee(ctx, d, tid, providerName, "", baseAmount)
 	chargeAmount := baseAmount + feeAmount
 	// Target callback webhook PG untuk order ini. Dipakai untuk memutuskan
 	// reuse intent: callback yang berubah wajib order baru ke PG.
@@ -118,9 +108,8 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 		wantCallback = strings.TrimRight(origin, "/") + paymentWebhookPathFor(providerName)
 	}
 	if existing, err := d.Store.GetLatestPendingPaymentIntent(ctx, tid, inv.ID, providerName); err == nil && existing != nil && existing.Amount == chargeAmount {
-		sameChannel := channel == "" || metaString(existing.Metadata, "doku_channel") == channel || metaString(existing.Metadata, "channel") == channel
-		hasPay := existing.QRString != "" || strings.TrimSpace(existing.CheckoutURL) != "" || metaString(existing.Metadata, "va_number") != "" || metaString(existing.Metadata, "payment_code") != ""
-		if sameChannel && hasPay {
+		hasPay := strings.TrimSpace(existing.CheckoutURL) != "" || existing.QRString != ""
+		if hasPay {
 			if storedCB := intentCallbackURL(existing); wantCallback == "" || storedCB == "" || storedCB == wantCallback {
 				_ = d.Store.CancelPendingPaymentIntentsExcept(ctx, tid, inv.ID, existing.ExternalID)
 				return existing, nil
@@ -136,21 +125,9 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	if err != nil {
 		return nil, err
 	}
-	if providerName == payment.ProviderDoku && channel != "" {
-		if cat, ok := payment.LookupDokuChannel(channel); ok && cat.NeedsVABin {
-			if doku, ok := prov.(*payment.DokuProvider); ok {
-				cfg, _ := loadDokuIntegration(ctx, d, tid)
-				bin := dokuVABinForChannel(cfg, channel)
-				if bin == "" {
-					return nil, httpx.BadRequest("BIN VA untuk " + cat.Label + " belum diisi di Integrasi → DOKU")
-				}
-				doku.WithPartnerServiceID(bin)
-			}
-		}
-	}
 	req := payment.IntentRequest{
 		TenantID: tid, CustomerID: inv.CustomerID, InvoiceID: inv.ID,
-		Amount: chargeAmount, ReturnURL: returnURL, Channel: channel,
+		Amount: chargeAmount, ReturnURL: returnURL,
 		ProductDetails: "Tagihan " + strings.TrimSpace(inv.InvoiceNumber),
 	}
 	var ten *store.Tenant

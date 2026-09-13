@@ -3,8 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { IconExternalLink, IconQrCode } from "./icons";
 import {
-  channelCustomerFee,
-  dokuChannelsFromMethod,
   getSavedPayMethod,
   hasSavedPayMethod,
   invoiceRemaining,
@@ -18,13 +16,11 @@ import {
   payOptionsToMethods,
   portalPaymentReturnURL,
   setSavedPayMethod,
-  type DokuChannelOption,
   type PayableInvoice,
   type PayMethodDef,
   type PayMethodId,
   type PayOption,
 } from "./payMethod";
-import { QrisPayDialog, type QrisIntent } from "./QrisPayDialog";
 import { toastError } from "./swal";
 import { formatRp, FormDialog } from "./ui";
 
@@ -93,9 +89,7 @@ export function PayMethodDialog({
               <p className="text-xs text-[var(--muted)]">Menyiapkan pembayaran…</p>
             )}
             {methods.map((m) => {
-              const channels = dokuChannelsFromMethod(m);
-              const isDokuDirect = m.id === PAY_METHOD_DOKU && channels.length > 0;
-              const fee = isDokuDirect ? 0 : methodCustomerFee(m, amount);
+              const fee = methodCustomerFee(m, amount);
               return (
                 <button
                   key={m.id}
@@ -108,9 +102,7 @@ export function PayMethodDialog({
                   <span className="mt-0.5 text-[var(--accent)]">{methodIcon(m.id)}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-semibold">{m.label}</span>
-                    <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                      {isDokuDirect ? `${channels.length} channel · pilih di langkah berikutnya` : m.description}
-                    </span>
+                    <span className="mt-0.5 block text-xs text-[var(--muted)]">{m.description}</span>
                     {feeBreakdown(amount, fee)}
                   </span>
                   <span className="shrink-0 text-[var(--muted)]" aria-hidden>
@@ -137,88 +129,6 @@ export function PayMethodDialog({
   );
 }
 
-function DokuChannelDialog({
-  open,
-  invoiceNumber,
-  amount,
-  feeMode,
-  channels,
-  busy,
-  error,
-  onBack,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  invoiceNumber: string;
-  amount: number;
-  feeMode?: string;
-  channels: DokuChannelOption[];
-  busy?: boolean;
-  error?: string;
-  onBack: () => void;
-  onClose: () => void;
-  onConfirm: (channelId: string) => void;
-}) {
-  const byKind = (kind: string) => channels.filter((c) => c.kind === kind);
-  const groups: { label: string; kind: string }[] = [
-    { label: "QRIS", kind: "qr" },
-    { label: "Virtual Account", kind: "va" },
-    { label: "E-wallet", kind: "ewallet" },
-    { label: "Retail", kind: "retail" },
-  ];
-
-  return (
-    <FormDialog open={open} title="Pilih channel DOKU" onClose={onClose}>
-      <div className="grid gap-3">
-        <div>
-          <p className="text-xs text-[var(--muted)]">{invoiceNumber || "Tagihan"}</p>
-          <p className="text-lg font-bold">{formatRp(amount)}</p>
-        </div>
-        <button type="button" className="btn-ghost w-fit text-xs" disabled={busy} onClick={onBack}>
-          ← Ganti gateway
-        </button>
-        {channels.length === 0 ? (
-          <p className="text-sm text-[var(--danger)]">Belum ada channel DOKU yang aktif. Hubungi admin.</p>
-        ) : (
-          <div className="grid gap-3">
-            {groups.map((g) => {
-              const list = byKind(g.kind);
-              if (!list.length) return null;
-              return (
-                <div key={g.kind} className="grid gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">{g.label}</p>
-                  {list.map((ch) => {
-                    const fee = channelCustomerFee(feeMode, ch, amount);
-                    return (
-                      <button
-                        key={ch.id}
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onConfirm(ch.id)}
-                        className="flex w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3 text-left transition-colors hover:border-[var(--accent)] disabled:opacity-60"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-semibold">{ch.label}</span>
-                          {feeBreakdown(amount, fee)}
-                        </span>
-                        <span className="shrink-0 text-[var(--muted)]" aria-hidden>
-                          →
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-      </div>
-    </FormDialog>
-  );
-}
-
 export function PortalPayHost({
   invoice,
   tenantSlug,
@@ -232,8 +142,7 @@ export function PortalPayHost({
   onClose: () => void;
   onPaid?: () => void;
 }) {
-  const [step, setStep] = useState<"method" | "channel" | "pay">("method");
-  const [intent, setIntent] = useState<QrisIntent | null>(null);
+  const [step, setStep] = useState<"method" | "busy">("method");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const autoTriedFor = useRef<string | null>(null);
@@ -246,18 +155,15 @@ export function PortalPayHost({
   const sandboxAvailable = payOptionsHasDuitkuSandbox(options.data);
   const invoiceAmount = invoice ? invoiceRemaining(invoice) : 0;
   const hasCustomerFee = payMethodsHaveCustomerFee(methods, invoiceAmount);
-  const dokuMethod = methods.find((m) => m.id === PAY_METHOD_DOKU);
-  const dokuChannels = dokuChannelsFromMethod(dokuMethod);
 
   useEffect(() => {
     setStep("method");
-    setIntent(null);
     setError("");
     setBusy(false);
     autoTriedFor.current = null;
   }, [invoice?.id]);
 
-  // Auto-bayar bila 1 gateway (bukan DOKU multi-channel / fee / sandbox).
+  // Auto-bayar bila 1 gateway (bukan fee / sandbox).
   useEffect(() => {
     if (!invoice?.id || step !== "method" || busy) return;
     if (autoTriedFor.current === invoice.id) return;
@@ -266,65 +172,37 @@ export function PortalPayHost({
     const useSaved = hasSavedPayMethod(tenantSlug) && methods.some((m) => m.id === saved);
     if (!useSaved && methods.length !== 1) return;
     const pick = useSaved ? saved : methods[0].id;
-    const m = methods.find((x) => x.id === pick);
-    if (pick === PAY_METHOD_DOKU && dokuChannelsFromMethod(m).length > 1) return;
     autoTriedFor.current = invoice.id;
-    void selectGateway(pick);
+    void confirmMethod(pick);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoice?.id, step, busy, options.isLoading, methods.length, tenantSlug, sandboxAvailable, hasCustomerFee]);
 
   if (!invoice?.id) return null;
 
-  async function selectGateway(method: PayMethodId) {
+  async function confirmMethod(method: PayMethodId) {
     if (!invoice?.id) return;
     setSavedPayMethod(method, tenantSlug);
-    setError("");
-    if (method === PAY_METHOD_DOKU) {
-      const channels = dokuChannelsFromMethod(methods.find((m) => m.id === PAY_METHOD_DOKU));
-      if (channels.length === 0) {
-        setError("Belum ada channel DOKU yang aktif");
-        void toastError("Belum ada channel DOKU yang aktif");
-        return;
-      }
-      if (channels.length === 1 && !hasCustomerFee) {
-        await checkout(method, channels[0].id);
-        return;
-      }
-      setStep("channel");
-      return;
-    }
-    await checkout(method);
-  }
-
-  async function checkout(method: PayMethodId, channel?: string) {
-    if (!invoice?.id) return;
     setBusy(true);
     setError("");
+    setStep("busy");
     try {
-      const next = await api<QrisIntent>(`/api/portal/invoices/${invoice.id}/checkout`, {
+      const next = await api<{ checkout_url?: string }>(`/api/portal/invoices/${invoice.id}/checkout`, {
         method: "POST",
         headers,
         body: JSON.stringify({
           provider: payMethodToProvider(method),
-          channel: channel || undefined,
           return_url: portalPaymentReturnURL(),
         }),
       });
-      if (method === PAY_METHOD_DUITKU) {
-        const url = String(next.checkout_url || "").trim();
-        if (!url) throw new Error("Link pembayaran Duitku kosong");
-        window.location.assign(url);
-        return;
-      }
-      // DOKU Direct: tampilkan QR / VA / kode retail / atau buka e-wallet di dialog.
-      setIntent(next);
-      setStep("pay");
+      const url = String(next.checkout_url || "").trim();
+      if (!url) throw new Error("Link pembayaran kosong");
+      // Sama seperti Duitku: redirect di tab yang sama (bukan tab baru).
+      window.location.assign(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Gagal membuat pembayaran";
       setError(msg);
       void toastError(msg);
-      if (method === PAY_METHOD_DOKU && channel) setStep("channel");
-      else setStep("method");
+      setStep("method");
     } finally {
       setBusy(false);
     }
@@ -335,7 +213,7 @@ export function PortalPayHost({
     setBusy(true);
     setError("");
     try {
-      await api<QrisIntent>(`/api/portal/invoices/${invoice.id}/sandbox-pay`, {
+      await api(`/api/portal/invoices/${invoice.id}/sandbox-pay`, {
         method: "POST",
         headers,
       });
@@ -353,45 +231,18 @@ export function PortalPayHost({
   const amount = invoiceRemaining(invoice);
 
   return (
-    <>
-      <PayMethodDialog
-        open={step === "method"}
-        invoiceNumber={invoice.invoice_number}
-        amount={amount}
-        methods={methods}
-        loading={options.isLoading}
-        busy={busy}
-        error={error || (options.isError ? "Gagal memuat metode pembayaran" : "")}
-        sandboxAvailable={sandboxAvailable}
-        onClose={onClose}
-        onConfirm={(m) => void selectGateway(m)}
-        onSandboxPay={() => void confirmSandboxPay()}
-      />
-      <DokuChannelDialog
-        open={step === "channel"}
-        invoiceNumber={invoice.invoice_number}
-        amount={amount}
-        feeMode={dokuMethod?.feeMode}
-        channels={dokuChannels}
-        busy={busy}
-        error={error}
-        onBack={() => {
-          setError("");
-          setStep("method");
-        }}
-        onClose={onClose}
-        onConfirm={(ch) => void checkout(PAY_METHOD_DOKU, ch)}
-      />
-      <QrisPayDialog
-        open={step === "pay"}
-        invoiceNumber={invoice.invoice_number}
-        intent={intent}
-        pollPath={`/api/portal/invoices/${invoice.id}/payment-intent`}
-        cancelPath={`/api/portal/invoices/${invoice.id}/payment-intent/cancel`}
-        pollHeaders={headers}
-        onClose={onClose}
-        onPaid={onPaid}
-      />
-    </>
+    <PayMethodDialog
+      open={step === "method" || step === "busy"}
+      invoiceNumber={invoice.invoice_number}
+      amount={amount}
+      methods={methods}
+      loading={options.isLoading}
+      busy={busy}
+      error={error || (options.isError ? "Gagal memuat metode pembayaran" : "")}
+      sandboxAvailable={sandboxAvailable}
+      onClose={onClose}
+      onConfirm={(m) => void confirmMethod(m)}
+      onSandboxPay={() => void confirmSandboxPay()}
+    />
   );
 }

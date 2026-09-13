@@ -25,11 +25,51 @@ func testRSAPrivateKey(t *testing.T) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
 }
 
-func TestDokuCreateIntentRequiresChannel(t *testing.T) {
+func TestDokuCreateIntentCheckout(t *testing.T) {
+	var gotHeaders http.Header
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/checkout/v1/payment" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		gotHeaders = r.Header.Clone()
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":["SUCCESS"],"response":{"order":{"invoice_number":"INV-1"},"payment":{"url":"https://sandbox.doku.com/checkout-link-v2/abc","token_id":"tok-9","expired_date":"20260911235959"}}}`))
+	}))
+	defer srv.Close()
+
 	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", "", "", "", "", true, 60)
-	_, err := p.CreateIntent(t.Context(), IntentRequest{Amount: 150000, MerchantOrderID: "INV-1"})
-	if err == nil || !strings.Contains(err.Error(), "channel") {
-		t.Fatalf("err = %v", err)
+	p.baseOverride = srv.URL
+	res, err := p.CreateIntent(t.Context(), IntentRequest{
+		Amount:          150000,
+		MerchantOrderID: "INV-1",
+		Email:           "budi@example.id",
+		Phone:           "081234567890",
+		CustomerName:    "Budi",
+		ReturnURL:       "https://isp.example.id/client",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CheckoutURL != "https://sandbox.doku.com/checkout-link-v2/abc" {
+		t.Fatalf("url = %q", res.CheckoutURL)
+	}
+	if res.ExternalID != "INV-1" || res.Status != "pending" {
+		t.Fatalf("%+v", res)
+	}
+	if res.Metadata["doku_kind"] != "checkout" {
+		t.Fatalf("meta = %v", res.Metadata)
+	}
+	if gotHeaders.Get("Client-Id") != "MCH-TEST-1" {
+		t.Fatalf("client-id = %q", gotHeaders.Get("Client-Id"))
+	}
+	if sig := gotHeaders.Get("Signature"); !strings.HasPrefix(sig, "HMACSHA256=") {
+		t.Fatalf("signature = %q", sig)
+	}
+	order, _ := gotBody["order"].(map[string]any)
+	if order["amount"] != float64(150000) {
+		t.Fatalf("amount = %v", order["amount"])
 	}
 }
 
@@ -47,7 +87,7 @@ func TestDokuCreateQRIntent(t *testing.T) {
 	defer srv.Close()
 	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", testRSAPrivateKey(t), "MALL1", "T001", "28111", true, 60)
 	p.baseOverride = srv.URL
-	res, err := p.CreateIntent(t.Context(), IntentRequest{
+	res, err := p.createQRIntent(t.Context(), IntentRequest{
 		Amount: 150000, MerchantOrderID: "INV-QR-1", Channel: "qris",
 	})
 	if err != nil {
@@ -71,9 +111,10 @@ func TestDokuCreateRetailAlfamart(t *testing.T) {
 	defer srv.Close()
 	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", "", "", "", "", true, 60)
 	p.baseOverride = srv.URL
-	res, err := p.CreateIntent(t.Context(), IntentRequest{
+	ch, _ := LookupDokuChannel("retail_alfamart")
+	res, err := p.createRetailIntent(t.Context(), IntentRequest{
 		Amount: 50000, MerchantOrderID: "INV-R1", Channel: "retail_alfamart", CustomerName: "Budi",
-	})
+	}, ch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +128,8 @@ func TestDokuCreateRetailAlfamart(t *testing.T) {
 
 func TestDokuCreateVARequiresBIN(t *testing.T) {
 	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", "", "", "", "", true, 60)
-	_, err := p.CreateIntent(t.Context(), IntentRequest{Amount: 100, MerchantOrderID: "INV-1", Channel: "va_bca"})
+	ch, _ := LookupDokuChannel("va_bca")
+	_, err := p.createVAIntent(t.Context(), IntentRequest{Amount: 100, MerchantOrderID: "INV-1", Channel: "va_bca"}, ch)
 	if err == nil || !strings.Contains(err.Error(), "BIN") {
 		t.Fatalf("err = %v", err)
 	}

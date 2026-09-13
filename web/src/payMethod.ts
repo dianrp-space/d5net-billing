@@ -53,7 +53,7 @@ export const PORTAL_PAY_METHODS: PayMethodDef[] = [
   {
     id: PAY_METHOD_DOKU,
     label: "DOKU",
-    description: "QRIS, VA bank, e-wallet, Alfamart/Indomaret",
+    description: "Halaman bayar DOKU (VA, e-wallet, QRIS, retail)",
   },
 ];
 

@@ -5177,11 +5177,9 @@ func registerPortal(api huma.API, d *Deps) {
 			return nil, httpx.NotFound("invoice not found")
 		}
 		providerName := ""
-		channel := ""
 		returnURL := ""
 		if input.Body != nil {
 			providerName = strings.TrimSpace(input.Body.Provider)
-			channel = strings.TrimSpace(input.Body.Channel)
 			returnURL = strings.TrimSpace(input.Body.ReturnURL)
 		}
 		if providerName == "" {
@@ -5190,15 +5188,12 @@ func registerPortal(api huma.API, d *Deps) {
 				return nil, httpx.BadRequest("belum ada metode pembayaran online yang aktif")
 			}
 			providerName = opts[0].Provider
-			if channel == "" && len(opts[0].Channels) > 0 {
-				channel = opts[0].Channels[0].ID
-			}
 		}
 		origin := appPublicOrigin(ctx, d, ten.ID, input.Origin, input.Referer, input.XForwardedProto, input.XForwardedHost, input.Host)
 		if returnURL == "" {
 			returnURL = origin
 		}
-		pi, err := checkoutInvoice(ctx, d, ten.ID, inv, providerName, channel, returnURL, origin)
+		pi, err := checkoutInvoice(ctx, d, ten.ID, inv, providerName, "", returnURL, origin)
 		if err != nil {
 			return nil, err
 		}

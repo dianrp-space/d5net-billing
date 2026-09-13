@@ -1534,7 +1534,7 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if returnURL == "" {
 			returnURL = origin
 		}
-		pi, err := checkoutInvoice(ctx, d, tid, inv, input.Body.Provider, input.Body.Channel, returnURL, origin)
+		pi, err := checkoutInvoice(ctx, d, tid, inv, input.Body.Provider, "", returnURL, origin)
 		if err != nil {
 			return nil, err
 		}
