@@ -3,11 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { IconExternalLink, IconQrCode } from "./icons";
 import {
-  getSavedPayMethod,
-  hasSavedPayMethod,
   invoiceRemaining,
   methodCustomerFee,
-  payMethodsHaveCustomerFee,
   PAY_METHOD_DOKU,
   PAY_METHOD_DUITKU,
   PAY_METHOD_QRIS,
@@ -23,6 +20,8 @@ import {
 } from "./payMethod";
 import { toastError } from "./swal";
 import { formatRp, FormDialog } from "./ui";
+
+const SINGLE_PG_REDIRECT_SECONDS = 3;
 
 function methodIcon(id: PayMethodId) {
   switch (id) {
@@ -83,11 +82,7 @@ export function PayMethodDialog({
           <p className="text-sm text-[var(--danger)]">Belum ada payment gateway yang aktif. Hubungi admin.</p>
         ) : (
           <div className="grid gap-2" role="list" aria-label="Metode pembayaran">
-            {methods.length > 1 || sandboxAvailable || methods.some((m) => methodCustomerFee(m, amount) > 0) ? (
-              <p className="text-xs text-[var(--muted)]">Klik salah satu untuk langsung bayar:</p>
-            ) : (
-              <p className="text-xs text-[var(--muted)]">Menyiapkan pembayaran…</p>
-            )}
+            <p className="text-xs text-[var(--muted)]">Klik salah satu untuk langsung bayar:</p>
             {methods.map((m) => {
               const fee = methodCustomerFee(m, amount);
               return (
@@ -129,6 +124,78 @@ export function PayMethodDialog({
   );
 }
 
+/** Layar singkat sebelum redirect otomatis bila hanya 1 PG aktif (tanpa menyebut nama PG). */
+function PayRedirectNotice({
+  open,
+  invoiceNumber,
+  amount,
+  fee,
+  secondsLeft,
+  busy,
+  error,
+  sandboxAvailable,
+  onCancel,
+  onSkipWait,
+  onSandboxPay,
+}: {
+  open: boolean;
+  invoiceNumber: string;
+  amount: number;
+  fee: number;
+  secondsLeft: number;
+  busy?: boolean;
+  error?: string;
+  sandboxAvailable?: boolean;
+  onCancel: () => void;
+  onSkipWait: () => void;
+  onSandboxPay?: () => void;
+}) {
+  const payTotal = amount + Math.max(0, fee);
+  return (
+    <FormDialog open={open} title="Menuju pembayaran" onClose={onCancel}>
+      <div className="grid gap-4">
+        <div>
+          <p className="text-xs text-[var(--muted)]">{invoiceNumber || "Tagihan"}</p>
+          <p className="text-lg font-bold">{formatRp(payTotal)}</p>
+          {feeBreakdown(amount, fee)}
+        </div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel-muted,rgba(0,0,0,0.03))] p-4 text-center">
+          <p className="text-sm leading-relaxed">
+            Anda akan diarahkan ke <strong>gateway pembayaran online</strong>
+            {busy ? "…" : ` dalam ${Math.max(0, secondsLeft)} detik.`}
+          </p>
+          {!busy ? (
+            <p className="mt-2 text-3xl font-semibold tabular-nums text-[var(--accent)]" aria-live="polite">
+              {Math.max(0, secondsLeft)}
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-[var(--muted)]">Menyiapkan halaman bayar…</p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className="btn" disabled={busy} onClick={onSkipWait}>
+            Lanjutkan sekarang
+          </button>
+          <button type="button" className="btn-ghost" disabled={busy} onClick={onCancel}>
+            Batal
+          </button>
+        </div>
+        {sandboxAvailable && onSandboxPay ? (
+          <div className="grid gap-1.5 rounded-xl border border-dashed border-[var(--border)] p-3">
+            <p className="text-xs text-[var(--muted)]">
+              Sandbox: uji tandai lunas tanpa membuka gateway.
+            </p>
+            <button type="button" className="btn-ghost w-fit text-sm" disabled={busy} onClick={onSandboxPay}>
+              Uji sandbox: tandai lunas
+            </button>
+          </div>
+        ) : null}
+        {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      </div>
+    </FormDialog>
+  );
+}
+
 export function PortalPayHost({
   invoice,
   tenantSlug,
@@ -142,10 +209,12 @@ export function PortalPayHost({
   onClose: () => void;
   onPaid?: () => void;
 }) {
-  const [step, setStep] = useState<"method" | "busy">("method");
+  const [step, setStep] = useState<"method" | "redirect" | "busy">("method");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const autoTriedFor = useRef<string | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(SINGLE_PG_REDIRECT_SECONDS);
+  const countdownFor = useRef<string | null>(null);
+  const checkoutStarted = useRef(false);
   const options = useQuery({
     queryKey: ["portal-pay-options", tenantSlug],
     queryFn: () => api<PayOption[]>("/api/portal/pay-options", { headers }),
@@ -153,29 +222,42 @@ export function PortalPayHost({
   });
   const methods = payOptionsToMethods(options.data);
   const sandboxAvailable = payOptionsHasDuitkuSandbox(options.data);
-  const invoiceAmount = invoice ? invoiceRemaining(invoice) : 0;
-  const hasCustomerFee = payMethodsHaveCustomerFee(methods, invoiceAmount);
+  const singleMethod = methods.length === 1 ? methods[0] : null;
+  const singlePgFlow = !options.isLoading && methods.length === 1;
 
   useEffect(() => {
     setStep("method");
     setError("");
     setBusy(false);
-    autoTriedFor.current = null;
+    setSecondsLeft(SINGLE_PG_REDIRECT_SECONDS);
+    countdownFor.current = null;
+    checkoutStarted.current = false;
   }, [invoice?.id]);
 
-  // Auto-bayar bila 1 gateway (bukan fee / sandbox).
+  // Satu PG aktif → tampilkan countdown, bukan daftar nama PG.
   useEffect(() => {
-    if (!invoice?.id || step !== "method" || busy) return;
-    if (autoTriedFor.current === invoice.id) return;
-    if (options.isLoading || !methods.length || sandboxAvailable || hasCustomerFee) return;
-    const saved = getSavedPayMethod(tenantSlug);
-    const useSaved = hasSavedPayMethod(tenantSlug) && methods.some((m) => m.id === saved);
-    if (!useSaved && methods.length !== 1) return;
-    const pick = useSaved ? saved : methods[0].id;
-    autoTriedFor.current = invoice.id;
-    void confirmMethod(pick);
+    if (!invoice?.id || options.isLoading || busy) return;
+    if (step !== "method") return;
+    if (methods.length !== 1) return;
+    countdownFor.current = invoice.id;
+    checkoutStarted.current = false;
+    setSecondsLeft(SINGLE_PG_REDIRECT_SECONDS);
+    setStep("redirect");
+  }, [invoice?.id, options.isLoading, methods.length, step, busy]);
+
+  // Hitungan mundur lalu checkout.
+  useEffect(() => {
+    if (!invoice?.id || step !== "redirect" || busy || !singleMethod) return;
+    if (countdownFor.current !== invoice.id) return;
+    if (secondsLeft > 0) {
+      const t = window.setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
+      return () => window.clearTimeout(t);
+    }
+    if (checkoutStarted.current) return;
+    checkoutStarted.current = true;
+    void confirmMethod(singleMethod.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoice?.id, step, busy, options.isLoading, methods.length, tenantSlug, sandboxAvailable, hasCustomerFee]);
+  }, [invoice?.id, step, busy, secondsLeft, singleMethod?.id]);
 
   if (!invoice?.id) return null;
 
@@ -196,13 +278,14 @@ export function PortalPayHost({
       });
       const url = String(next.checkout_url || "").trim();
       if (!url) throw new Error("Link pembayaran kosong");
-      // Sama seperti Duitku: redirect di tab yang sama (bukan tab baru).
       window.location.assign(url);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Gagal membuat pembayaran";
       setError(msg);
       void toastError(msg);
-      setStep("method");
+      checkoutStarted.current = false;
+      setStep(methods.length === 1 ? "redirect" : "method");
+      setSecondsLeft(SINGLE_PG_REDIRECT_SECONDS);
     } finally {
       setBusy(false);
     }
@@ -229,20 +312,44 @@ export function PortalPayHost({
   }
 
   const amount = invoiceRemaining(invoice);
+  const singleFee = singleMethod ? methodCustomerFee(singleMethod, amount) : 0;
 
   return (
-    <PayMethodDialog
-      open={step === "method" || step === "busy"}
-      invoiceNumber={invoice.invoice_number}
-      amount={amount}
-      methods={methods}
-      loading={options.isLoading}
-      busy={busy}
-      error={error || (options.isError ? "Gagal memuat metode pembayaran" : "")}
-      sandboxAvailable={sandboxAvailable}
-      onClose={onClose}
-      onConfirm={(m) => void confirmMethod(m)}
-      onSandboxPay={() => void confirmSandboxPay()}
-    />
+    <>
+      <PayMethodDialog
+        open={!options.isLoading && step === "method" && methods.length !== 1}
+        invoiceNumber={invoice.invoice_number}
+        amount={amount}
+        methods={methods}
+        loading={false}
+        busy={busy}
+        error={error || (options.isError ? "Gagal memuat metode pembayaran" : "")}
+        sandboxAvailable={sandboxAvailable}
+        onClose={onClose}
+        onConfirm={(m) => void confirmMethod(m)}
+        onSandboxPay={() => void confirmSandboxPay()}
+      />
+      <PayRedirectNotice
+        open={singlePgFlow && (step === "method" || step === "redirect" || step === "busy")}
+        invoiceNumber={invoice.invoice_number}
+        amount={amount}
+        fee={singleFee}
+        secondsLeft={secondsLeft}
+        busy={busy || step === "busy"}
+        error={error}
+        sandboxAvailable={sandboxAvailable}
+        onCancel={onClose}
+        onSkipWait={() => {
+          if (!singleMethod || busy || checkoutStarted.current) return;
+          setSecondsLeft(0);
+        }}
+        onSandboxPay={() => void confirmSandboxPay()}
+      />
+      {options.isLoading ? (
+        <FormDialog open title="Menuju pembayaran" onClose={onClose}>
+          <p className="text-sm text-[var(--muted)]">Memuat metode pembayaran…</p>
+        </FormDialog>
+      ) : null}
+    </>
   );
 }
