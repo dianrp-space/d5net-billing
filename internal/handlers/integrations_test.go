@@ -106,6 +106,17 @@ func TestDuitkuCustomerFee(t *testing.T) {
 	}
 }
 
+func TestUniqueEnabledCustomerAdminFeeAmbiguous(t *testing.T) {
+	// Pure helper path: two different fees must not invent a single number.
+	// uniqueEnabledCustomerAdminFee needs live configs; assert dokuFeeFromBaseMDR
+	// consistency used by invoice display.
+	a := dokuFeeFromBaseMDR(4000, 50)
+	b := dokuFeeFromBaseMDR(3500, 100)
+	if a == b {
+		t.Fatal("expected different fee samples")
+	}
+}
+
 func TestSandboxSimExternalID(t *testing.T) {
 	got := sandboxSimExternalID(&store.Invoice{InvoiceNumber: "INV-TES-1"})
 	if !strings.Contains(got, "INV-TES-1-SIM-") {

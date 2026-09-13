@@ -678,7 +678,11 @@ export function ClientHome({
   const greeting = data.customer?.full_name || "Pelanggan";
   const isolirSubs = subscriptions.filter((s) => isIsolirStatus(s.status));
   const unpaidInvoices = invoices.filter(isInvoiceUnpaid);
-  const unpaidTotal = unpaidInvoices.reduce((sum, i) => sum + invoiceRemaining(i), 0);
+  const unpaidTotal = unpaidInvoices.reduce((sum, i) => {
+    const payable = Math.max(0, Math.floor(Number(i.payable_amount) || 0));
+    if (payable > 0) return sum + payable;
+    return sum + invoiceRemaining(i);
+  }, 0);
   const firstUnpaid = unpaidInvoices[0] ?? null;
 
   const invoiceRows = invoices.map((i) => {
@@ -686,6 +690,11 @@ export function ClientHome({
     const paidSomething = i.status === "paid" || (i.paid_amount ?? 0) > 0;
     const itemLabel = (i.items_summary || "").trim() || "—";
     const paidWhen = i.paid_at ? new Date(i.paid_at).toLocaleString("id-ID") : "—";
+    const adminFee = Math.max(0, Math.floor(Number(i.admin_fee) || 0));
+    const amountLabel =
+      adminFee > 0
+        ? `${formatRp(i.total_amount)} + admin ${formatRp(adminFee)}`
+        : formatRp(i.total_amount);
     const action = (
       <span className="flex flex-wrap items-center justify-end gap-1.5">
         {unpaid ? (
@@ -700,12 +709,9 @@ export function ClientHome({
             ) : null}
           </>
         ) : null}
-        {paidSomething ? (
-          <IconButton label="Unduh invoice" onClick={() => downloadInvoice(i)}>
-            <IconDownload />
-          </IconButton>
-        ) : null}
-        {!unpaid && !paidSomething ? <span className="text-[var(--muted)]">—</span> : null}
+        <IconButton label="Unduh invoice" onClick={() => downloadInvoice(i)}>
+          <IconDownload />
+        </IconButton>
       </span>
     );
     return multi
@@ -713,7 +719,7 @@ export function ClientHome({
           accountLabel(i.customer_code, i.customer_name),
           i.invoice_number,
           itemLabel,
-          formatRp(i.total_amount),
+          amountLabel,
           i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
           paidWhen,
           invoiceStatusLabel(i.status),
@@ -722,7 +728,7 @@ export function ClientHome({
       : [
           i.invoice_number,
           itemLabel,
-          formatRp(i.total_amount),
+          amountLabel,
           i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
           paidWhen,
           invoiceStatusLabel(i.status),
@@ -1082,7 +1088,8 @@ export function ClientHome({
                 ) : (
                   invoices.map((i) => {
                     const unpaid = isInvoiceUnpaid(i);
-                    const paidSomething = i.status === "paid" || (i.paid_amount ?? 0) > 0;
+                    const adminFee = Math.max(0, Math.floor(Number(i.admin_fee) || 0));
+                    const payable = Math.max(0, Math.floor(Number(i.payable_amount) || 0));
                     return (
                       <article key={i.id || i.invoice_number} className="portal-item-card">
                         <div className="flex items-start justify-between gap-2">
@@ -1093,7 +1100,12 @@ export function ClientHome({
                         {(i.items_summary || "").trim() ? (
                           <p className="text-xs text-[var(--muted)]">{i.items_summary}</p>
                         ) : null}
-                        <p className="text-base font-bold">{formatRp(i.total_amount)}</p>
+                        <p className="text-base font-bold">{formatRp(adminFee > 0 && payable > 0 ? payable : i.total_amount)}</p>
+                        {adminFee > 0 ? (
+                          <p className="text-[11px] text-[var(--muted)]">
+                            Tagihan {formatRp(i.total_amount)} + biaya admin {formatRp(adminFee)}
+                          </p>
+                        ) : null}
                         <p className="text-xs text-[var(--muted)]">
                           Jatuh tempo {i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—"}
                           {i.paid_at ? ` · Dibayar ${new Date(i.paid_at).toLocaleString("id-ID")}` : ""}
@@ -1111,11 +1123,9 @@ export function ClientHome({
                               ) : null}
                             </>
                           ) : null}
-                          {paidSomething ? (
-                            <IconButton label="Unduh invoice" onClick={() => downloadInvoice(i)}>
-                              <IconDownload />
-                            </IconButton>
-                          ) : null}
+                          <IconButton label="Unduh invoice" onClick={() => downloadInvoice(i)}>
+                            <IconDownload />
+                          </IconButton>
                         </div>
                       </article>
                     );

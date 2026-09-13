@@ -21,6 +21,8 @@ type Invoice = {
   paid_amount: number;
   status: string;
   due_date?: string;
+  admin_fee?: number;
+  payable_amount?: number;
 };
 
 type IsolirSession = {
@@ -206,7 +208,18 @@ export function IsolirPortalPage() {
                       </p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-sm font-bold">{formatRp(inv.total_amount - (inv.paid_amount || 0))}</p>
+                      <p className="text-sm font-bold">
+                        {formatRp(
+                          (inv.payable_amount || 0) > 0
+                            ? inv.payable_amount!
+                            : inv.total_amount - (inv.paid_amount || 0),
+                        )}
+                      </p>
+                      {(inv.admin_fee || 0) > 0 ? (
+                        <p className="text-[10px] text-[var(--muted)]">
+                          + admin {formatRp(inv.admin_fee || 0)}
+                        </p>
+                      ) : null}
                       <button
                         type="button"
                         className="text-xs font-semibold text-[var(--accent)] underline"

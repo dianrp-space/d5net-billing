@@ -32,6 +32,9 @@ type Invoice struct {
 	CustomerPhone  string        `json:"customer_phone,omitempty"`
 	ItemsSummary   string        `json:"items_summary,omitempty"`
 	Items          []InvoiceItem `json:"items,omitempty"`
+	// AdminFee / PayableAmount diisi handler portal bila MDR ditanggung customer.
+	AdminFee      int64 `json:"admin_fee,omitempty"`
+	PayableAmount int64 `json:"payable_amount,omitempty"`
 }
 
 type InvoiceItem struct {

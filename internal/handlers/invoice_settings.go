@@ -110,6 +110,7 @@ func invoiceRenderOptions(ctx context.Context, d *Deps, tenantID xid.ID, inv *st
 				opts.CustomerEmail = strings.TrimSpace(*cust.Email)
 			}
 		}
+		opts.AdminFee = invoiceCustomerAdminFee(ctx, d, tenantID, inv)
 	}
 	return opts
 }

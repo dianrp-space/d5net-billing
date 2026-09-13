@@ -63,6 +63,13 @@ export type PayableInvoice = {
   status: string;
   total_amount: number;
   paid_amount?: number;
+  admin_fee?: number;
+  payable_amount?: number;
+  items_summary?: string;
+  customer_code?: string;
+  customer_name?: string;
+  due_date?: string;
+  paid_at?: string | null;
 };
 
 function storageKey(slug?: string) {

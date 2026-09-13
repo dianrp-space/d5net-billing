@@ -4910,6 +4910,7 @@ func collectPortalInvoices(ctx context.Context, d *Deps, tenantID xid.ID, byID m
 			}
 		}
 	}
+	attachInvoiceAdminFees(ctx, d, tenantID, list)
 	// Terbaru di atas: urutkan berdasarkan waktu terbit (fallback jatuh tempo
 	// bila issued_at kosong).
 	sort.Slice(list, func(i, j int) bool {

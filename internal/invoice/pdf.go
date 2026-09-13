@@ -18,6 +18,10 @@ type RenderOptions struct {
 	CustomerPhone   string
 	CustomerEmail   string
 	Logo            *pdfJPEG
+	// AdminFee: MDR yang dibebankan ke pelanggan saat bayar online (0 = sembunyikan).
+	// Ditampilkan terpisah agar TOTAL tagihan ISP tetap jelas, tapi nominal bayar
+	// di gateway sama dengan yang dilihat customer.
+	AdminFee int64
 }
 
 // A4 page geometry (points).
@@ -252,14 +256,38 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 	}
 	c.line(totL, y+6, tableR, y+6, colOlive, 1)
 	y -= 4
-	drawTotal("TOTAL", rupiah(inv.TotalAmount), true)
+	drawTotal("TOTAL TAGIHAN", rupiah(inv.TotalAmount), true)
+	if s.AdminFee > 0 {
+		drawTotal("Biaya admin pembayaran online", rupiah(s.AdminFee), false)
+		c.line(totL, y+6, tableR, y+6, colOlive, 0.8)
+		y -= 4
+		payOnline := inv.TotalAmount + s.AdminFee
+		remaining := inv.TotalAmount - inv.PaidAmount
+		if remaining < 0 {
+			remaining = 0
+		}
+		if inv.PaidAmount > 0 && remaining > 0 {
+			payOnline = remaining + s.AdminFee
+			drawTotal("TOTAL BAYAR ONLINE (sisa)", rupiah(payOnline), true)
+		} else {
+			drawTotal("TOTAL BAYAR ONLINE", rupiah(payOnline), true)
+		}
+	}
 	if inv.PaidAmount > 0 {
-		drawTotal("Terbayar", rupiah(inv.PaidAmount), false)
+		drawTotal("Terbayar (pelunasan tagihan)", rupiah(inv.PaidAmount), false)
 		bal := inv.TotalAmount - inv.PaidAmount
 		if bal < 0 {
 			bal = 0
 		}
 		drawTotal("Sisa tagihan", rupiah(bal), true)
+	}
+	if s.AdminFee > 0 {
+		y -= 4
+		note := "*Biaya admin hanya berlaku untuk pembayaran online (payment gateway) dan ditanggung pelanggan."
+		for _, ln := range wrapToWidth(note, 8, contentW, false) {
+			c.text(tableL, y, 8, fontBody, ln, colMuted)
+			y -= 10
+		}
 	}
 
 	// Payment + footer

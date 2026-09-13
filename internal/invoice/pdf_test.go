@@ -185,6 +185,31 @@ func TestRenderPDFMetaIsLabeled(t *testing.T) {
 	}
 }
 
+func TestRenderPDFWithAdminFee(t *testing.T) {
+	issued := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	inv := &store.Invoice{
+		InvoiceNumber: "INV-2026-FEE",
+		CustomerName:  "Budi",
+		Subtotal:      100000,
+		TotalAmount:   100000,
+		Status:        "issued",
+		DueDate:       issued.AddDate(0, 0, 7),
+		IssuedAt:      &issued,
+	}
+	out := RenderPDF(inv, []store.InvoiceItem{
+		{Description: "Paket 30Mbps", Quantity: 1, UnitPrice: 100000, Amount: 100000},
+	}, RenderOptions{
+		Settings: store.InvoiceSettings{CompanyName: "ISP"},
+		AdminFee: 2000,
+	})
+	if !bytes.HasPrefix(out, []byte("%PDF-1.")) {
+		t.Fatal("not a pdf")
+	}
+	if len(out) < 800 {
+		t.Fatalf("pdf too small with admin fee: %d", len(out))
+	}
+}
+
 func TestRupiahGrouping(t *testing.T) {
 	cases := map[int64]string{
 		0:       "Rp 0",
