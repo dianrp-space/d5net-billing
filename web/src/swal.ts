@@ -1,4 +1,5 @@
 import Swal from "sweetalert2";
+import { DEFAULT_PRIMARY } from "./theme";
 
 export type ConfirmOptions = {
   title?: string;
@@ -8,15 +9,33 @@ export type ConfirmOptions = {
   danger?: boolean;
 };
 
-const olive = "#5A5A40";
-const terracotta = "#8C7355";
+const FALLBACK_SECONDARY = "#8C7355";
 const danger = "#b91c1c";
+
+/** Warna accent aktif dari setting branding (CSS var --accent, di-set TenantAccent). */
+function cssVar(name: string, fallback: string): string {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    if (v) return v;
+  } catch {
+    /* abaikan (SSR / test tanpa DOM) */
+  }
+  return fallback;
+}
+
+export function swalConfirmColor(): string {
+  return cssVar("--accent", DEFAULT_PRIMARY);
+}
+
+export function swalCancelColor(): string {
+  return cssVar("--secondary", FALLBACK_SECONDARY);
+}
 
 function mixin() {
   return Swal.mixin({
     buttonsStyling: true,
-    confirmButtonColor: olive,
-    cancelButtonColor: terracotta,
+    confirmButtonColor: swalConfirmColor(),
+    cancelButtonColor: swalCancelColor(),
   });
 }
 
@@ -44,7 +63,8 @@ export async function swalConfirm(opts: ConfirmOptions | string): Promise<boolea
     reverseButtons: true,
     confirmButtonText: n.confirmLabel ?? "Ya, lanjutkan",
     cancelButtonText: n.cancelLabel ?? "Batal",
-    confirmButtonColor: isDanger ? danger : olive,
+    confirmButtonColor: isDanger ? danger : swalConfirmColor(),
+    cancelButtonColor: swalCancelColor(),
   });
   return result.isConfirmed;
 }

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { DEFAULT_BRAND_LOGO } from "./branding";
 import { toastError, toastSuccess } from "./swal";
+import { DEFAULT_PRIMARY, parseHexColor } from "./theme";
 import { Button, Input, SearchableSelect, Section } from "./ui";
 
 type IsolirNetwork = {
@@ -50,7 +51,7 @@ IP → Web Proxy: enable proxy 8080, allow host billing, redirect HTTP ke URL is
 NAT tcp/80 → 8080, allow DNS + HTTPS portal (address-list FQDN, bukan IP publik).`;
 }
 
-function defaultPreviewHTML(appName: string, logoURL: string, loginURL: string) {
+function defaultPreviewHTML(appName: string, logoURL: string, loginURL: string, primary = DEFAULT_PRIMARY) {
   const logo = logoURL
     ? `<img src="${logoURL}" alt="" style="max-height:48px;margin-bottom:1rem"/>`
     : "";
@@ -60,9 +61,9 @@ function defaultPreviewHTML(appName: string, logoURL: string, loginURL: string) 
 <style>
 body{margin:0;font-family:system-ui,sans-serif;background:#F7F6F2;color:#1a1a14;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem}
 .card{background:#fff;border:1px solid #e5e2d9;border-radius:12px;padding:2rem;max-width:420px;width:100%;box-shadow:0 8px 24px rgba(0,0,0,.06);text-align:center}
-h1{font-size:1.35rem;margin:0 0 .5rem;color:#5A5A40}
+h1{font-size:1.35rem;margin:0 0 .5rem;color:${primary}}
 p{color:#5c584c;line-height:1.5;margin:0 0 1.25rem}
-a.btn{display:inline-block;background:#5A5A40;color:#fff;text-decoration:none;padding:.7rem 1.25rem;border-radius:8px;font-weight:600}
+a.btn{display:inline-block;background:${primary};color:#fff;text-decoration:none;padding:.7rem 1.25rem;border-radius:8px;font-weight:600}
 </style></head><body><div class="card">${logo}
 <h1>Layanan diisolir</h1>
 <p>Internet Anda dibatasi karena ada tagihan yang belum lunas. Silakan masuk untuk melihat tagihan dan membayar.</p>
@@ -100,7 +101,9 @@ export function IsolirTemplatePage() {
   const brandingQ = useQuery({
     queryKey: ["public-branding"],
     queryFn: () =>
-      api<{ app_name?: string; logo_url?: string | null; name?: string }>("/api/public/branding"),
+      api<{ app_name?: string; logo_url?: string | null; name?: string; primary_color?: string | null }>(
+        "/api/public/branding",
+      ),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -145,6 +148,7 @@ export function IsolirTemplatePage() {
 
   const appName = brandingQ.data?.name || brandingQ.data?.app_name || "ISP";
   const logoURL = brandingQ.data?.logo_url || DEFAULT_BRAND_LOGO;
+  const primaryHex = parseHexColor(brandingQ.data?.primary_color) || DEFAULT_PRIMARY;
   const loginURL = network.portal_base_url
     ? `${network.portal_base_url.replace(/\/$/, "")}/login`
     : "/login";
@@ -164,9 +168,9 @@ export function IsolirTemplatePage() {
       tenant_slug: "",
     };
     const custom = deferredHtml.trim();
-    if (!custom) return defaultPreviewHTML(appName, logoURL, loginURL);
+    if (!custom) return defaultPreviewHTML(appName, logoURL, loginURL, primaryHex);
     return fillPlaceholders(custom, vars);
-  }, [deferredHtml, appName, logoURL, loginURL]);
+  }, [deferredHtml, appName, logoURL, loginURL, primaryHex]);
 
   const save = useMutation({
     mutationFn: () =>
