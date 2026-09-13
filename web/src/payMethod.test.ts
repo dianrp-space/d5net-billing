@@ -55,11 +55,19 @@ describe("payMethod", () => {
 
   it("marks and consumes payment return from query", () => {
     sessionStorage.clear();
-    window.history.replaceState(null, "", "/client/dashboard?payment=success&x=1");
-    expect(portalPaymentReturnURL()).toContain("payment=success");
+    window.history.replaceState(null, "", "/client/dashboard?payment=return&x=1");
+    expect(portalPaymentReturnURL()).toContain("payment=return");
+    expect(portalPaymentReturnURL()).not.toContain("payment=success");
     notePaymentReturnFromLocation();
     expect(consumePaymentReturnSuccess()).toBe(true);
-    expect(window.location.search).not.toContain("payment=success");
+    expect(window.location.search).not.toContain("payment=return");
     expect(consumePaymentReturnSuccess()).toBe(false);
+  });
+
+  it("still consumes legacy payment=success return marker", () => {
+    sessionStorage.clear();
+    window.history.replaceState(null, "", "/client/dashboard?payment=success");
+    expect(consumePaymentReturnSuccess()).toBe(true);
+    expect(window.location.search).not.toContain("payment=success");
   });
 });

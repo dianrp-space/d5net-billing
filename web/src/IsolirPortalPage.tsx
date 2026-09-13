@@ -48,7 +48,36 @@ export function IsolirPortalPage() {
   useEffect(() => {
     if (!session?.portal_token) return;
     if (!consumePaymentReturnSuccess()) return;
-    void alertPaymentSuccess();
+    const token = session.portal_token;
+    void (async () => {
+      try {
+        const before = await api<{ data: Invoice[] }>("/api/portal/invoices", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const unpaidBefore = (before.data || []).filter(isInvoiceUnpaid);
+        for (const inv of unpaidBefore) {
+          if (!inv.id) continue;
+          try {
+            await api(`/api/portal/invoices/${inv.id}/payment-intent`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          } catch {
+            /* belum lunas */
+          }
+        }
+        const after = await api<{ data: Invoice[] }>("/api/portal/invoices", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const next = (after.data || []).filter(isInvoiceUnpaid);
+        setSession((prev) => (prev ? { ...prev, invoices: next } : prev));
+        const unpaidAfterIds = new Set(next.map((i) => i.id).filter(Boolean));
+        if (unpaidBefore.some((inv) => inv.id && !unpaidAfterIds.has(inv.id))) {
+          void alertPaymentSuccess();
+        }
+      } catch {
+        /* keep snapshot */
+      }
+    })();
   }, [session?.portal_token]);
 
   useEffect(() => {

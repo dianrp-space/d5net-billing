@@ -219,14 +219,21 @@ export function isIsolirStatus(status?: string | null) {
 }
 
 export const PAYMENT_RETURN_PARAM = "payment";
+/** Marker bahwa customer kembali dari halaman PG (bukan jaminan sudah lunas). */
+export const PAYMENT_RETURN_VALUE = "return";
+/** @deprecated alias lama — masih dikenali saat consume. */
 export const PAYMENT_RETURN_SUCCESS = "success";
 const PAYMENT_RETURN_STORAGE = "drp_payment_return";
 
-/** Return URL ke portal setelah hosted checkout (DOKU / fallback Duitku). */
+function isPaymentReturnValue(v: string | null): boolean {
+  return v === PAYMENT_RETURN_VALUE || v === PAYMENT_RETURN_SUCCESS;
+}
+
+/** Return URL ke portal setelah hosted checkout (DOKU / Duitku). */
 export function portalPaymentReturnURL(): string {
   if (typeof window === "undefined") return "";
   const u = new URL(window.location.href);
-  u.searchParams.set(PAYMENT_RETURN_PARAM, PAYMENT_RETURN_SUCCESS);
+  u.searchParams.set(PAYMENT_RETURN_PARAM, PAYMENT_RETURN_VALUE);
   return u.toString();
 }
 
@@ -235,7 +242,7 @@ export function notePaymentReturnFromLocation() {
   if (typeof window === "undefined") return;
   try {
     const u = new URL(window.location.href);
-    if (u.searchParams.get(PAYMENT_RETURN_PARAM) === PAYMENT_RETURN_SUCCESS) {
+    if (isPaymentReturnValue(u.searchParams.get(PAYMENT_RETURN_PARAM))) {
       sessionStorage.setItem(PAYMENT_RETURN_STORAGE, "1");
     }
   } catch {
@@ -243,7 +250,8 @@ export function notePaymentReturnFromLocation() {
   }
 }
 
-/** True sekali saat customer kembali dari PG. Membersihkan query + sessionStorage. */
+/** True sekali saat customer kembali dari PG. Membersihkan query + sessionStorage.
+ * Tidak berarti pembayaran sukses — pemanggil harus cek status tagihan/intent. */
 export function consumePaymentReturnSuccess(): boolean {
   notePaymentReturnFromLocation();
   let hit = false;
@@ -255,7 +263,7 @@ export function consumePaymentReturnSuccess(): boolean {
   }
   if (typeof window === "undefined") return hit;
   const u = new URL(window.location.href);
-  if (u.searchParams.get(PAYMENT_RETURN_PARAM) === PAYMENT_RETURN_SUCCESS) {
+  if (isPaymentReturnValue(u.searchParams.get(PAYMENT_RETURN_PARAM))) {
     hit = true;
     u.searchParams.delete(PAYMENT_RETURN_PARAM);
     const next = `${u.pathname}${u.search}${u.hash}`;

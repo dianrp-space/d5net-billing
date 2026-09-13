@@ -457,28 +457,34 @@ export function ClientHome({
     void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
     void (async () => {
       try {
-        const res = await api<{ data: NonNullable<ClientPortalData["invoices"]> }>("/api/portal/invoices", {
+        const before = await api<{ data: NonNullable<ClientPortalData["invoices"]> }>("/api/portal/invoices", {
           headers: portalHeaders,
         });
-        for (const inv of res.data ?? []) {
-          if (!inv.id || !isInvoiceUnpaid(inv)) continue;
+        const unpaidBefore = (before.data ?? []).filter(isInvoiceUnpaid);
+        for (const inv of unpaidBefore) {
+          if (!inv.id) continue;
           try {
             await api(`/api/portal/invoices/${inv.id}/payment-intent`, { headers: portalHeaders });
           } catch {
             /* belum ada intent / belum lunas di PG */
           }
         }
+        const after = await api<{ data: NonNullable<ClientPortalData["invoices"]> }>("/api/portal/invoices", {
+          headers: portalHeaders,
+        });
         void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
         void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
         void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
+        const unpaidAfterIds = new Set((after.data ?? []).filter(isInvoiceUnpaid).map((i) => i.id).filter(Boolean));
+        const paidNow = unpaidBefore.some((inv) => inv.id && !unpaidAfterIds.has(inv.id));
+        if (paidNow) void alertPaymentSuccess();
       } catch {
         /* daftar tagihan tetap di-refresh interval */
       }
     })();
-    void alertPaymentSuccess();
     // Sekali saat kembali dari PG; jangan ikut re-render query.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [data.tenant_slug, data.portal_token]);
 
   useEffect(() => {
     const session = getClientSession<ClientPortalData>() || data;
