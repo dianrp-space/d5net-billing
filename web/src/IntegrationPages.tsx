@@ -501,99 +501,97 @@ export function PaymentGWPage() {
               Pelanggan diarahkan ke <strong>halaman bayar Duitku</strong> (bukan API v2 / MD5). Callback memakai HMAC-SHA256.
               Isi callback URL di bawah ke dashboard Duitku.
             </p>
-            <div className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Mode aktif untuk transaksi baru</span>
-              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Mode Duitku aktif">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={duitkuForm.sandbox}
-                  className={duitkuForm.sandbox ? "btn" : "btn-ghost"}
-                  onClick={() => setDuitkuForm({ ...duitkuForm, sandbox: true })}
-                >
+            <Tabs
+              value={duitkuForm.sandbox ? "sandbox" : "prod"}
+              onValueChange={(v) => setDuitkuForm({ ...duitkuForm, sandbox: v !== "prod" })}
+              className="w-full space-y-0"
+            >
+              <TabsList aria-label="Mode kredensial Duitku">
+                <TabsTrigger value="sandbox" className="min-w-[8rem]">
                   Sandbox
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={!duitkuForm.sandbox}
-                  className={!duitkuForm.sandbox ? "btn" : "btn-ghost"}
-                  onClick={() => setDuitkuForm({ ...duitkuForm, sandbox: false })}
-                >
+                  {duitkuQ.data?.sandbox_configured ? (
+                    <span className="text-[10px] font-normal text-[var(--muted)]" title="Kredensial sandbox tersimpan">
+                      ●
+                    </span>
+                  ) : null}
+                  {duitkuForm.sandbox ? (
+                    <span className="rounded bg-[var(--ok)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ok)]">aktif</span>
+                  ) : null}
+                </TabsTrigger>
+                <TabsTrigger value="prod" className="min-w-[8rem]">
                   Produksi
-                </button>
-              </div>
-              <span className="text-[11px] text-[var(--muted)]">
-                {duitkuForm.sandbox
-                  ? "Transaksi baru memakai api-sandbox.duitku.com + kredensial sandbox."
-                  : "Transaksi baru memakai api-prod.duitku.com + kredensial produksi. Callback lama dari env satunya tetap valid."}
-              </span>
-            </div>
-            {duitkuForm.sandbox ? (
-              <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-                Dashboard Duitku sandbox tidak punya tandai lunas. Saat sandbox aktif, portal pelanggan dan daftar
-                tagihan admin punya aksi <strong>Uji sandbox: tandai lunas</strong> yang menjalankan alur webhook yang
-                sama.
-              </p>
-            ) : null}
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="grid content-start gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
-                <p className="flex items-center justify-between text-sm font-medium">
-                  Sandbox
-                  <span className="text-[10px] font-normal text-[var(--muted)]">
-                    {duitkuQ.data?.sandbox_configured ? "tersimpan" : "kosong"}
-                  </span>
-                </p>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[var(--muted)]">Merchant code (sandbox)</span>
-                  <input
-                    className="input"
-                    placeholder="Dxxxxx sandbox"
-                    value={duitkuForm.sandbox_merchant_code}
-                    onChange={(e) => setDuitkuForm({ ...duitkuForm, sandbox_merchant_code: e.target.value })}
-                    autoComplete="off"
-                  />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[var(--muted)]">API key (sandbox)</span>
-                  <SecretInput
-                    name="duitku-sandbox-api-key"
-                    placeholder="API key Duitku sandbox"
-                    value={duitkuForm.sandbox_api_key}
-                    onChange={(e) => setDuitkuForm({ ...duitkuForm, sandbox_api_key: e.target.value })}
-                    autoComplete="new-password"
-                  />
-                </label>
-              </div>
-              <div className="grid content-start gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
-                <p className="flex items-center justify-between text-sm font-medium">
-                  Produksi
-                  <span className="text-[10px] font-normal text-[var(--muted)]">
-                    {duitkuQ.data?.prod_configured ? "tersimpan" : "kosong"}
-                  </span>
-                </p>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[var(--muted)]">Merchant code (produksi)</span>
-                  <input
-                    className="input"
-                    placeholder="Dxxxxx produksi"
-                    value={duitkuForm.prod_merchant_code}
-                    onChange={(e) => setDuitkuForm({ ...duitkuForm, prod_merchant_code: e.target.value })}
-                    autoComplete="off"
-                  />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[var(--muted)]">API key (produksi)</span>
-                  <SecretInput
-                    name="duitku-prod-api-key"
-                    placeholder="API key Duitku produksi"
-                    value={duitkuForm.prod_api_key}
-                    onChange={(e) => setDuitkuForm({ ...duitkuForm, prod_api_key: e.target.value })}
-                    autoComplete="new-password"
-                  />
-                </label>
-              </div>
-            </div>
+                  {duitkuQ.data?.prod_configured ? (
+                    <span className="text-[10px] font-normal text-[var(--muted)]" title="Kredensial produksi tersimpan">
+                      ●
+                    </span>
+                  ) : null}
+                  {!duitkuForm.sandbox ? (
+                    <span className="rounded bg-[var(--ok)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ok)]">aktif</span>
+                  ) : null}
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="sandbox">
+                <div className="grid gap-2 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                  <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+                    Transaksi baru memakai <strong>api-sandbox.duitku.com</strong>. Kredensial produksi tetap
+                    tersimpan aman di tab Produksi.
+                  </p>
+                  <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+                    Dashboard Duitku sandbox tidak punya tandai lunas. Saat sandbox aktif, portal pelanggan dan daftar
+                    tagihan admin punya aksi <strong>Uji sandbox: tandai lunas</strong> yang menjalankan alur webhook yang
+                    sama.
+                  </p>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-[var(--muted)]">Merchant code (sandbox)</span>
+                    <input
+                      className="input"
+                      placeholder="Dxxxxx sandbox"
+                      value={duitkuForm.sandbox_merchant_code}
+                      onChange={(e) => setDuitkuForm({ ...duitkuForm, sandbox_merchant_code: e.target.value })}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-[var(--muted)]">API key (sandbox)</span>
+                    <SecretInput
+                      name="duitku-sandbox-api-key"
+                      placeholder="API key Duitku sandbox"
+                      value={duitkuForm.sandbox_api_key}
+                      onChange={(e) => setDuitkuForm({ ...duitkuForm, sandbox_api_key: e.target.value })}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                </div>
+              </TabsContent>
+              <TabsContent value="prod">
+                <div className="grid gap-2 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                  <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+                    Transaksi baru memakai <strong>api-prod.duitku.com</strong>. Kredensial sandbox tetap tersimpan
+                    aman di tab Sandbox. Callback lama dari env satunya tetap valid.
+                  </p>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-[var(--muted)]">Merchant code (produksi)</span>
+                    <input
+                      className="input"
+                      placeholder="Dxxxxx produksi"
+                      value={duitkuForm.prod_merchant_code}
+                      onChange={(e) => setDuitkuForm({ ...duitkuForm, prod_merchant_code: e.target.value })}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-[var(--muted)]">API key (produksi)</span>
+                    <SecretInput
+                      name="duitku-prod-api-key"
+                      placeholder="API key Duitku produksi"
+                      value={duitkuForm.prod_api_key}
+                      onChange={(e) => setDuitkuForm({ ...duitkuForm, prod_api_key: e.target.value })}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                </div>
+              </TabsContent>
+            </Tabs>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
               <input
@@ -728,92 +726,92 @@ export function PaymentGWPage() {
               Pelanggan diarahkan ke <strong>halaman bayar DOKU Checkout</strong> (VA, e-wallet, QRIS, retail) di tab
               yang sama. Cukup Client ID + Secret Key dari dashboard DOKU.
             </p>
-            <div className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Mode aktif untuk transaksi baru</span>
-              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Mode DOKU aktif">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={dokuForm.sandbox}
-                  className={dokuForm.sandbox ? "btn" : "btn-ghost"}
-                  onClick={() => setDokuForm({ ...dokuForm, sandbox: true })}
-                >
+            <Tabs
+              value={dokuForm.sandbox ? "sandbox" : "prod"}
+              onValueChange={(v) => setDokuForm({ ...dokuForm, sandbox: v !== "prod" })}
+              className="w-full space-y-0"
+            >
+              <TabsList aria-label="Mode kredensial DOKU">
+                <TabsTrigger value="sandbox" className="min-w-[8rem]">
                   Sandbox
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={!dokuForm.sandbox}
-                  className={!dokuForm.sandbox ? "btn" : "btn-ghost"}
-                  onClick={() => setDokuForm({ ...dokuForm, sandbox: false })}
-                >
+                  {dokuQ.data?.sandbox_configured ? (
+                    <span className="text-[10px] font-normal text-[var(--muted)]" title="Kredensial sandbox tersimpan">
+                      ●
+                    </span>
+                  ) : null}
+                  {dokuForm.sandbox ? (
+                    <span className="rounded bg-[var(--ok)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ok)]">aktif</span>
+                  ) : null}
+                </TabsTrigger>
+                <TabsTrigger value="prod" className="min-w-[8rem]">
                   Produksi
-                </button>
-              </div>
-              <span className="text-[11px] text-[var(--muted)]">
-                {dokuForm.sandbox
-                  ? "Transaksi baru memakai api-sandbox.doku.com + kredensial sandbox."
-                  : "Transaksi baru memakai api.doku.com + kredensial produksi. Callback lama dari env satunya tetap valid."}
-              </span>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="grid content-start gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
-                <p className="flex items-center justify-between text-sm font-medium">
-                  Sandbox
-                  <span className="text-[10px] font-normal text-[var(--muted)]">
-                    {dokuQ.data?.sandbox_configured ? "tersimpan" : "kosong"}
-                  </span>
-                </p>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[var(--muted)]">Client ID (sandbox)</span>
-                  <input
-                    className="input"
-                    placeholder="BRN-xxxx / MCH-xxxx sandbox"
-                    value={dokuForm.sandbox_client_id}
-                    onChange={(e) => setDokuForm({ ...dokuForm, sandbox_client_id: e.target.value })}
-                    autoComplete="off"
-                  />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[var(--muted)]">Secret key (sandbox)</span>
-                  <SecretInput
-                    name="doku-sandbox-secret-key"
-                    placeholder="SK-… sandbox"
-                    value={dokuForm.sandbox_secret_key}
-                    onChange={(e) => setDokuForm({ ...dokuForm, sandbox_secret_key: e.target.value })}
-                    autoComplete="new-password"
-                  />
-                </label>
-              </div>
-              <div className="grid content-start gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
-                <p className="flex items-center justify-between text-sm font-medium">
-                  Produksi
-                  <span className="text-[10px] font-normal text-[var(--muted)]">
-                    {dokuQ.data?.prod_configured ? "tersimpan" : "kosong"}
-                  </span>
-                </p>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[var(--muted)]">Client ID (produksi)</span>
-                  <input
-                    className="input"
-                    placeholder="BRN-xxxx / MCH-xxxx produksi"
-                    value={dokuForm.prod_client_id}
-                    onChange={(e) => setDokuForm({ ...dokuForm, prod_client_id: e.target.value })}
-                    autoComplete="off"
-                  />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-[var(--muted)]">Secret key (produksi)</span>
-                  <SecretInput
-                    name="doku-prod-secret-key"
-                    placeholder="SK-… produksi"
-                    value={dokuForm.prod_secret_key}
-                    onChange={(e) => setDokuForm({ ...dokuForm, prod_secret_key: e.target.value })}
-                    autoComplete="new-password"
-                  />
-                </label>
-              </div>
-            </div>
+                  {dokuQ.data?.prod_configured ? (
+                    <span className="text-[10px] font-normal text-[var(--muted)]" title="Kredensial produksi tersimpan">
+                      ●
+                    </span>
+                  ) : null}
+                  {!dokuForm.sandbox ? (
+                    <span className="rounded bg-[var(--ok)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ok)]">aktif</span>
+                  ) : null}
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="sandbox">
+                <div className="grid gap-2 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                  <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+                    Transaksi baru memakai <strong>api-sandbox.doku.com</strong>. Kredensial produksi tetap
+                    tersimpan aman di tab Produksi.
+                  </p>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-[var(--muted)]">Client ID (sandbox)</span>
+                    <input
+                      className="input"
+                      placeholder="BRN-xxxx / MCH-xxxx sandbox"
+                      value={dokuForm.sandbox_client_id}
+                      onChange={(e) => setDokuForm({ ...dokuForm, sandbox_client_id: e.target.value })}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-[var(--muted)]">Secret key (sandbox)</span>
+                    <SecretInput
+                      name="doku-sandbox-secret-key"
+                      placeholder="SK-… sandbox"
+                      value={dokuForm.sandbox_secret_key}
+                      onChange={(e) => setDokuForm({ ...dokuForm, sandbox_secret_key: e.target.value })}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                </div>
+              </TabsContent>
+              <TabsContent value="prod">
+                <div className="grid gap-2 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                  <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+                    Transaksi baru memakai <strong>api.doku.com</strong>. Kredensial sandbox tetap tersimpan
+                    aman di tab Sandbox. Callback lama dari env satunya tetap valid.
+                  </p>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-[var(--muted)]">Client ID (produksi)</span>
+                    <input
+                      className="input"
+                      placeholder="BRN-xxxx / MCH-xxxx produksi"
+                      value={dokuForm.prod_client_id}
+                      onChange={(e) => setDokuForm({ ...dokuForm, prod_client_id: e.target.value })}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-[var(--muted)]">Secret key (produksi)</span>
+                    <SecretInput
+                      name="doku-prod-secret-key"
+                      placeholder="SK-… produksi"
+                      value={dokuForm.prod_secret_key}
+                      onChange={(e) => setDokuForm({ ...dokuForm, prod_secret_key: e.target.value })}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                </div>
+              </TabsContent>
+            </Tabs>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
               <input

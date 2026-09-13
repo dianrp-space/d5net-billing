@@ -81,10 +81,24 @@ type BroadcastMessage struct {
 }
 
 // BroadcastVars membangun variabel personalisasi broadcast untuk satu penerima.
-func BroadcastVars(customerName, phone string) map[string]string {
+// Konteksnya sama seperti template tagihan: paket + satu tagihan acuan
+// (tunggakan tertua untuk audience overdue, terbaru untuk active).
+func BroadcastVars(customerName, phone, planName, itemName, invoiceNumber, amount, dueDate string) map[string]string {
+	item := strings.TrimSpace(itemName)
+	if item == "" {
+		item = strings.TrimSpace(planName)
+	}
+	if item == "" {
+		item = "layanan"
+	}
 	return map[string]string{
-		"customer_name": strings.TrimSpace(customerName),
-		"phone":         strings.TrimSpace(phone),
+		"customer_name":  strings.TrimSpace(customerName),
+		"phone":          strings.TrimSpace(phone),
+		"plan_name":      strings.TrimSpace(planName),
+		"item_name":      item,
+		"invoice_number": strings.TrimSpace(invoiceNumber),
+		"amount":         strings.TrimSpace(amount),
+		"due_date":       strings.TrimSpace(dueDate),
 	}
 }
 
@@ -543,8 +557,13 @@ func TemplateCatalog() []TemplateEvent {
 			Description: "Dipakai untuk pesan massal dari tab Broadcast.",
 			Channels:    []string{"whatsapp", "telegram", "email"},
 			Variables: []TemplateVariable{
-				{Name: "customer_name", Desc: "Nama pelanggan (diisi otomatis per penerima)"},
+				{Name: "customer_name", Desc: "Nama pelanggan"},
 				{Name: "phone", Desc: "Nomor penerima"},
+				{Name: "plan_name", Desc: "Paket langganan (terbaru)"},
+				{Name: "item_name", Desc: "Item tagihan acuan"},
+				{Name: "invoice_number", Desc: "Nomor tagihan acuan"},
+				{Name: "amount", Desc: "Sisa tagihan acuan (angka)"},
+				{Name: "due_date", Desc: "Jatuh tempo tagihan acuan"},
 			},
 			DefaultBody: "Halo {{customer_name}}! ",
 		},

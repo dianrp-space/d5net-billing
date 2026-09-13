@@ -121,8 +121,21 @@ func broadcastExtraConditions(filter BroadcastFilter, args []any) (string, []any
 
 func broadcastBaseQuery(audience string) string {
 	if audience == "overdue" {
+		// Satu baris per nomor: tagihan menunggak tertua sebagai acuan,
+		// paket dari langganan terbaru pelanggan.
 		return `
-			SELECT c.phone, MIN(c.full_name) AS customer_name FROM customers c
+			SELECT c.phone AS phone,
+			       c.full_name AS customer_name,
+			       COALESCE((SELECT p.name FROM subscriptions s2 JOIN plans p ON p.id = s2.plan_id
+			          WHERE s2.customer_id = c.id AND s2.tenant_id = c.tenant_id
+			          ORDER BY s2.started_at DESC NULLS LAST, s2.id DESC LIMIT 1), '') AS plan_name,
+			       i.invoice_number AS invoice_number,
+			       COALESCE((SELECT STRING_AGG(ii.description, ', ' ORDER BY ii.id)
+			          FROM invoice_items ii WHERE ii.invoice_id = i.id AND ii.tenant_id = i.tenant_id), '') AS item_name,
+			       (i.total_amount - i.paid_amount)::text AS amount,
+			       TO_CHAR(i.due_date, 'DD/MM/YYYY') AS due_date,
+			       ROW_NUMBER() OVER (PARTITION BY c.phone ORDER BY i.due_date ASC, i.id ASC) AS rn
+			FROM customers c
 			JOIN invoices i ON i.customer_id = c.id AND i.tenant_id = c.tenant_id
 			WHERE c.tenant_id=$1 AND c.phone <> ''
 			  AND i.deleted_at IS NULL
@@ -130,19 +143,52 @@ func broadcastBaseQuery(audience string) string {
 			  AND i.total_amount > i.paid_amount
 			  AND i.due_date < CURRENT_DATE`
 	}
+	// Satu baris per nomor: paket dari langganan terbaru; tagihan belum lunas
+	// terbaru sebagai acuan (kosong bila tidak ada tunggakan).
 	return `
-		SELECT c.phone, MIN(c.full_name) AS customer_name FROM customers c
+		SELECT c.phone AS phone,
+		       c.full_name AS customer_name,
+		       p.name AS plan_name,
+		       li.invoice_number AS invoice_number,
+		       COALESCE(li.item_name, '') AS item_name,
+		       COALESCE(li.amount, '') AS amount,
+		       COALESCE(li.due_date, '') AS due_date,
+		       ROW_NUMBER() OVER (PARTITION BY c.phone ORDER BY s.started_at DESC NULLS LAST, s.id DESC) AS rn
+		FROM customers c
 		JOIN subscriptions s ON s.customer_id = c.id AND s.tenant_id = c.tenant_id
+		JOIN plans p ON p.id = s.plan_id
+		LEFT JOIN LATERAL (
+		  SELECT i.invoice_number,
+		         COALESCE((SELECT STRING_AGG(ii.description, ', ' ORDER BY ii.id)
+		            FROM invoice_items ii WHERE ii.invoice_id = i.id AND ii.tenant_id = i.tenant_id), '') AS item_name,
+		         (i.total_amount - i.paid_amount)::text AS amount,
+		         TO_CHAR(i.due_date, 'DD/MM/YYYY') AS due_date
+		  FROM invoices i
+		  WHERE i.customer_id = c.id AND i.tenant_id = c.tenant_id
+		    AND i.deleted_at IS NULL
+		    AND i.status IN ('issued','partial','overdue')
+		    AND i.total_amount > i.paid_amount
+		  ORDER BY i.due_date DESC, i.id DESC LIMIT 1
+		) li ON true
 		WHERE c.tenant_id=$1 AND c.phone <> '' AND s.status IN ('active','suspended','overdue')`
 }
 
-const broadcastGroupBy = "\n\t\t\tGROUP BY c.phone"
+const broadcastOuterQuery = `
+	SELECT phone, customer_name, plan_name, item_name, invoice_number, amount, due_date
+	FROM (%s) AS aud WHERE rn = 1`
 
-// BroadcastRecipient adalah satu penerima broadcast beserta namanya (untuk
-// personalisasi variabel seperti {{customer_name}}).
+const broadcastCountQuery = `SELECT COUNT(*) FROM (%s) AS aud WHERE rn = 1`
+
+// BroadcastRecipient adalah satu penerima broadcast beserta konteksnya untuk
+// personalisasi variabel (nama, paket, dan satu tagihan acuan).
 type BroadcastRecipient struct {
-	Phone        string `json:"phone"`
-	CustomerName string `json:"customer_name"`
+	Phone         string `json:"phone"`
+	CustomerName  string `json:"customer_name"`
+	PlanName      string `json:"plan_name"`
+	ItemName      string `json:"item_name"`
+	InvoiceNumber string `json:"invoice_number"`
+	Amount        string `json:"amount"`
+	DueDate       string `json:"due_date"`
 }
 
 // ListBroadcastPhones returns distinct customer phones for an audience filter.
@@ -166,7 +212,7 @@ func (s *Store) ListBroadcastRecipientsFiltered(ctx context.Context, tenantID xi
 	}
 	args := []any{tenantID}
 	cond, args := broadcastExtraConditions(filter, args)
-	q := broadcastBaseQuery(audience) + cond + broadcastGroupBy
+	q := fmt.Sprintf(broadcastOuterQuery, broadcastBaseQuery(audience)+cond)
 	rows, err := s.Pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -175,7 +221,7 @@ func (s *Store) ListBroadcastRecipientsFiltered(ctx context.Context, tenantID xi
 	var out []BroadcastRecipient
 	for rows.Next() {
 		var r BroadcastRecipient
-		if err := rows.Scan(&r.Phone, &r.CustomerName); err != nil {
+		if err := rows.Scan(&r.Phone, &r.CustomerName, &r.PlanName, &r.ItemName, &r.InvoiceNumber, &r.Amount, &r.DueDate); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -205,10 +251,9 @@ func (s *Store) CountBroadcastPhonesFiltered(ctx context.Context, tenantID xid.I
 	}
 	args := []any{tenantID}
 	cond, args := broadcastExtraConditions(filter, args)
-	base := broadcastBaseQuery(audience)
-	// Bungkus sebagai subquery agar DISTINCT tetap dihitung tepat.
+	// Bungkus sebagai subquery agar satu nomor dihitung tepat satu penerima.
 	var n int64
-	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM (`+base+cond+`) AS aud`, args...).Scan(&n); err != nil {
+	if err := s.Pool.QueryRow(ctx, fmt.Sprintf(broadcastCountQuery, broadcastBaseQuery(audience)+cond), args...).Scan(&n); err != nil {
 		return 0, err
 	}
 	return n, nil

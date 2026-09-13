@@ -212,11 +212,11 @@ func registerNotifications(api huma.API, d *Deps) {
 			if err != nil {
 				return nil, httpx.Internal(err)
 			}
-			// Isi variabel per penerima ({{customer_name}}, {{phone}}) agar
+			// Isi variabel per penerima (nama, paket, tagihan acuan) agar
 			// pesan tersimpan final per nomor di antrean.
 			personalized = make([]notify.BroadcastMessage, 0, len(recips))
 			for _, r := range recips {
-				vars := notify.BroadcastVars(r.CustomerName, r.Phone)
+				vars := notify.BroadcastVars(r.CustomerName, r.Phone, r.PlanName, r.ItemName, r.InvoiceNumber, r.Amount, r.DueDate)
 				personalized = append(personalized, notify.BroadcastMessage{
 					Recipient: r.Phone,
 					Subject:   notify.RenderBroadcastBody(subject, vars),

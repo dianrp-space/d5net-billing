@@ -43,7 +43,15 @@ function renderPreview(body: string): string {
 }
 
 /** Variabel yang benar-benar diisi saat broadcast dikirim (per penerima). */
-const SUPPORTED_BCAST_VARS = new Set(["customer_name", "phone"]);
+const SUPPORTED_BCAST_VARS = new Set([
+  "customer_name",
+  "phone",
+  "plan_name",
+  "item_name",
+  "invoice_number",
+  "amount",
+  "due_date",
+]);
 
 /** Daftar placeholder {{nama}} unik persis seperti yang dikenali backend. */
 function findPlaceholders(s: string): string[] {
@@ -199,8 +207,13 @@ export function NotificationsPage() {
     broadcastEvent && broadcastEvent.variables.length
       ? broadcastEvent.variables
       : [
-          { name: "customer_name", desc: "Nama pelanggan (diisi otomatis per penerima)" },
+          { name: "customer_name", desc: "Nama pelanggan" },
           { name: "phone", desc: "Nomor penerima" },
+          { name: "plan_name", desc: "Paket langganan (terbaru)" },
+          { name: "item_name", desc: "Item tagihan acuan" },
+          { name: "invoice_number", desc: "Nomor tagihan acuan" },
+          { name: "amount", desc: "Sisa tagihan acuan (angka)" },
+          { name: "due_date", desc: "Jatuh tempo tagihan acuan" },
         ];
   // Template tersimpan untuk channel yang sedang dipilih.
   const bcastChannelTemplates = templates.filter((t) => t.channel === bcast.channel);
@@ -443,7 +456,7 @@ export function NotificationsPage() {
               Variabel {unsupportedVars.map((v) => `{{${v}}}`).join(", ")} tidak didukung broadcast
               {bcast.audience === "custom"
                 ? " custom (nomor paste-an tanpa data pelanggan)"
-                : " (hanya {{customer_name}} dan {{phone}} yang terisi otomatis)"}
+                : " (yang terisi otomatis: customer_name, phone, plan_name, item_name, invoice_number, amount, due_date)"}
               {" "}dan akan terkirim mentah. Hapus atau ganti sebelum mengirim.
             </p>
           ) : null}
