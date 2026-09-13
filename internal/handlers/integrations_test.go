@@ -94,6 +94,18 @@ func TestDokuCustomerFee(t *testing.T) {
 	}
 }
 
+func TestDuitkuCustomerFee(t *testing.T) {
+	if got := duitkuCustomerFee(duitkuIntegrationStored{FeeMode: "", FeeFlat: 4000, FeePercent: 50}, 2_000_000); got != 0 {
+		t.Fatalf("merchant mode fee = %d, want 0", got)
+	}
+	if got := duitkuCustomerFee(duitkuIntegrationStored{FeeMode: "customer", FeeFlat: 4000, FeePercent: 50}, 2_000_000); got != 2000 {
+		t.Fatalf("customer fee = %d, want 2000", got)
+	}
+	if got := duitkuCustomerFee(duitkuIntegrationStored{FeeMode: "customer", FeeFlat: 3500}, 100000); got != 3500 {
+		t.Fatalf("flat fee = %d, want 3500", got)
+	}
+}
+
 func TestSandboxSimExternalID(t *testing.T) {
 	got := sandboxSimExternalID(&store.Invoice{InvoiceNumber: "INV-TES-1"})
 	if !strings.Contains(got, "INV-TES-1-SIM-") {

@@ -17,16 +17,27 @@ import (
 
 // paymentCustomerFee mengembalikan biaya admin yang dibebankan ke customer untuk
 // provider tertentu (0 bila merchant menanggung / tidak berlaku).
-// Fee DOKU Checkout memakai rumus global: biaya dasar MDR × % ke customer.
+// Rumus: biaya dasar MDR × % ke customer (sama untuk DOKU & Duitku).
 func paymentCustomerFee(ctx context.Context, d *Deps, tid xid.ID, providerName, _ string, base int64) int64 {
-	if providerName != payment.ProviderDoku || base <= 0 {
+	if base <= 0 {
 		return 0
 	}
-	cfg, err := loadDokuIntegration(ctx, d, tid)
-	if err != nil {
+	switch providerName {
+	case payment.ProviderDoku:
+		cfg, err := loadDokuIntegration(ctx, d, tid)
+		if err != nil {
+			return 0
+		}
+		return dokuCustomerFee(cfg, base)
+	case payment.ProviderDuitku:
+		cfg, err := loadDuitkuIntegration(ctx, d, tid)
+		if err != nil {
+			return 0
+		}
+		return duitkuCustomerFee(cfg, base)
+	default:
 		return 0
 	}
-	return dokuCustomerFee(cfg, base)
 }
 
 // metaInt64 membaca angka dari metadata intent (JSON → biasanya float64).

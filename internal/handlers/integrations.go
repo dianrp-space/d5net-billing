@@ -31,26 +31,36 @@ type duitkuIntegrationStored struct {
 	Sandbox          bool   `json:"sandbox"`
 	Enabled          bool   `json:"enabled"`
 	ExpiresInMinutes int    `json:"expires_in_minutes"`
+	// FeeMode: "customer" = biaya admin ditambahkan ke tagihan; selain itu merchant.
+	FeeMode    string  `json:"fee_mode"`
+	FeeFlat    int64   `json:"fee_flat,omitempty"` // biaya dasar MDR
+	FeePercent float64 `json:"fee_percent,omitempty"`
 }
 
 type duitkuIntegrationView struct {
-	Configured       bool   `json:"configured"`
-	Enabled          bool   `json:"enabled"`
-	Sandbox          bool   `json:"sandbox"`
-	MerchantCode     string `json:"merchant_code"`
-	APIKey           string `json:"api_key,omitempty"`
-	ExpiresInMinutes int    `json:"expires_in_minutes"`
-	WebhookPath      string `json:"webhook_path"`
-	WebhookURL       string `json:"webhook_url"`
-	WebhookBaseHint  string `json:"webhook_base_hint"`
+	Configured       bool    `json:"configured"`
+	Enabled          bool    `json:"enabled"`
+	Sandbox          bool    `json:"sandbox"`
+	MerchantCode     string  `json:"merchant_code"`
+	APIKey           string  `json:"api_key,omitempty"`
+	ExpiresInMinutes int     `json:"expires_in_minutes"`
+	FeeMode          string  `json:"fee_mode"`
+	FeeFlat          int64   `json:"fee_flat"`
+	FeePercent       float64 `json:"fee_percent"`
+	WebhookPath      string  `json:"webhook_path"`
+	WebhookURL       string  `json:"webhook_url"`
+	WebhookBaseHint  string  `json:"webhook_base_hint"`
 }
 
 type duitkuIntegrationPut struct {
-	Enabled          bool   `json:"enabled"`
-	Sandbox          bool   `json:"sandbox"`
-	MerchantCode     string `json:"merchant_code"`
-	APIKey           string `json:"api_key,omitempty"`
-	ExpiresInMinutes int    `json:"expires_in_minutes,omitempty"`
+	Enabled          bool    `json:"enabled"`
+	Sandbox          bool    `json:"sandbox"`
+	MerchantCode     string  `json:"merchant_code"`
+	APIKey           string  `json:"api_key,omitempty"`
+	ExpiresInMinutes int     `json:"expires_in_minutes,omitempty"`
+	FeeMode          string  `json:"fee_mode,omitempty"`
+	FeeFlat          int64   `json:"fee_flat,omitempty"`
+	FeePercent       float64 `json:"fee_percent,omitempty"`
 }
 
 type dokuIntegrationStored struct {
@@ -141,9 +151,17 @@ func normalizeDokuFeeMode(mode string) string {
 	return ""
 }
 
-// dokuCustomerFee menghitung biaya admin legacy (fee global) — rumus sama:
-// persen dari fee_flat (MDR), bukan dari nominal invoice.
+// dokuCustomerFee menghitung biaya admin DOKU — persen dari fee_flat (MDR),
+// bukan dari nominal invoice.
 func dokuCustomerFee(cfg dokuIntegrationStored, invoiceBase int64) int64 {
+	if normalizeDokuFeeMode(cfg.FeeMode) != DokuFeeModeCustomer || invoiceBase <= 0 {
+		return 0
+	}
+	return dokuFeeFromBaseMDR(cfg.FeeFlat, cfg.FeePercent)
+}
+
+// duitkuCustomerFee sama rumusnya dengan DOKU (MDR dasar × % ke customer).
+func duitkuCustomerFee(cfg duitkuIntegrationStored, invoiceBase int64) int64 {
 	if normalizeDokuFeeMode(cfg.FeeMode) != DokuFeeModeCustomer || invoiceBase <= 0 {
 		return 0
 	}
@@ -342,6 +360,13 @@ func registerIntegrations(api huma.API, d *Deps) {
 		if input.Body.ExpiresInMinutes > 0 {
 			cur.ExpiresInMinutes = payment.ClampDuitkuExpiryMinutes(input.Body.ExpiresInMinutes)
 		}
+		cur.FeeMode = normalizeDokuFeeMode(input.Body.FeeMode)
+		if input.Body.FeeFlat < 0 {
+			cur.FeeFlat = 0
+		} else {
+			cur.FeeFlat = input.Body.FeeFlat
+		}
+		cur.FeePercent = clampFeePercent(input.Body.FeePercent)
 		if err := d.Store.UpsertSettingJSON(ctx, tid, settingDuitku, cur); err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -932,6 +957,9 @@ func duitkuView(ctx context.Context, d *Deps, tid xid.ID, s duitkuIntegrationSto
 		MerchantCode:     merchant,
 		APIKey:           apiKey,
 		ExpiresInMinutes: payment.ClampDuitkuExpiryMinutes(s.ExpiresInMinutes),
+		FeeMode:          normalizeDokuFeeMode(s.FeeMode),
+		FeeFlat:          s.FeeFlat,
+		FeePercent:       s.FeePercent,
 		WebhookPath:      paymentWebhookPathFor(payment.ProviderDuitku),
 		WebhookURL:       webhookURL,
 		WebhookBaseHint:  webhookURL,
@@ -1098,13 +1126,19 @@ func normalizePaymentProviderName(name string) string {
 func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payOptionView {
 	out := make([]payOptionView, 0, 2)
 	if cfg, _ := loadDuitkuIntegration(ctx, d, tenantID); duitkuCredentialsReady(d, cfg) {
-		out = append(out, payOptionView{
+		opt := payOptionView{
 			Provider:    payment.ProviderDuitku,
 			Label:       "Duitku Payment Gateway",
 			Description: "Halaman pembayaran Duitku (VA, e-wallet, retail, QRIS)",
 			Kind:        "redirect",
 			Sandbox:     cfg.Sandbox,
-		})
+		}
+		if normalizeDokuFeeMode(cfg.FeeMode) == DokuFeeModeCustomer {
+			opt.FeeMode = DokuFeeModeCustomer
+			opt.FeeFlat = cfg.FeeFlat
+			opt.FeePercent = cfg.FeePercent
+		}
+		out = append(out, opt)
 	}
 	if cfg, _ := loadDokuIntegration(ctx, d, tenantID); dokuCredentialsReady(d, cfg) {
 		opt := payOptionView{

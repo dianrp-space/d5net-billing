@@ -40,6 +40,9 @@ type DuitkuIntegration = {
   merchant_code: string;
   api_key?: string;
   expires_in_minutes: number;
+  fee_mode?: string;
+  fee_flat?: number;
+  fee_percent?: number;
   webhook_path: string;
   webhook_url: string;
   webhook_base_hint: string;
@@ -257,6 +260,9 @@ export function PaymentGWPage() {
     merchant_code: "",
     api_key: "",
     expires_in_minutes: 60,
+    fee_mode: "merchant",
+    fee_flat: 0,
+    fee_percent: 0,
   });
   const [dokuForm, setDokuForm] = useState({
     enabled: false,
@@ -277,6 +283,9 @@ export function PaymentGWPage() {
       merchant_code: duitkuQ.data.merchant_code || "",
       api_key: duitkuQ.data.api_key || "",
       expires_in_minutes: duitkuQ.data.expires_in_minutes || 60,
+      fee_mode: duitkuQ.data.fee_mode === "customer" ? "customer" : "merchant",
+      fee_flat: duitkuQ.data.fee_flat || 0,
+      fee_percent: duitkuQ.data.fee_percent || 0,
     });
   }, [duitkuQ.data]);
 
@@ -304,6 +313,9 @@ export function PaymentGWPage() {
           merchant_code: duitkuForm.merchant_code.trim(),
           api_key: duitkuForm.api_key.trim() || undefined,
           expires_in_minutes: Math.min(1440, Math.max(1, duitkuForm.expires_in_minutes || 60)),
+          fee_mode: duitkuForm.fee_mode === "customer" ? "customer" : "merchant",
+          fee_flat: Math.max(0, Math.floor(Number(duitkuForm.fee_flat) || 0)),
+          fee_percent: Math.min(100, Math.max(0, Number(duitkuForm.fee_percent) || 0)),
         }),
       }),
     onSuccess: (data) => {
@@ -314,6 +326,9 @@ export function PaymentGWPage() {
         merchant_code: data.merchant_code || "",
         api_key: data.api_key || duitkuForm.api_key,
         expires_in_minutes: data.expires_in_minutes || duitkuForm.expires_in_minutes,
+        fee_mode: data.fee_mode === "customer" ? "customer" : "merchant",
+        fee_flat: data.fee_flat || 0,
+        fee_percent: data.fee_percent || 0,
       });
       void qc.invalidateQueries({ queryKey: ["integration-duitku"] });
       void toastSuccess("Duitku disimpan");
@@ -374,6 +389,10 @@ export function PaymentGWPage() {
     onError: (e: Error) => void toastError(e.message),
   });
 
+  const duitkuFeePreview =
+    duitkuForm.fee_mode === "customer" && duitkuForm.fee_flat > 0
+      ? Math.round((duitkuForm.fee_flat * ((duitkuForm.fee_percent || 0) > 0 ? duitkuForm.fee_percent : 100)) / 100)
+      : 0;
   const dokuFeePreview =
     dokuForm.fee_mode === "customer" && dokuForm.fee_flat > 0
       ? Math.round((dokuForm.fee_flat * ((dokuForm.fee_percent || 0) > 0 ? dokuForm.fee_percent : 100)) / 100)
@@ -503,6 +522,60 @@ export function PaymentGWPage() {
                 Invoice Duitku berlaku {ttlHint(duitkuForm.expires_in_minutes)}.
               </span>
             </label>
+            <div className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Biaya admin ditanggung</span>
+                <select
+                  className="input"
+                  value={duitkuForm.fee_mode}
+                  onChange={(e) => setDuitkuForm({ ...duitkuForm, fee_mode: e.target.value })}
+                >
+                  <option value="merchant">Merchant (dipotong dari settlement)</option>
+                  <option value="customer">Customer (ditambahkan ke tagihan)</option>
+                </select>
+                <span className="text-[11px] leading-relaxed text-[var(--muted)]">
+                  Biaya dasar = MDR dari Duitku (mis. VA Rp4.000). Persen = berapa % dari biaya dasar itu yang
+                  dibebankan ke pelanggan — <strong>bukan</strong> % dari nominal tagihan. Contoh: dasar 4000 +
+                  50% → admin Rp2.000. Kosongkan persen = 100% (customer bayar penuh biaya dasar).
+                </span>
+              </label>
+              {duitkuForm.fee_mode === "customer" ? (
+                <div className="grid gap-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="grid gap-0.5 text-sm">
+                      <span className="text-[var(--muted)]">Biaya dasar MDR (Rp)</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        step={500}
+                        value={duitkuForm.fee_flat}
+                        onChange={(e) => setDuitkuForm({ ...duitkuForm, fee_flat: Number(e.target.value) || 0 })}
+                      />
+                    </label>
+                    <label className="grid gap-0.5 text-sm">
+                      <span className="text-[var(--muted)]">% ke customer</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={duitkuForm.fee_percent}
+                        onChange={(e) => setDuitkuForm({ ...duitkuForm, fee_percent: Number(e.target.value) || 0 })}
+                      />
+                    </label>
+                  </div>
+                  <span className="text-[11px] text-[var(--muted)]">
+                    {duitkuForm.fee_flat > 0
+                      ? `Customer bayar admin ${formatRp(duitkuFeePreview)} · ditambah ke tagihan`
+                      : "Isi biaya dasar MDR dulu (mis. 4000)."}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-[11px] text-[var(--muted)]">Merchant menanggung MDR</span>
+              )}
+            </div>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Callback URL Duitku · /api/webhooks/payment/duitku</span>
               <div className="flex gap-2">

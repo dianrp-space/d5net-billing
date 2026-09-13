@@ -117,8 +117,8 @@ export function payOptionsHasDuitkuSandbox(options: PayOption[] | null | undefin
   );
 }
 
-/** Biaya admin channel DOKU: persen dari biaya dasar MDR (fee_flat), bukan dari nominal invoice.
- * Persen 0/kosong = 100% biaya dasar dibebankan ke customer.
+/** Biaya admin: persen dari biaya dasar MDR (fee_flat), bukan dari nominal invoice.
+ * Persen 0/kosong = 100% biaya dasar dibebankan ke customer. Dipakai DOKU & Duitku.
  */
 export function channelCustomerFee(
   feeMode: string | undefined,
