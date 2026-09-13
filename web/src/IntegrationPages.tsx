@@ -658,17 +658,36 @@ export function PaymentGWPage() {
                 autoComplete="off"
                 spellCheck={false}
               />
-              <span className="text-[11px] leading-relaxed text-[var(--muted)]">
-                Dashboard DOKU <strong>tidak menampilkan private key</strong>. Alurnya: generate pasangan RSA di
-                komputermu → upload <em>merchant public key</em> ke DOKU (API Keys) → simpan{" "}
-                <em>private key</em>-nya di sini. Jangan tempel DOKU Public Key / Merchant Public Key / Secret Key.
-                Header yang benar: <code>BEGIN PRIVATE KEY</code> atau <code>BEGIN RSA PRIVATE KEY</code>.{" "}
-                {dokuQ.data?.snap_auth_ready
-                  ? "Private key tersimpan & valid."
-                  : dokuQ.data?.has_private_key
-                    ? "Ada key tersimpan tapi bukan private key RSA yang valid — ganti."
-                    : "Tanpa ini, VA / e-wallet / QRIS SNAP tidak bisa dipakai."}
-              </span>
+              <div className="grid gap-1.5 text-[11px] leading-relaxed text-[var(--muted)]">
+                <p>
+                  Dashboard DOKU <strong>tidak punya private key</strong>. Kamu generate sendiri, lalu upload public-nya ke
+                  DOKU.
+                </p>
+                <p className="font-medium text-[var(--fg,inherit)]">Cara buat (di komputer / server):</p>
+                <pre className="overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel-muted,rgba(0,0,0,0.04))] p-2 font-mono text-[10px] leading-snug">{`openssl genrsa -out doku-private.pem 2048
+openssl pkcs8 -topk8 -nocrypt -in doku-private.pem -out doku-private-pkcs8.pem
+openssl rsa -in doku-private.pem -pubout -out doku-public.pem`}</pre>
+                <ol className="list-decimal space-y-0.5 pl-4">
+                  <li>
+                    Isi / upload isi <code>doku-public.pem</code> ke DOKU → Settings → API Keys →{" "}
+                    <strong>Merchant Public Key</strong> (sandbox & production terpisah).
+                  </li>
+                  <li>
+                    Tempel isi <code>doku-private-pkcs8.pem</code> (atau <code>doku-private.pem</code>) ke kolom ini — simpan
+                    file itu aman, jangan hilang.
+                  </li>
+                  <li>
+                    Jangan tempel DOKU Public Key / Merchant Public Key / Secret Key ke sini.
+                  </li>
+                </ol>
+                <p>
+                  {dokuQ.data?.snap_auth_ready
+                    ? "Private key tersimpan & valid."
+                    : dokuQ.data?.has_private_key
+                      ? "Ada key tersimpan tapi bukan private key RSA yang valid — ganti."
+                      : "Tanpa langkah di atas, VA / e-wallet / QRIS SNAP tidak bisa dipakai."}
+                </p>
+              </div>
             </label>
             <div className="grid grid-cols-3 gap-2">
               <label className="grid gap-1 text-sm">
