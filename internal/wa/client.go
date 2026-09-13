@@ -39,6 +39,14 @@ func (c *Client) Configured() bool {
 	return c != nil && c.cfg.BaseURL != ""
 }
 
+// DeviceID mengembalikan device/nomor pengirim gateway ("" = default gateway).
+func (c *Client) DeviceID() string {
+	if c == nil {
+		return ""
+	}
+	return c.cfg.DeviceID
+}
+
 // Status mirrors the gateway's GET /app/status results.
 type Status struct {
 	Connected bool   `json:"is_connected"`

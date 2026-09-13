@@ -265,6 +265,7 @@ type NotificationLog struct {
 	Channel     string     `json:"channel"`
 	Event       string     `json:"event"`
 	Recipient   string     `json:"recipient"`
+	Sender      *string    `json:"sender,omitempty"`
 	Subject     *string    `json:"subject,omitempty"`
 	Body        string     `json:"body"`
 	Status      string     `json:"status"`
@@ -311,7 +312,7 @@ func (s *Store) ListNotificationHistory(ctx context.Context, tenantID xid.ID, st
 	}
 	args = append(args, limit, offset)
 	q := `
-		SELECT id, channel, event, recipient, subject, body, status, attempts, error,
+		SELECT id, channel, event, recipient, sender, subject, body, status, attempts, error,
 		       batch_id, scheduled_at, sent_at, created_at
 		FROM notification_queue ` + where +
 		fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
@@ -323,13 +324,34 @@ func (s *Store) ListNotificationHistory(ctx context.Context, tenantID xid.ID, st
 	var list []NotificationLog
 	for rows.Next() {
 		var n NotificationLog
-		if err := rows.Scan(&n.ID, &n.Channel, &n.Event, &n.Recipient, &n.Subject, &n.Body, &n.Status,
+		if err := rows.Scan(&n.ID, &n.Channel, &n.Event, &n.Recipient, &n.Sender, &n.Subject, &n.Body, &n.Status,
 			&n.Attempts, &n.Error, &n.BatchID, &n.ScheduledAt, &n.SentAt, &n.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		list = append(list, n)
 	}
 	return list, total, rows.Err()
+}
+
+// ResendNotification mengembalikan satu log gagal ke antrean (status pending,
+// dijadwalkan langsung). Hanya berlaku untuk status failed agar riwayat
+// terkirim/menunggu tidak terganggu.
+func (s *Store) ResendNotification(ctx context.Context, tenantID, id xid.ID) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE notification_queue
+		SET status='pending', error=NULL, attempts=0, scheduled_at=NOW(), sent_at=NULL
+		WHERE tenant_id=$1 AND id=$2 AND status='failed'
+	`, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // NotificationHistoryStats menghitung status antrean untuk ringkasan riwayat.

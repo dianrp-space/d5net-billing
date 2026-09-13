@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { useConfirm } from "./confirm";
-import { IconTrash } from "./icons";
+import { IconRefresh, IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
 import { Button, IconButton, Input, Section, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table } from "./ui";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -693,6 +693,7 @@ type NotifLog = {
   channel: string;
   event: string;
   recipient: string;
+  sender?: string | null;
   subject?: string | null;
   body: string;
   status: string;
@@ -802,6 +803,25 @@ function NotificationHistoryTab() {
     },
     onError: (e: Error) => void toastError(e.message),
   });
+
+  const resend = useMutation({
+    mutationFn: (id: string) => api<{ status: string }>(`/api/notifications/history/${id}/resend`, { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["notification-history"] });
+      void toastSuccess("Dimasukkan antrean, worker mengirim ±15 detik lagi");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  async function onResend(n: NotifLog) {
+    const ok = await confirm({
+      title: "Kirim ulang pesan?",
+      description: `Kirim ulang ke ${n.recipient || "penerima"}? Isi pesan sama seperti sebelumnya.`,
+      confirmLabel: "Kirim ulang",
+    });
+    if (!ok) return;
+    resend.mutate(n.id);
+  }
 
   async function onPurgeNow() {
     const days = clampRetentionDays(retentionDays);
@@ -928,7 +948,7 @@ function NotificationHistoryTab() {
       />
       <Table
         rowNumberStart={page * limit + 1}
-        columns={["Waktu", "Jenis", "Channel", "Penerima", "Pesan", "Status", "Keterangan"]}
+        columns={["Waktu", "Jenis", "Channel", "Pengirim", "Penerima", "Pesan", "Status", "Keterangan", "Aksi"]}
         rows={rows.map((n) => {
           const st = LOG_STATUS[n.status] ?? { label: n.status, tone: "var(--muted)" };
           const body = n.body.length > 80 ? `${n.body.slice(0, 80)}…` : n.body;
@@ -938,6 +958,15 @@ function NotificationHistoryTab() {
             </span>,
             EVENT_LABELS[n.event] || n.event || "—",
             n.channel,
+            n.sender ? (
+              <span key="from" title={`Dikirim via ${n.sender}`}>
+                {n.sender}
+              </span>
+            ) : (
+              <span key="from" className="text-[var(--muted)]">
+                —
+              </span>
+            ),
             n.recipient,
             <span key="b" title={n.body}>
               {body}
@@ -957,6 +986,20 @@ function NotificationHistoryTab() {
               <span key="e" className="text-[var(--muted)]">percobaan ke-{n.attempts + 1}</span>
             ) : (
               <span key="e" className="text-[var(--muted)]">—</span>
+            ),
+            n.status === "failed" ? (
+              <IconButton
+                key="r"
+                label="Kirim ulang"
+                disabled={resend.isPending}
+                onClick={() => void onResend(n)}
+              >
+                <IconRefresh />
+              </IconButton>
+            ) : (
+              <span key="r" className="text-[var(--muted)]">
+                —
+              </span>
             ),
           ];
         })}

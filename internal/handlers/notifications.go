@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -408,6 +409,25 @@ func registerNotifications(api huma.API, d *Deps) {
 		}{}
 		out.Body.RetentionDays = store.NormalizeJobScheduleSettings(cfg).NotifLogRetentionDays
 		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "resend-notification", Method: http.MethodPost, Path: "/api/notifications/history/{id}/resend",
+		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct{ Body map[string]string }, error) {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.Store.ResendNotification(ctx, tid, input.ID); errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("log gagal tidak ditemukan (hanya status Gagal yang bisa dikirim ulang)")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		auditEvent(ctx, d, AuditNotifResend, "notification", &input.ID, nil)
+		return &struct{ Body map[string]string }{Body: map[string]string{"status": "queued"}}, nil
 	})
 
 	huma.Register(api, huma.Operation{

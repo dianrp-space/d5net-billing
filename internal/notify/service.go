@@ -225,24 +225,27 @@ func (s *Service) ProcessPending(ctx context.Context, limit int) (int, error) {
 			msg.Subject = *subject
 		}
 		var sendErr error
+		sender := ""
 		switch channel {
 		case "whatsapp":
-			sendErr = s.sendWhatsApp(ctx, tenantID, recipient, body)
+			sender, sendErr = s.sendWhatsApp(ctx, tenantID, recipient, body)
 		case "telegram":
-			sender := s.tenantMessagingNotifier(ctx, tenantID, "telegram")
-			if sender == nil {
-				sender = n
+			sender = "bot"
+			senderSvc := s.tenantMessagingNotifier(ctx, tenantID, "telegram")
+			if senderSvc == nil {
+				senderSvc = n
 			}
 			if chatID := s.tenantTelegramChatID(ctx, tenantID); chatID != "" {
 				msg.Recipient = chatID
 			}
-			sendErr = sender.Send(ctx, msg)
+			sendErr = senderSvc.Send(ctx, msg)
 		case "email":
-			sender := s.tenantEmailNotifier(ctx, tenantID)
-			if sender == nil {
-				sender = n
+			sender = s.tenantEmailFrom(ctx, tenantID)
+			senderSvc := s.tenantEmailNotifier(ctx, tenantID)
+			if senderSvc == nil {
+				senderSvc = n
 			}
-			sendErr = sender.Send(ctx, msg)
+			sendErr = senderSvc.Send(ctx, msg)
 		default:
 			sendErr = fmt.Errorf("unknown channel")
 		}
@@ -251,7 +254,7 @@ func (s *Service) ProcessPending(ctx context.Context, limit int) (int, error) {
 			slog.Error("notification failed", "id", id, "err", sendErr)
 			continue
 		}
-		_, _ = s.store.Pool.Exec(ctx, `UPDATE notification_queue SET status='sent', sent_at=NOW() WHERE id=$1`, id)
+		_, _ = s.store.Pool.Exec(ctx, `UPDATE notification_queue SET status='sent', sent_at=NOW(), sender=NULLIF($2,'') WHERE id=$1`, id, sender)
 		sent++
 	}
 	return sent, nil
@@ -271,7 +274,8 @@ func (s *Service) SendTest(ctx context.Context, tenantID xid.ID, channel, recipi
 		if recipient == "" {
 			return fmt.Errorf("nomor WhatsApp tujuan wajib diisi")
 		}
-		return s.sendWhatsApp(ctx, tenantID, recipient, body)
+		_, err := s.sendWhatsApp(ctx, tenantID, recipient, body)
+		return err
 	case "telegram":
 		n := s.tenantMessagingNotifier(ctx, tenantID, "telegram")
 		if n == nil {
@@ -358,10 +362,11 @@ func (s *Service) tenantWhatsAppClients(ctx context.Context, tenantID xid.ID) []
 }
 
 // sendWhatsApp tries each configured number until one succeeds (redundancy).
-func (s *Service) sendWhatsApp(ctx context.Context, tenantID xid.ID, phone, body string) error {
+// Mengembalikan device ID pengirim yang berhasil ("" = default gateway).
+func (s *Service) sendWhatsApp(ctx context.Context, tenantID xid.ID, phone, body string) (string, error) {
 	clients := s.tenantWhatsAppClients(ctx, tenantID)
 	if len(clients) == 0 {
-		return fmt.Errorf("WhatsApp gateway belum dikonfigurasi/aktif untuk tenant")
+		return "", fmt.Errorf("WhatsApp gateway belum dikonfigurasi/aktif untuk tenant")
 	}
 	var errs []string
 	for _, c := range clients {
@@ -369,9 +374,21 @@ func (s *Service) sendWhatsApp(ctx context.Context, tenantID xid.ID, phone, body
 			errs = append(errs, err.Error())
 			continue
 		}
-		return nil
+		return c.DeviceID(), nil
 	}
-	return fmt.Errorf("semua nomor WhatsApp gagal: %s", strings.Join(errs, "; "))
+	return "", fmt.Errorf("semua nomor WhatsApp gagal: %s", strings.Join(errs, "; "))
+}
+
+// tenantEmailFrom mengembalikan alamat From SMTP tenant ("" bila tak dikonfigurasi).
+func (s *Service) tenantEmailFrom(ctx context.Context, tenantID xid.ID) string {
+	var cfg tenantSMTPCfg
+	if err := s.store.GetSettingJSON(ctx, tenantID, "integration.smtp", &cfg); err != nil {
+		return ""
+	}
+	if !cfg.Enabled {
+		return ""
+	}
+	return strings.TrimSpace(cfg.From)
 }
 
 func (s *Service) loadTenantMessaging(ctx context.Context, tenantID xid.ID) (tenantMessagingCfg, bool) {
