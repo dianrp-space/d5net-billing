@@ -1516,9 +1516,9 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		XForwardedHost  string `header:"X-Forwarded-Host"`
 		XForwardedProto string `header:"X-Forwarded-Proto"`
 		Body            struct {
-			Provider  string `json:"provider"`
-			Channel   string `json:"channel"`
-			ReturnURL string `json:"return_url"`
+			Provider  string `json:"provider,omitempty"`
+			Channel   string `json:"channel,omitempty"`
+			ReturnURL string `json:"return_url,omitempty"`
 		}
 	}) (*struct{ Body store.PaymentIntent }, error) {
 		tid, err := tenantIDFromCtx(ctx)
