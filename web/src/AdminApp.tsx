@@ -46,7 +46,8 @@ import {
 } from "./icons";
 import { IconButton } from "./ui";
 import { PanelLeft, PanelLeftClose, Home } from "lucide-react";
-import { lazy, Suspense, Component, useEffect, useState, type ReactNode } from "react";
+import { Suspense, Component, useEffect, useState, type ReactNode } from "react";
+import { lazyWithReload as lazy, isChunkLoadError } from "./lazyReload";
 import { useQuery } from "@tanstack/react-query";
 
 export type { AdminPage } from "./admin/pages";
@@ -227,10 +228,23 @@ class PageErrorBoundary extends Component<{ children: ReactNode; resetKey: strin
 
   render() {
     if (this.state.error) {
+      const chunk = isChunkLoadError(this.state.error);
       return (
         <div className="rounded-[var(--radius)] border border-[var(--danger)]/30 bg-[var(--panel)] p-4">
           <p className="text-sm font-semibold text-[var(--danger)]">Halaman gagal dimuat</p>
-          <p className="mt-1 text-sm text-[var(--muted)]">{this.state.error.message}</p>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            {chunk
+              ? "Aplikasi baru saja diperbarui. Muat ulang halaman untuk memakai versi terbaru."
+              : this.state.error.message}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className="btn" onClick={() => window.location.reload()}>
+              Muat ulang halaman
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => this.setState({ error: null })}>
+              Coba lagi
+            </button>
+          </div>
         </div>
       );
     }
