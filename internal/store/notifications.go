@@ -86,42 +86,132 @@ func (s *Store) GetNotificationTemplate(ctx context.Context, tenantID xid.ID, ch
 	return &t, nil
 }
 
-// ListBroadcastPhones returns distinct customer phones for an audience filter.
-func (s *Store) ListBroadcastPhones(ctx context.Context, tenantID xid.ID, audience string) ([]string, error) {
-	if err := s.SetTenantContext(ctx, tenantID); err != nil {
-		return nil, err
+// BroadcastFilter mempersempit audience broadcast ke area terdampak
+// (mis. pemberitahuan gangguan): cluster = POP/area pelanggan,
+// odp = ODP tempat langganan pelanggan menancap.
+type BroadcastFilter struct {
+	ClusterID *xid.ID
+	ODPID     *xid.ID
+}
+
+// broadcastExtraConditions menyusun kondisi tambahan cluster/ODP untuk query
+// audience. Kedua query dasar memakai alias "c" untuk customers dan $1 untuk
+// tenant_id; kondisi ODP dicek lewat langganan (odp_ports.subscription_id)
+// dengan fallback ke odp_ports.customer_id langsung.
+func broadcastExtraConditions(filter BroadcastFilter, args []any) (string, []any) {
+	cond := ""
+	if filter.ClusterID != nil && !xid.IsNil(*filter.ClusterID) {
+		args = append(args, *filter.ClusterID)
+		cond += fmt.Sprintf(" AND c.cluster_id = $%d", len(args))
 	}
-	var q string
-	switch audience {
-	case "overdue":
-		q = `
-			SELECT DISTINCT c.phone FROM customers c
+	if filter.ODPID != nil && !xid.IsNil(*filter.ODPID) {
+		args = append(args, *filter.ODPID)
+		n := len(args)
+		cond += fmt.Sprintf(` AND (EXISTS (
+			SELECT 1 FROM subscriptions s
+			JOIN odp_ports op ON op.subscription_id = s.id AND op.tenant_id = s.tenant_id
+			WHERE s.customer_id = c.id AND s.tenant_id = $1 AND op.odp_id = $%d
+		) OR EXISTS (
+			SELECT 1 FROM odp_ports op2
+			WHERE op2.customer_id = c.id AND op2.tenant_id = $1 AND op2.odp_id = $%d
+		))`, n, n)
+	}
+	return cond, args
+}
+
+func broadcastBaseQuery(audience string) string {
+	if audience == "overdue" {
+		return `
+			SELECT c.phone, MIN(c.full_name) AS customer_name FROM customers c
 			JOIN invoices i ON i.customer_id = c.id AND i.tenant_id = c.tenant_id
 			WHERE c.tenant_id=$1 AND c.phone <> ''
 			  AND i.deleted_at IS NULL
 			  AND i.status IN ('issued','partial','overdue')
 			  AND i.total_amount > i.paid_amount
 			  AND i.due_date < CURRENT_DATE`
-	default: // active
-		q = `
-			SELECT DISTINCT c.phone FROM customers c
-			JOIN subscriptions s ON s.customer_id = c.id AND s.tenant_id = c.tenant_id
-			WHERE c.tenant_id=$1 AND c.phone <> '' AND s.status IN ('active','suspended','overdue')`
 	}
-	rows, err := s.Pool.Query(ctx, q, tenantID)
+	return `
+		SELECT c.phone, MIN(c.full_name) AS customer_name FROM customers c
+		JOIN subscriptions s ON s.customer_id = c.id AND s.tenant_id = c.tenant_id
+		WHERE c.tenant_id=$1 AND c.phone <> '' AND s.status IN ('active','suspended','overdue')`
+}
+
+const broadcastGroupBy = "\n\t\t\tGROUP BY c.phone"
+
+// BroadcastRecipient adalah satu penerima broadcast beserta namanya (untuk
+// personalisasi variabel seperti {{customer_name}}).
+type BroadcastRecipient struct {
+	Phone        string `json:"phone"`
+	CustomerName string `json:"customer_name"`
+}
+
+// ListBroadcastPhones returns distinct customer phones for an audience filter.
+func (s *Store) ListBroadcastPhones(ctx context.Context, tenantID xid.ID, audience string) ([]string, error) {
+	recips, err := s.ListBroadcastRecipientsFiltered(ctx, tenantID, audience, BroadcastFilter{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(recips))
+	for _, r := range recips {
+		out = append(out, r.Phone)
+	}
+	return out, nil
+}
+
+// ListBroadcastRecipientsFiltered mengembalikan penerima (nomor + nama) untuk
+// audience dengan filter opsional cluster dan ODP.
+func (s *Store) ListBroadcastRecipientsFiltered(ctx context.Context, tenantID xid.ID, audience string, filter BroadcastFilter) ([]BroadcastRecipient, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	args := []any{tenantID}
+	cond, args := broadcastExtraConditions(filter, args)
+	q := broadcastBaseQuery(audience) + cond + broadcastGroupBy
+	rows, err := s.Pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
+	var out []BroadcastRecipient
 	for rows.Next() {
-		var phone string
-		if err := rows.Scan(&phone); err != nil {
+		var r BroadcastRecipient
+		if err := rows.Scan(&r.Phone, &r.CustomerName); err != nil {
 			return nil, err
 		}
-		out = append(out, phone)
+		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ListBroadcastPhonesFiltered sama seperti ListBroadcastPhones dengan filter
+// opsional cluster dan ODP.
+func (s *Store) ListBroadcastPhonesFiltered(ctx context.Context, tenantID xid.ID, audience string, filter BroadcastFilter) ([]string, error) {
+	recips, err := s.ListBroadcastRecipientsFiltered(ctx, tenantID, audience, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(recips))
+	for _, r := range recips {
+		out = append(out, r.Phone)
+	}
+	return out, nil
+}
+
+// CountBroadcastPhonesFiltered menghitung penerima tanpa memuat semuanya —
+// dipakai preview audience sebelum broadcast dikirim.
+func (s *Store) CountBroadcastPhonesFiltered(ctx context.Context, tenantID xid.ID, audience string, filter BroadcastFilter) (int64, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return 0, err
+	}
+	args := []any{tenantID}
+	cond, args := broadcastExtraConditions(filter, args)
+	base := broadcastBaseQuery(audience)
+	// Bungkus sebagai subquery agar DISTINCT tetap dihitung tepat.
+	var n int64
+	if err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM (`+base+cond+`) AS aud`, args...).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // NotificationLog adalah satu baris riwayat pengiriman (antrean notifikasi).

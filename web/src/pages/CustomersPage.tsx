@@ -95,9 +95,13 @@ export function CustomersPage({
   const [clusterFilter, setClusterFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(0);
-  const limit = 25;
+  const [limit, setLimit] = useState(25);
+  function setPageSize(n: number) {
+    setLimit(n);
+    setPage(0);
+  }
   const q = useQuery({
-    queryKey: ["customers", debouncedSearch, clusterFilter, statusFilter, page],
+    queryKey: ["customers", debouncedSearch, clusterFilter, statusFilter, page, limit],
     queryFn: () => {
       const params = new URLSearchParams({
         limit: String(limit),
@@ -516,6 +520,8 @@ export function CustomersPage({
         pageCount={pageCount}
         onPageChange={setPage}
         total={total}
+        pageSize={limit}
+        onPageSizeChange={setPageSize}
       >
         <label className="flex cursor-pointer items-center gap-1.5 text-sm text-[var(--muted)]">
           <input

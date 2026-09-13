@@ -208,7 +208,11 @@ export function TicketsPage() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
   const [page, setPage] = useState(0);
-  const limit = 20;
+  const [limit, setLimit] = useState(20);
+  function setPageSize(n: number) {
+    setLimit(n);
+    setPage(0);
+  }
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [formErr, setFormErr] = useState("");
@@ -244,7 +248,7 @@ export function TicketsPage() {
   const canDispatch = canDispatchOps(meQ.data?.permissions);
 
   const listQ = useQuery({
-    queryKey: ["tickets", "list", status, debouncedSearch, page],
+    queryKey: ["tickets", "list", status, debouncedSearch, page, limit],
     queryFn: () => {
       const params = new URLSearchParams({
         limit: String(limit),
@@ -570,6 +574,8 @@ export function TicketsPage() {
             pageCount={pages}
             onPageChange={setPage}
             total={total}
+            pageSize={limit}
+            onPageSizeChange={setPageSize}
           />
 
           <Table

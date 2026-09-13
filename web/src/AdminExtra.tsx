@@ -547,7 +547,11 @@ export function ResellersPage() {
 
   const [commStatus, setCommStatus] = useState("");
   const [commPage, setCommPage] = useState(0);
-  const commLimit = 25;
+  const [commLimit, setCommLimit] = useState(25);
+  function setCommPageSize(n: number) {
+    setCommLimit(n);
+    setCommPage(0);
+  }
   const [newAmountInput, setNewAmountInput] = useState("");
   const [acqAmountInput, setAcqAmountInput] = useState("");
   const [form, setForm] = useState({ name: "", phone: "", commission_percent: 0, is_active: true });
@@ -563,7 +567,7 @@ export function ResellersPage() {
     queryFn: () => api<{ new_customer_amount: number; acquisition_amount: number }>("/api/settings/commission"),
   });
   const commissionsQ = useQuery({
-    queryKey: ["commissions", commStatus, commPage],
+    queryKey: ["commissions", commStatus, commPage, commLimit],
     queryFn: () =>
       api<{ data: CommissionRow[]; total: number }>(
         `/api/commissions?limit=${commLimit}&offset=${commPage * commLimit}${commStatus ? `&status=${encodeURIComponent(commStatus)}` : ""}`,
@@ -868,6 +872,8 @@ export function ResellersPage() {
           page={commPage}
           pageCount={commPageCount}
           onPageChange={setCommPage}
+          pageSize={commLimit}
+          onPageSizeChange={setCommPageSize}
         />
       </div>
       <Table

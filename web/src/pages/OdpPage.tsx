@@ -134,7 +134,7 @@ export function OdpPage({ tenantSlug, onNavigate }: { tenantSlug?: string; onNav
     }
     return matchesQuery(odpSearch, o.name, o.code);
   });
-  const { page: odpPage, setPage: setOdpPage, pageCount: odpPageCount, pageItems: odpPageItems } =
+  const { page: odpPage, setPage: setOdpPage, pageCount: odpPageCount, pageItems: odpPageItems, pageSize: odpPageSize, setPageSize: setOdpPageSize } =
     usePagination(filtered, 25);
 
   const refresh = () => {
@@ -330,6 +330,8 @@ export function OdpPage({ tenantSlug, onNavigate }: { tenantSlug?: string; onNav
         page={odpPage}
         pageCount={odpPageCount}
         onPageChange={setOdpPage}
+        pageSize={odpPageSize}
+        onPageSizeChange={setOdpPageSize}
       >
         <span className="ml-auto flex flex-wrap items-center gap-1.5">
           <IconButton label="Export CSV" onClick={() => void exportCsv()}>
@@ -341,7 +343,7 @@ export function OdpPage({ tenantSlug, onNavigate }: { tenantSlug?: string; onNav
         </span>
       </ListToolbar>
       <Table
-        rowNumberStart={odpPage * 25 + 1}
+        rowNumberStart={odpPage * odpPageSize + 1}
         columns={["Nama", "Kode", "Port", "Terpakai", "Sisa", "Koordinat", "Coverage", "Aksi"]}
         rows={odpPageItems.map((o) => [
           o.name,

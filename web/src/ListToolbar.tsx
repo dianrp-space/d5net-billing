@@ -10,16 +10,24 @@ export function useDebouncedValue<T>(value: T, delayMs = 300): T {
   return debounced;
 }
 
+/** Opsi jumlah baris per halaman untuk select "Tampilkan". */
+export const PAGE_SIZE_OPTIONS = [10, 20, 25, 50, 100];
+
 /** Client-side pagination for already-loaded lists (slices into pages). */
-export function usePagination<T>(items: T[], pageSize = 25) {
+export function usePagination<T>(items: T[], defaultPageSize = 25) {
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSizeState] = useState(defaultPageSize);
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
   useEffect(() => {
     if (page > pageCount - 1) setPage(pageCount - 1);
   }, [page, pageCount]);
+  function setPageSize(n: number) {
+    setPageSizeState(n);
+    setPage(0);
+  }
   const pageItems = items.slice(safePage * pageSize, safePage * pageSize + pageSize);
-  return { page: safePage, setPage, pageCount, pageItems };
+  return { page, setPage, pageCount, pageItems, pageSize, setPageSize };
 }
 
 export type ListFilterOption = { value: string; label: string };
@@ -45,6 +53,9 @@ export function ListToolbar({
   pageCount,
   onPageChange,
   total,
+  pageSize,
+  pageSizeOptions = PAGE_SIZE_OPTIONS,
+  onPageSizeChange,
   children,
 }: {
   search?: string;
@@ -55,6 +66,10 @@ export function ListToolbar({
   pageCount?: number;
   onPageChange?: (page: number) => void;
   total?: number;
+  /** Jumlah baris per halaman (tampilkan select "Tampilkan" bila onPageSizeChange ada). */
+  pageSize?: number;
+  pageSizeOptions?: number[];
+  onPageSizeChange?: (size: number) => void;
   children?: ReactNode;
 }) {
   const showPager =
@@ -62,6 +77,7 @@ export function ListToolbar({
     typeof pageCount === "number" &&
     pageCount > 1 &&
     typeof onPageChange === "function";
+  const showPageSize = typeof onPageSizeChange === "function" && typeof pageSize === "number";
 
   return (
     <div className="mb-4 space-y-3">
@@ -75,6 +91,23 @@ export function ListToolbar({
               placeholder={searchPlaceholder}
               autoComplete="off"
             />
+          </div>
+        ) : null}
+        {showPageSize ? (
+          <div className="min-w-[130px]">
+            <Label className="mb-1.5 block">Tampilkan</Label>
+            <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange!(Number(v) || pageSize!)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {pageSizeOptions.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n} data
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         ) : null}
         {filters.map((f) => {

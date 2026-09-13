@@ -139,7 +139,7 @@ export function DiscountsPage() {
       return matchesQuery(search, r.name, r.plan_name, r.audience, valueLabel(r));
     });
   }, [rows, search, statusFilter]);
-  const { page: discPage, setPage: setDiscPage, pageCount: discPageCount, pageItems: discPageItems } =
+  const { page: discPage, setPage: setDiscPage, pageCount: discPageCount, pageItems: discPageItems, pageSize: discPageSize, setPageSize: setDiscPageSize } =
     usePagination(filtered, 25);
 
   const customerHits = useMemo(() => {
@@ -260,10 +260,12 @@ export function DiscountsPage() {
         page={discPage}
         pageCount={discPageCount}
         onPageChange={setDiscPage}
+        pageSize={discPageSize}
+        onPageSizeChange={setDiscPageSize}
       />
 
       <Table
-        rowNumberStart={discPage * 25 + 1}
+        rowNumberStart={discPage * discPageSize + 1}
         columns={["Nama", "Paket", "Diskon", "Periode", "Sasaran", "Status", "Aksi"]}
         rows={discPageItems.map((r) => [
           r.name,

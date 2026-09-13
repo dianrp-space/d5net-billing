@@ -123,14 +123,14 @@ export function VouchersPage() {
     () => batches.filter((b) => matchesQuery(batchSearch, b.name, b.plan_name, b.router_name)),
     [batches, batchSearch],
   );
-  const { page: batchPage, setPage: setBatchPage, pageCount: batchPageCount, pageItems: batchPageItems } =
+  const { page: batchPage, setPage: setBatchPage, pageCount: batchPageCount, pageItems: batchPageItems, pageSize: batchPageSize, setPageSize: setBatchPageSize } =
     usePagination(filteredBatches, 25);
   const plans = (Array.isArray(plansQ.data) ? plansQ.data : []).filter(
     (p) => !p.service_type || p.service_type === "hotspot",
   );
   const routers = (Array.isArray(routersQ.data) ? routersQ.data : []).filter((r) => r.is_active);
   const codes = Array.isArray(codesQ.data) ? codesQ.data : [];
-  const { page: codePage, setPage: setCodePage, pageCount: codePageCount, pageItems: codePageItems } =
+  const { page: codePage, setPage: setCodePage, pageCount: codePageCount, pageItems: codePageItems, pageSize: codePageSize, setPageSize: setCodePageSize } =
     usePagination(codes, 50);
 
   useEffect(() => {
@@ -239,9 +239,11 @@ export function VouchersPage() {
         page={batchPage}
         pageCount={batchPageCount}
         onPageChange={setBatchPage}
+        pageSize={batchPageSize}
+        onPageSizeChange={setBatchPageSize}
       />
       <Table
-        rowNumberStart={batchPage * 25 + 1}
+        rowNumberStart={batchPage * batchPageSize + 1}
         columns={["Batch", "Router", "Paket", "Harga", "Qty", "Sync", "Tersedia", "Terpakai", "Aksi"]}
         rows={batchPageItems.map((b) => [
           <div key={`${b.id}-n`}>
@@ -493,7 +495,7 @@ export function VouchersPage() {
             </div>
 
             <Table
-              rowNumberStart={codePage * 50 + 1}
+              rowNumberStart={codePage * codePageSize + 1}
               columns={["Kode", "Status", "Dipakai oleh", "Dipakai pada", "Kadaluarsa"]}
               rows={codePageItems.map((c) => [
                 <code key={`${c.id}-c`} className="text-xs font-semibold">
@@ -507,14 +509,14 @@ export function VouchersPage() {
                 formatWhen(c.expires_at),
               ])}
             />
-            {codePageCount > 1 ? (
-              <ListToolbar
-                total={codes.length}
-                page={codePage}
-                pageCount={codePageCount}
-                onPageChange={setCodePage}
-              />
-            ) : null}
+            <ListToolbar
+              total={codes.length}
+              page={codePage}
+              pageCount={codePageCount}
+              onPageChange={setCodePage}
+              pageSize={codePageSize}
+              onPageSizeChange={setCodePageSize}
+            />
             {codesQ.isLoading ? <p className="text-sm text-[var(--muted)]">Memuat kode…</p> : null}
             {!codesQ.isLoading && codes.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">Tidak ada kode{codeStatus ? " dengan filter ini" : ""}.</p>

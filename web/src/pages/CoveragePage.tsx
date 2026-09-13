@@ -217,9 +217,9 @@ export function CoveragePage({ canEdit, onNavigate }: { canEdit: boolean; onNavi
     () => odps.filter((o) => o.latitude != null && o.longitude != null),
     [odps],
   );
-  const { page: popPage, setPage: setPopPage, pageCount: popPageCount, pageItems: popPageItems } =
+  const { page: popPage, setPage: setPopPage, pageCount: popPageCount, pageItems: popPageItems, pageSize: popPageSize, setPageSize: setPopPageSize } =
     usePagination(popsWithCoords, 25);
-  const { page: covOdpPage, setPage: setCovOdpPage, pageCount: covOdpPageCount, pageItems: covOdpPageItems } =
+  const { page: covOdpPage, setPage: setCovOdpPage, pageCount: covOdpPageCount, pageItems: covOdpPageItems, pageSize: covOdpPageSize, setPageSize: setCovOdpPageSize } =
     usePagination(odpsWithCoords, 25);
   const coveredIds = useMemo(() => {
     const hits = checkQ.data?.hits ?? [];
@@ -549,7 +549,7 @@ export function CoveragePage({ canEdit, onNavigate }: { canEdit: boolean; onNavi
 
       <h2 className="mb-2 mt-8 text-sm font-semibold">POP</h2>
       <Table
-        rowNumberStart={popPage * 25 + 1}
+        rowNumberStart={popPage * popPageSize + 1}
         columns={canEdit ? ["Nama", "Kode", "Koordinat", "Radius", "Aksi"] : ["Nama", "Kode", "Koordinat", "Radius"]}
         rows={popPageItems.map((c) => {
           const cells: (string | number | ReactNode)[] = [
@@ -571,13 +571,11 @@ export function CoveragePage({ canEdit, onNavigate }: { canEdit: boolean; onNavi
           return cells;
         })}
       />
-      {popPageCount > 1 ? (
-        <ListToolbar total={popsWithCoords.length} page={popPage} pageCount={popPageCount} onPageChange={setPopPage} />
-      ) : null}
+      <ListToolbar total={popsWithCoords.length} page={popPage} pageCount={popPageCount} onPageChange={setPopPage} pageSize={popPageSize} onPageSizeChange={setPopPageSize} />
 
       <h2 className="mb-2 mt-8 text-sm font-semibold">ODP</h2>
       <Table
-        rowNumberStart={covOdpPage * 25 + 1}
+        rowNumberStart={covOdpPage * covOdpPageSize + 1}
         columns={canEdit ? ["Nama", "Kode", "Sisa port", "Koordinat", "Radius", "Aksi"] : ["Nama", "Kode", "Sisa port", "Koordinat", "Radius"]}
         rows={covOdpPageItems.map((o) => {
           const cells: (string | number | ReactNode)[] = [
@@ -600,14 +598,14 @@ export function CoveragePage({ canEdit, onNavigate }: { canEdit: boolean; onNavi
           return cells;
         })}
       />
-      {covOdpPageCount > 1 ? (
-        <ListToolbar
-          total={odpsWithCoords.length}
-          page={covOdpPage}
-          pageCount={covOdpPageCount}
-          onPageChange={setCovOdpPage}
-        />
-      ) : null}
+      <ListToolbar
+        total={odpsWithCoords.length}
+        page={covOdpPage}
+        pageCount={covOdpPageCount}
+        onPageChange={setCovOdpPage}
+        pageSize={covOdpPageSize}
+        onPageSizeChange={setCovOdpPageSize}
+      />
       {popsWithCoords.length === 0 && odpsWithCoords.length === 0 ? (
         <p className="mt-3 text-sm text-[var(--muted)]">
           Belum ada POP/ODP berkoordinat. Isi lat/long di{" "}

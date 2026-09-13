@@ -41,9 +41,13 @@ export function PaymentsPage() {
   const debouncedSearch = useDebouncedValue(search, 300);
   const [trashed, setTrashed] = useState(false);
   const [page, setPage] = useState(0);
-  const limit = 20;
+  const [limit, setLimit] = useState(20);
+  function setPageSize(n: number) {
+    setLimit(n);
+    setPage(0);
+  }
   const q = useQuery({
-    queryKey: ["payments", debouncedSearch, trashed, page],
+    queryKey: ["payments", debouncedSearch, trashed, page, limit],
     queryFn: () => {
       const params = new URLSearchParams({
         limit: String(limit),
@@ -110,6 +114,8 @@ export function PaymentsPage() {
         pageCount={pages}
         onPageChange={setPage}
         total={total}
+        pageSize={limit}
+        onPageSizeChange={setPageSize}
       />
       <Table
         rowNumberStart={page * limit + 1}

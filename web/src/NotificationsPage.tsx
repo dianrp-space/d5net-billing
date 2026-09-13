@@ -29,6 +29,7 @@ type TemplateEvent = {
 
 const PREVIEW_SAMPLES: Record<string, string> = {
   customer_name: "Budi Santoso",
+  phone: "0812-3456-7890",
   plan_name: "Home 20 Mbps",
   item_name: "Tes 3",
   invoice_number: "INV-D5N-2026090001-092026A3F9K2",
@@ -39,6 +40,20 @@ const PREVIEW_SAMPLES: Record<string, string> = {
 
 function renderPreview(body: string): string {
   return body.replace(/\{\{(\w+)\}\}/g, (_, key: string) => PREVIEW_SAMPLES[key] ?? `{{${key}}}`);
+}
+
+/** Variabel yang benar-benar diisi saat broadcast dikirim (per penerima). */
+const SUPPORTED_BCAST_VARS = new Set(["customer_name", "phone"]);
+
+/** Daftar placeholder {{nama}} unik persis seperti yang dikenali backend. */
+function findPlaceholders(s: string): string[] {
+  const out: string[] = [];
+  const re = /\{\{(\w+)\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    if (!out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
 }
 
 export function NotificationsPage() {
@@ -58,10 +73,44 @@ export function NotificationsPage() {
   const [bcast, setBcast] = useState({
     channel: "whatsapp",
     audience: "overdue",
-    body: "Halo, ini pengingat tagihan dari kami. Silakan bayar via portal pelanggan.",
+    cluster_id: "",
+    odp_id: "",
+    subject: "",
+    template_event: "",
+    body: "Halo {{customer_name}}, ini pengingat tagihan dari kami. Silakan bayar via portal pelanggan.",
     delay_seconds: 3,
     recipients: "",
   });
+
+  type ClusterOpt = { id: string; name: string; code: string; is_active: boolean };
+  type OdpOpt = { id: string; name: string; code: string; cluster_id?: string | null };
+  const clustersQ = useQuery({
+    queryKey: ["clusters"],
+    queryFn: () => api<ClusterOpt[]>("/api/clusters"),
+    retry: false,
+  });
+  const odpsQ = useQuery({
+    queryKey: ["odps"],
+    queryFn: () => api<OdpOpt[]>("/api/odps"),
+    retry: false,
+  });
+  const clusters = (Array.isArray(clustersQ.data) ? clustersQ.data : []).filter((c) => c.is_active);
+  const odps = Array.isArray(odpsQ.data) ? odpsQ.data : [];
+  const odpOptions = bcast.cluster_id ? odps.filter((o) => o.cluster_id === bcast.cluster_id) : odps;
+
+  const previewQ = useQuery({
+    queryKey: ["broadcast-preview", bcast.audience, bcast.cluster_id, bcast.odp_id],
+    queryFn: () => {
+      const params = new URLSearchParams({ audience: bcast.audience });
+      if (bcast.cluster_id) params.set("cluster_id", bcast.cluster_id);
+      if (bcast.odp_id) params.set("odp_id", bcast.odp_id);
+      return api<{ audience: string; count: number }>(`/api/notifications/broadcast/preview?${params}`);
+    },
+    enabled: bcast.audience !== "custom",
+    retry: false,
+    staleTime: 10_000,
+  });
+  const previewCount = previewQ.data?.count;
 
   const saveTpl = useMutation({
     mutationFn: () =>
@@ -98,11 +147,16 @@ export function NotificationsPage() {
         body: bcast.body,
         delay_seconds: bcast.delay_seconds,
       };
+      if (bcast.subject.trim()) body.subject = bcast.subject.trim();
+      if (bcast.template_event) body.template_event = bcast.template_event;
       if (bcast.audience === "custom") {
         body.recipients = bcast.recipients
           .split(/[\n,;]+/)
           .map((s) => s.trim())
           .filter(Boolean);
+      } else {
+        if (bcast.cluster_id) body.cluster_id = bcast.cluster_id;
+        if (bcast.odp_id) body.odp_id = bcast.odp_id;
       }
       return api<{ queued: number; batch_id: string }>("/api/notifications/broadcast", {
         method: "POST",
@@ -140,6 +194,39 @@ export function NotificationsPage() {
   const catalog = catalogQ.data ?? [];
   const templates = templatesQ.data ?? [];
   const selectedEvent = catalog.find((e) => e.event === tpl.event);
+  const broadcastEvent = catalog.find((e) => e.event === "broadcast");
+  const bcastVars =
+    broadcastEvent && broadcastEvent.variables.length
+      ? broadcastEvent.variables
+      : [
+          { name: "customer_name", desc: "Nama pelanggan (diisi otomatis per penerima)" },
+          { name: "phone", desc: "Nomor penerima" },
+        ];
+  // Template tersimpan untuk channel yang sedang dipilih.
+  const bcastChannelTemplates = templates.filter((t) => t.channel === bcast.channel);
+  function bcastTemplateLabel(t: NotifTemplate): string {
+    return catalog.find((e) => e.event === t.event)?.label || t.event;
+  }
+  function pickBcastTemplate(event: string) {
+    if (!event) {
+      setBcast((b) => ({ ...b, template_event: "" }));
+      return;
+    }
+    const saved = templates.find((t) => t.channel === bcast.channel && t.event === event);
+    if (!saved) return;
+    setBcast((b) => ({ ...b, template_event: event, subject: saved.subject || "", body: saved.body }));
+  }
+  // Placeholder yang tidak akan terisi saat kirim → cegah terkirim mentah.
+  const unsupportedVars = findPlaceholders(`${bcast.body}\n${bcast.subject}`).filter(
+    (v) => bcast.audience === "custom" || !SUPPORTED_BCAST_VARS.has(v),
+  );
+
+  function insertBcastVar(name: string) {
+    setBcast((b) => ({
+      ...b,
+      body: `${b.body}${b.body === "" || b.body.endsWith(" ") ? "" : " "}{{${name}}}`,
+    }));
+  }
 
   function findSaved(channel: string, event: string) {
     return templates.find((t) => t.channel === channel && t.event === event);
@@ -195,7 +282,10 @@ export function NotificationsPage() {
           </p>
           <label className="grid gap-1 text-sm">
             <span>Channel</span>
-            <Select value={bcast.channel} onValueChange={(v) => setBcast({ ...bcast, channel: v })}>
+            <Select
+              value={bcast.channel}
+              onValueChange={(v) => setBcast((b) => ({ ...b, channel: v, template_event: "" }))}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -207,8 +297,32 @@ export function NotificationsPage() {
             </Select>
           </label>
           <label className="grid gap-1 text-sm">
+            <span>Pakai template tersimpan (opsional)</span>
+            <Select value={bcast.template_event || "__manual__"} onValueChange={pickBcastTemplate}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__manual__">Tulis manual</SelectItem>
+                {bcastChannelTemplates.map((t) => (
+                  <SelectItem key={t.id} value={t.event}>
+                    {bcastTemplateLabel(t)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[11px] text-[var(--muted)]">
+              {bcastChannelTemplates.length
+                ? "Memilih template mengisi subject & isi pesan di bawah (masih bisa diubah)."
+                : "Belum ada template untuk channel ini — buat di tab Template."}
+            </span>
+          </label>
+          <label className="grid gap-1 text-sm">
             <span>Audience</span>
-            <Select value={bcast.audience} onValueChange={(v) => setBcast({ ...bcast, audience: v })}>
+            <Select
+              value={bcast.audience}
+              onValueChange={(v) => setBcast({ ...bcast, audience: v, cluster_id: "", odp_id: "" })}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -228,7 +342,73 @@ export function NotificationsPage() {
                 onChange={(e) => setBcast({ ...bcast, recipients: e.target.value })}
               />
             </label>
-          ) : null}
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-sm">
+                  <span>Cluster / area (opsional)</span>
+                  <Select
+                    value={bcast.cluster_id || "__all__"}
+                    onValueChange={(v) => {
+                      const next = v === "__all__" ? "" : v;
+                      setBcast((b) => ({
+                        ...b,
+                        cluster_id: next,
+                        // ODP yang tidak masuk cluster baru ikut direset.
+                        odp_id: next && b.odp_id && !odps.some((o) => o.id === b.odp_id && o.cluster_id === next) ? "" : b.odp_id,
+                      }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Semua cluster</SelectItem>
+                      {clusters.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name} ({c.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-[11px] text-[var(--muted)]">
+                    Batasi ke pelanggan di satu POP/area — mis. area terdampak gangguan.
+                  </span>
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>ODP (opsional)</span>
+                  <Select
+                    value={bcast.odp_id || "__all__"}
+                    onValueChange={(v) => setBcast({ ...bcast, odp_id: v === "__all__" ? "" : v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Semua ODP</SelectItem>
+                      {odpOptions.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.code} · {o.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-[11px] text-[var(--muted)]">
+                    Batasi ke pelanggan yang langganannya menancap di ODP ini.
+                  </span>
+                </label>
+              </div>
+              <p className="text-xs text-[var(--muted)]" aria-live="polite">
+                {previewQ.isLoading
+                  ? "Menghitung penerima…"
+                  : previewQ.isError
+                    ? "Gagal menghitung penerima. Cek koneksi lalu ubah filter untuk mencoba lagi."
+                    : previewCount != null
+                      ? `${previewCount} penerima akan dikirimi pesan.`
+                      : null}
+              </p>
+            </>
+          )}
           <label className="grid gap-1 text-sm">
             <span>Delay antar pesan (detik)</span>
             <Input
@@ -248,7 +428,64 @@ export function NotificationsPage() {
               required
             />
           </label>
-          <Button type="button" onClick={() => sendBcast.mutate()} disabled={sendBcast.isPending}>
+          {bcast.channel === "email" ? (
+            <label className="grid gap-1 text-sm">
+              <span>Subject (email)</span>
+              <Input
+                value={bcast.subject}
+                onChange={(e) => setBcast({ ...bcast, subject: e.target.value })}
+                placeholder="Judul email"
+              />
+            </label>
+          ) : null}
+          {unsupportedVars.length > 0 ? (
+            <p className="rounded-lg border border-[var(--danger)]/40 bg-[var(--danger)]/5 p-3 text-xs leading-relaxed text-[var(--danger)]">
+              Variabel {unsupportedVars.map((v) => `{{${v}}}`).join(", ")} tidak didukung broadcast
+              {bcast.audience === "custom"
+                ? " custom (nomor paste-an tanpa data pelanggan)"
+                : " (hanya {{customer_name}} dan {{phone}} yang terisi otomatis)"}
+              {" "}dan akan terkirim mentah. Hapus atau ganti sebelum mengirim.
+            </p>
+          ) : null}
+          {bcast.audience !== "custom" ? (
+            <>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-[var(--muted)]">Sisipkan variabel:</span>
+                {bcastVars.map((v) => (
+                  <button
+                    key={v.name}
+                    type="button"
+                    className="btn-ghost"
+                    style={{ padding: "0.2rem 0.5rem", fontSize: "0.7rem", lineHeight: 1.4 }}
+                    title={v.desc}
+                    onClick={() => insertBcastVar(v.name)}
+                  >
+                    {`{{${v.name}}}`}
+                  </button>
+                ))}
+              </div>
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)]/40 p-3">
+                <p className="mb-1 text-xs font-medium text-[var(--muted)]">Pratinjau</p>
+                {bcast.channel === "email" && bcast.subject.trim() ? (
+                  <p className="mb-1 text-sm font-semibold">{renderPreview(bcast.subject) || "—"}</p>
+                ) : null}
+                <p className="whitespace-pre-wrap text-sm">{renderPreview(bcast.body) || "—"}</p>
+              </div>
+            </>
+          ) : (
+            <p className="text-[11px] text-[var(--muted)]">
+              Audience custom berisi nomor paste-an tanpa data pelanggan, jadi variabel tidak tersedia.
+            </p>
+          )}
+          <Button
+            type="button"
+            onClick={() => sendBcast.mutate()}
+            disabled={
+              sendBcast.isPending ||
+              unsupportedVars.length > 0 ||
+              (bcast.audience !== "custom" && previewCount === 0)
+            }
+          >
             {sendBcast.isPending ? "Mengantre…" : "Kirim broadcast"}
           </Button>
           {batchId && progress ? (
@@ -483,10 +720,14 @@ function NotificationHistoryTab() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
   const [page, setPage] = useState(0);
-  const limit = 20;
+  const [limit, setLimit] = useState(20);
+  function setPageSize(n: number) {
+    setLimit(n);
+    setPage(0);
+  }
 
   const q = useQuery({
-    queryKey: ["notification-history", status, channel, debouncedSearch, page],
+    queryKey: ["notification-history", status, channel, debouncedSearch, page, limit],
     queryFn: () => {
       const params = new URLSearchParams({ limit: String(limit), offset: String(page * limit) });
       if (status) params.set("status", status);
@@ -669,6 +910,8 @@ function NotificationHistoryTab() {
         pageCount={pages}
         onPageChange={setPage}
         total={total}
+        pageSize={limit}
+        onPageSizeChange={setPageSize}
       />
       <Table
         rowNumberStart={page * limit + 1}

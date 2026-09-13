@@ -72,9 +72,44 @@ func (s *Service) Queue(ctx context.Context, msg Message) error {
 	return err
 }
 
+// BroadcastMessage adalah satu pesan broadcast yang sudah dirender final
+// untuk penerimanya (variabel seperti {{customer_name}} terisi).
+type BroadcastMessage struct {
+	Recipient string
+	Subject   string
+	Body      string
+}
+
+// BroadcastVars membangun variabel personalisasi broadcast untuk satu penerima.
+func BroadcastVars(customerName, phone string) map[string]string {
+	return map[string]string{
+		"customer_name": strings.TrimSpace(customerName),
+		"phone":         strings.TrimSpace(phone),
+	}
+}
+
+// RenderBroadcastBody mengisi variabel broadcast ({{customer_name}}, {{phone}})
+// untuk satu penerima.
+func RenderBroadcastBody(body string, vars map[string]string) string {
+	return applyVars(body, vars)
+}
+
 // QueueBroadcast enqueues many messages with staggered scheduled_at (rate limit).
 // Returns queued count + batch ID for progress tracking.
 func (s *Service) QueueBroadcast(ctx context.Context, tenantID xid.ID, channel, subject, body string, recipients []string, delaySeconds int, event string) (int, xid.ID, error) {
+	msgs := make([]BroadcastMessage, 0, len(recipients))
+	for _, r := range recipients {
+		if strings.TrimSpace(r) == "" {
+			continue
+		}
+		msgs = append(msgs, BroadcastMessage{Recipient: r, Subject: subject, Body: body})
+	}
+	return s.QueueBroadcastMessages(ctx, tenantID, channel, subject, msgs, delaySeconds, event)
+}
+
+// QueueBroadcastMessages sama seperti QueueBroadcast tetapi body tiap penerima
+// sudah final (hasil personalisasi).
+func (s *Service) QueueBroadcastMessages(ctx context.Context, tenantID xid.ID, channel, subject string, msgs []BroadcastMessage, delaySeconds int, event string) (int, xid.ID, error) {
 	if delaySeconds < 1 {
 		delaySeconds = 2
 	}
@@ -88,14 +123,18 @@ func (s *Service) QueueBroadcast(ctx context.Context, tenantID xid.ID, channel, 
 	batch := xid.New()
 	n := 0
 	base := time.Now()
-	for i, r := range recipients {
-		r = strings.TrimSpace(r)
+	for i, m := range msgs {
+		r := strings.TrimSpace(m.Recipient)
 		if r == "" {
 			continue
 		}
+		subj := m.Subject
+		if subj == "" {
+			subj = subject
+		}
 		at := base.Add(time.Duration(i*delaySeconds) * time.Second)
 		if err := s.Queue(ctx, Message{
-			TenantID: tenantID, Channel: channel, Recipient: r, Subject: subject, Body: body, ScheduledAt: &at, BatchID: batch, Event: event,
+			TenantID: tenantID, Channel: channel, Recipient: r, Subject: subj, Body: m.Body, ScheduledAt: &at, BatchID: batch, Event: event,
 		}); err != nil {
 			return n, batch, err
 		}
@@ -503,8 +542,11 @@ func TemplateCatalog() []TemplateEvent {
 			Label:       "Broadcast manual",
 			Description: "Dipakai untuk pesan massal dari tab Broadcast.",
 			Channels:    []string{"whatsapp", "telegram", "email"},
-			Variables:   []TemplateVariable{{Name: "message", Desc: "Isi pesan"}},
-			DefaultBody: "{{message}}",
+			Variables: []TemplateVariable{
+				{Name: "customer_name", Desc: "Nama pelanggan (diisi otomatis per penerima)"},
+				{Name: "phone", Desc: "Nomor penerima"},
+			},
+			DefaultBody: "Halo {{customer_name}}! ",
 		},
 	}
 }

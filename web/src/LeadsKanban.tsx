@@ -359,7 +359,7 @@ export function LeadsPage() {
       }),
     [list, listStatus, leadSearch],
   );
-  const { page: leadPage, setPage: setLeadPage, pageCount: leadPageCount, pageItems: leadPageItems } =
+  const { page: leadPage, setPage: setLeadPage, pageCount: leadPageCount, pageItems: leadPageItems, pageSize: leadPageSize, setPageSize: setLeadPageSize } =
     usePagination(filteredList, 25);
 
   const commentsQ = useQuery({
@@ -728,9 +728,11 @@ export function LeadsPage() {
             page={leadPage}
             pageCount={leadPageCount}
             onPageChange={setLeadPage}
+            pageSize={leadPageSize}
+            onPageSizeChange={setLeadPageSize}
           />
           <Table
-            rowNumberStart={leadPage * 25 + 1}
+            rowNumberStart={leadPage * leadPageSize + 1}
             columns={["Nama", "Telepon", "Status", "Teknisi", "Atribusi", "Dibuat", "Aksi"]}
             onRowClick={(i) => openDetail(leadPageItems[i])}
             rows={leadPageItems.map((l) => [

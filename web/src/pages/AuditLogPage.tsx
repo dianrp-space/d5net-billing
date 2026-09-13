@@ -82,10 +82,14 @@ export function AuditLogPage() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
   const [page, setPage] = useState(0);
-  const limit = 20;
+  const [limit, setLimit] = useState(20);
+  function setPageSize(n: number) {
+    setLimit(n);
+    setPage(0);
+  }
 
   const q = useQuery({
-    queryKey: ["audit-logs", action, debouncedSearch, page],
+    queryKey: ["audit-logs", action, debouncedSearch, page, limit],
     queryFn: () => {
       const params = new URLSearchParams({ limit: String(limit), offset: String(page * limit) });
       if (action) params.set("action", action);
@@ -127,6 +131,8 @@ export function AuditLogPage() {
         pageCount={pages}
         onPageChange={setPage}
         total={total}
+        pageSize={limit}
+        onPageSizeChange={setPageSize}
       />
       <Table
         rowNumberStart={page * limit + 1}

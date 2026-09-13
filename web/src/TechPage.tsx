@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IconCheck, IconEye, IconMapPin, IconUserCheck } from "./icons";
 import { canDispatchOps, type MePermissions } from "./permissions";
 import { usePersistedTab } from "./navPersist";
+import { PAGE_SIZE_OPTIONS } from "./ListToolbar";
 import { toastError, toastSuccess } from "./swal";
 import {
   Button,
@@ -115,7 +116,11 @@ export function TechPage() {
   const [tab, setTab] = usePersistedTab("tech", "orders", ["orders", "techs"] as const);
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(0);
-  const limit = 20;
+  const [limit, setLimit] = useState(20);
+  function setPageSize(n: number) {
+    setLimit(n);
+    setPage(0);
+  }
 
   const [openWO, setOpenWO] = useState(false);
   const [form, setForm] = useState(emptyWO);
@@ -134,7 +139,7 @@ export function TechPage() {
   const canDispatch = canDispatchOps(meQ.data?.permissions);
 
   const q = useQuery({
-    queryKey: ["work-orders", status, page],
+    queryKey: ["work-orders", status, page, limit],
     queryFn: () =>
       api<{ data: WorkOrder[]; total: number }>(
         `/api/work-orders?limit=${limit}&offset=${page * limit}${status ? `&status=${encodeURIComponent(status)}` : ""}`,
@@ -390,11 +395,30 @@ export function TechPage() {
               ])}
             />
 
-            {total > limit && (
-              <div className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-[var(--muted)]">
-                  {total} work order · halaman {page + 1}/{pages}
-                </span>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span className="flex flex-wrap items-center gap-2 text-[var(--muted)]">
+                <label className="flex items-center gap-1.5">
+                  Tampilkan
+                  <select
+                    className="input w-auto py-1 text-sm"
+                    value={limit}
+                    onChange={(e) => setPageSize(Number(e.target.value) || 20)}
+                    aria-label="Jumlah work order per halaman"
+                  >
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <option key={n} value={n}>
+                        {n} data
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {total > 0 ? (
+                  <span>
+                    {total} work order · halaman {page + 1}/{pages}
+                  </span>
+                ) : null}
+              </span>
+              {total > limit && (
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>
                     Sebelumnya
@@ -408,8 +432,8 @@ export function TechPage() {
                     Berikutnya
                   </Button>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </TabsContent>
 
           {canDispatch ? (

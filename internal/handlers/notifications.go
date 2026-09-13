@@ -12,6 +12,27 @@ import (
 	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
+// broadcastFilterFromInput memvalidasi filter area opsional (cluster/ODP).
+// String kosong = tanpa filter.
+func broadcastFilterFromInput(clusterID, odpID string) (store.BroadcastFilter, error) {
+	var f store.BroadcastFilter
+	if clusterID != "" {
+		id, err := xid.Parse(clusterID)
+		if err != nil {
+			return f, httpx.BadRequest("cluster_id tidak valid")
+		}
+		f.ClusterID = &id
+	}
+	if odpID != "" {
+		id, err := xid.Parse(odpID)
+		if err != nil {
+			return f, httpx.BadRequest("odp_id tidak valid")
+		}
+		f.ODPID = &id
+	}
+	return f, nil
+}
+
 func registerNotifications(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-notification-templates", Method: http.MethodGet, Path: "/api/notifications/templates",
@@ -84,12 +105,57 @@ func registerNotifications(api huma.API, d *Deps) {
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "broadcast-preview", Method: http.MethodGet, Path: "/api/notifications/broadcast/preview",
+		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Audience  string `query:"audience"`
+		ClusterID string `query:"cluster_id"`
+		ODPID     string `query:"odp_id"`
+	}) (*struct {
+		Body struct {
+			Audience string `json:"audience"`
+			Count    int64  `json:"count"`
+		}
+	}, error) {
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		aud := strings.TrimSpace(input.Audience)
+		if aud == "" {
+			aud = "active"
+		}
+		if aud != "overdue" && aud != "active" {
+			return nil, httpx.BadRequest("audience harus overdue atau active")
+		}
+		filter, err := broadcastFilterFromInput(strings.TrimSpace(input.ClusterID), strings.TrimSpace(input.ODPID))
+		if err != nil {
+			return nil, err
+		}
+		n, err := d.Store.CountBroadcastPhonesFiltered(ctx, tid, aud, filter)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := &struct {
+			Body struct {
+				Audience string `json:"audience"`
+				Count    int64  `json:"count"`
+			}
+		}{}
+		out.Body.Audience = aud
+		out.Body.Count = n
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "broadcast-notifications", Method: http.MethodPost, Path: "/api/notifications/broadcast",
 		Tags: []string{"Notifications"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {
 		Body struct {
 			Channel       string   `json:"channel"`
 			Audience      string   `json:"audience"` // overdue | active | custom
+			ClusterID     string   `json:"cluster_id,omitempty"`
+			ODPID         string   `json:"odp_id,omitempty"`
 			Recipients    []string `json:"recipients,omitempty"`
 			Subject       string   `json:"subject,omitempty"`
 			Body          string   `json:"body"`
@@ -111,12 +177,17 @@ func registerNotifications(api huma.API, d *Deps) {
 			ch = "whatsapp"
 		}
 		body := strings.TrimSpace(input.Body.Body)
+		subject := strings.TrimSpace(input.Body.Subject)
+		// Template tersimpan hanya mengisi field yang kosong di composer —
+		// hasil edit user di tab Broadcast selalu menang.
 		if input.Body.TemplateEvent != "" {
 			tpl, err := d.Store.GetNotificationTemplate(ctx, tid, ch, input.Body.TemplateEvent)
 			if err == nil && tpl != nil {
-				body = tpl.Body
-				if tpl.Subject != nil && input.Body.Subject == "" {
-					input.Body.Subject = *tpl.Subject
+				if body == "" {
+					body = tpl.Body
+				}
+				if subject == "" && tpl.Subject != nil {
+					subject = strings.TrimSpace(*tpl.Subject)
 				}
 			}
 		}
@@ -124,6 +195,7 @@ func registerNotifications(api huma.API, d *Deps) {
 			return nil, httpx.BadRequest("body atau template_event wajib")
 		}
 		var recipients []string
+		var personalized []notify.BroadcastMessage
 		switch strings.TrimSpace(input.Body.Audience) {
 		case "custom":
 			recipients = input.Body.Recipients
@@ -132,17 +204,38 @@ func registerNotifications(api huma.API, d *Deps) {
 			if aud == "" {
 				aud = "active"
 			}
-			recipients, err = d.Store.ListBroadcastPhones(ctx, tid, aud)
+			filter, ferr := broadcastFilterFromInput(strings.TrimSpace(input.Body.ClusterID), strings.TrimSpace(input.Body.ODPID))
+			if ferr != nil {
+				return nil, ferr
+			}
+			recips, err := d.Store.ListBroadcastRecipientsFiltered(ctx, tid, aud, filter)
 			if err != nil {
 				return nil, httpx.Internal(err)
+			}
+			// Isi variabel per penerima ({{customer_name}}, {{phone}}) agar
+			// pesan tersimpan final per nomor di antrean.
+			personalized = make([]notify.BroadcastMessage, 0, len(recips))
+			for _, r := range recips {
+				vars := notify.BroadcastVars(r.CustomerName, r.Phone)
+				personalized = append(personalized, notify.BroadcastMessage{
+					Recipient: r.Phone,
+					Subject:   notify.RenderBroadcastBody(subject, vars),
+					Body:      notify.RenderBroadcastBody(body, vars),
+				})
 			}
 		default:
 			return nil, httpx.BadRequest("audience harus overdue, active, atau custom")
 		}
-		if len(recipients) == 0 {
+		if len(recipients) == 0 && len(personalized) == 0 {
 			return nil, httpx.BadRequest("tidak ada penerima")
 		}
-		n, batch, err := d.Notify.QueueBroadcast(ctx, tid, ch, input.Body.Subject, body, recipients, input.Body.DelaySeconds, input.Body.TemplateEvent)
+		var n int
+		var batch xid.ID
+		if len(personalized) > 0 {
+			n, batch, err = d.Notify.QueueBroadcastMessages(ctx, tid, ch, subject, personalized, input.Body.DelaySeconds, input.Body.TemplateEvent)
+		} else {
+			n, batch, err = d.Notify.QueueBroadcast(ctx, tid, ch, subject, body, recipients, input.Body.DelaySeconds, input.Body.TemplateEvent)
+		}
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
@@ -156,6 +249,8 @@ func registerNotifications(api huma.API, d *Deps) {
 		out.Body.BatchID = batch.String()
 		auditEvent(ctx, d, AuditBroadcast, "notification", nil, map[string]any{
 			"channel": ch, "audience": input.Body.Audience, "queued": n, "batch_id": batch.String(),
+			"cluster_id": strings.TrimSpace(input.Body.ClusterID), "odp_id": strings.TrimSpace(input.Body.ODPID),
+			"template_event": strings.TrimSpace(input.Body.TemplateEvent),
 		})
 		return out, nil
 	})
