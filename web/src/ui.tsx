@@ -89,7 +89,7 @@ export function Table({
           rows.map((r, i) => (
             <TableRow
               key={i}
-              className={onRowClick ? "cursor-pointer hover:bg-[var(--panel-muted)]/60" : undefined}
+              className={onRowClick ? "cursor-pointer" : undefined}
               onClick={onRowClick ? () => onRowClick(i) : undefined}
             >
               {!hideRowNumber ? (
