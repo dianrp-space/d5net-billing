@@ -2,6 +2,10 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"strings"
 	"testing"
 
@@ -62,24 +66,28 @@ func TestDuitkuViewReturnsDecryptedKeyAndCallbackURL(t *testing.T) {
 
 func TestDokuCustomerFee(t *testing.T) {
 	// Merchant menanggung → 0.
-	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "", FeeFlat: 2500, FeePercent: 1}, 150000); got != 0 {
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "", FeeFlat: 4000, FeePercent: 50}, 2_000_000); got != 0 {
 		t.Fatalf("merchant mode fee = %d, want 0", got)
 	}
-	// Customer: flat + persen dibulatkan.
-	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 2500, FeePercent: 1}, 150000); got != 4000 {
-		t.Fatalf("customer fee = %d, want 4000", got)
+	// Customer: persen dari biaya dasar MDR, bukan dari invoice.
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 4000, FeePercent: 50}, 2_000_000); got != 2000 {
+		t.Fatalf("customer fee = %d, want 2000 (50%% of 4000)", got)
 	}
-	// Flat saja.
-	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 3000}, 150000); got != 3000 {
-		t.Fatalf("flat fee = %d, want 3000", got)
+	// Flat saja (persen 0 = 100% biaya dasar).
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 4000}, 2_000_000); got != 4000 {
+		t.Fatalf("flat fee = %d, want 4000", got)
 	}
-	// Persen saja, pembulatan.
-	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeePercent: 0.7}, 100000); got != 700 {
-		t.Fatalf("percent fee = %d, want 700", got)
+	// Persen 100% = penuh.
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 4000, FeePercent: 100}, 100000); got != 4000 {
+		t.Fatalf("full pass = %d, want 4000", got)
 	}
-	// Base 0 → 0.
-	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 2500}, 0); got != 0 {
-		t.Fatalf("zero base fee = %d, want 0", got)
+	// Tanpa flat → 0 (persen tanpa acuan MDR tidak dipakai).
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeePercent: 50}, 2_000_000); got != 0 {
+		t.Fatalf("percent without flat = %d, want 0", got)
+	}
+	// Base invoice 0 → 0.
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 4000}, 0); got != 0 {
+		t.Fatalf("zero invoice fee = %d, want 0", got)
 	}
 	if normalizeDokuFeeMode("CUSTOMER") != DokuFeeModeCustomer || normalizeDokuFeeMode("merchant") != "" {
 		t.Fatal("normalizeDokuFeeMode")
@@ -105,7 +113,16 @@ func TestDokuViewReturnsDecryptedSecretsAndCallbackURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	priv, err := enc.EncryptString("-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----")
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(rsaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemPriv := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8}))
+	priv, err := enc.EncryptString(pemPriv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +138,8 @@ func TestDokuViewReturnsDecryptedSecretsAndCallbackURL(t *testing.T) {
 	if view.SecretKey != "SK-test-secret" {
 		t.Fatalf("secret = %q", view.SecretKey)
 	}
-	if !view.Configured || !view.Enabled || !view.HasPrivateKey || !view.QREnabled {
-		t.Fatal("expected configured+enabled+private+qr")
+	if !view.Configured || !view.Enabled || !view.HasPrivateKey || !view.SnapAuthReady || !view.QREnabled {
+		t.Fatal("expected configured+enabled+private+snap+qr")
 	}
 	wantURL := "http://localhost:5173/api/webhooks/payment/doku"
 	if view.WebhookURL != wantURL {

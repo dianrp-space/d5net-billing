@@ -46,22 +46,33 @@ func dokuParseRSAPrivateKey(pemStr string) (*rsa.PrivateKey, error) {
 	pemStr = strings.TrimSpace(pemStr)
 	block, _ := pem.Decode([]byte(pemStr))
 	if block == nil {
-		return nil, fmt.Errorf("private key PEM tidak valid")
+		return nil, fmt.Errorf("private key PEM tidak valid (harus BEGIN PRIVATE KEY / RSA PRIVATE KEY)")
 	}
-	if block.Type == "PRIVATE KEY" {
+	switch block.Type {
+	case "PUBLIC KEY", "RSA PUBLIC KEY":
+		return nil, fmt.Errorf("yang diunggah adalah public key — unggah private key RSA (BEGIN PRIVATE KEY), bukan public key")
+	case "CERTIFICATE":
+		return nil, fmt.Errorf("yang diunggah adalah certificate — unggah private key RSA PEM")
+	case "PRIVATE KEY":
 		key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("gagal parse PKCS#8 private key: %w", err)
 		}
 		if k, ok := key.(*rsa.PrivateKey); ok {
 			return k, nil
 		}
 		return nil, fmt.Errorf("bukan RSA private key")
-	}
-	if block.Type == "RSA PRIVATE KEY" {
+	case "RSA PRIVATE KEY":
 		return x509.ParsePKCS1PrivateKey(block.Bytes)
+	default:
+		return nil, fmt.Errorf("tipe PEM tidak didukung: %s (butuh PRIVATE KEY / RSA PRIVATE KEY)", block.Type)
 	}
-	return nil, fmt.Errorf("tipe private key tidak didukung: %s", block.Type)
+}
+
+// ValidateDokuPrivateKeyPEM memeriksa PEM RSA private key (bukan public key).
+func ValidateDokuPrivateKeyPEM(pemStr string) error {
+	_, err := dokuParseRSAPrivateKey(pemStr)
+	return err
 }
 
 func dokuRSASign(key *rsa.PrivateKey, s string) (string, error) {

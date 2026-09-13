@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -96,6 +95,7 @@ type dokuIntegrationView struct {
 	PartnerServiceID string               `json:"partner_service_id"` // legacy fallback BIN
 	ExpiresInMinutes int                  `json:"expires_in_minutes"`
 	QREnabled        bool                 `json:"qr_enabled"`
+	SnapAuthReady    bool                 `json:"snap_auth_ready"`
 	FeeMode          string               `json:"fee_mode"`
 	Channels         []dokuChannelFeeView `json:"channels"`
 	WebhookPath      string               `json:"webhook_path"`
@@ -137,20 +137,13 @@ func normalizeDokuFeeMode(mode string) string {
 	return ""
 }
 
-// dokuCustomerFee menghitung biaya admin yang dibebankan ke customer (0 bila
-// merchant yang menanggung atau konfigurasi kosong). Dibulatkan ke rupiah.
-func dokuCustomerFee(cfg dokuIntegrationStored, base int64) int64 {
-	if normalizeDokuFeeMode(cfg.FeeMode) != DokuFeeModeCustomer || base <= 0 {
+// dokuCustomerFee menghitung biaya admin legacy (fee global) — rumus sama:
+// persen dari fee_flat (MDR), bukan dari nominal invoice.
+func dokuCustomerFee(cfg dokuIntegrationStored, invoiceBase int64) int64 {
+	if normalizeDokuFeeMode(cfg.FeeMode) != DokuFeeModeCustomer || invoiceBase <= 0 {
 		return 0
 	}
-	fee := cfg.FeeFlat
-	if cfg.FeePercent > 0 {
-		fee += int64(math.Round(float64(base) * cfg.FeePercent / 100))
-	}
-	if fee < 0 {
-		return 0
-	}
-	return fee
+	return dokuFeeFromBaseMDR(cfg.FeeFlat, cfg.FeePercent)
 }
 
 type payOptionView struct {
@@ -945,10 +938,22 @@ func loadDokuIntegration(ctx context.Context, d *Deps, tid xid.ID) (dokuIntegrat
 }
 
 func dokuQRReady(s dokuIntegrationStored, d *Deps) bool {
-	if strings.TrimSpace(s.ClientID) == "" || decryptSecret(d, s.PrivateKey) == "" {
+	if !dokuSNAPAuthReady(s, d) {
 		return false
 	}
 	return strings.TrimSpace(s.MerchantID) != "" && strings.TrimSpace(s.TerminalID) != "" && strings.TrimSpace(s.PostalCode) != ""
+}
+
+// dokuSNAPAuthReady: client ID + RSA private key (wajib token B2B untuk VA/e-wallet/QRIS SNAP).
+func dokuSNAPAuthReady(s dokuIntegrationStored, d *Deps) bool {
+	if strings.TrimSpace(s.ClientID) == "" {
+		return false
+	}
+	priv := decryptSecret(d, s.PrivateKey)
+	if priv == "" {
+		return false
+	}
+	return payment.ValidateDokuPrivateKeyPEM(priv) == nil
 }
 
 func dokuView(ctx context.Context, d *Deps, tid xid.ID, s dokuIntegrationStored, origin, referer, proto, forwardedHost, host string) dokuIntegrationView {
@@ -966,6 +971,7 @@ func dokuView(ctx context.Context, d *Deps, tid xid.ID, s dokuIntegrationStored,
 		PartnerServiceID: strings.TrimSpace(s.PartnerServiceID),
 		ExpiresInMinutes: payment.ClampDokuExpiryMinutes(s.ExpiresInMinutes),
 		QREnabled:        dokuQRReady(s, d),
+		SnapAuthReady:    dokuSNAPAuthReady(s, d),
 		FeeMode:          normalizeDokuFeeMode(s.FeeMode),
 		Channels:         dokuChannelViews(s),
 		WebhookPath:      paymentWebhookPathFor(payment.ProviderDoku),
@@ -1095,8 +1101,14 @@ func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payO
 				continue
 			}
 			cat, _ := payment.LookupDokuChannel(ch.ID)
-			if cat.NeedsSNAP && !dokuQRReady(cfg, d) {
-				continue
+			if cat.NeedsSNAP {
+				if cat.Kind == payment.DokuKindQR {
+					if !dokuQRReady(cfg, d) {
+						continue
+					}
+				} else if !dokuSNAPAuthReady(cfg, d) {
+					continue
+				}
 			}
 			if cat.NeedsVABin && dokuVABinForChannel(cfg, ch.ID) == "" {
 				continue

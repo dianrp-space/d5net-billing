@@ -117,17 +117,21 @@ export function payOptionsHasDuitkuSandbox(options: PayOption[] | null | undefin
   );
 }
 
-/** Biaya admin untuk channel DOKU (atau fee global legacy di method). */
+/** Biaya admin channel DOKU: persen dari biaya dasar MDR (fee_flat), bukan dari nominal invoice.
+ * Persen 0/kosong = 100% biaya dasar dibebankan ke customer.
+ */
 export function channelCustomerFee(
   feeMode: string | undefined,
   channel: Pick<DokuChannelOption, "fee_flat" | "fee_percent"> | null | undefined,
-  base: number,
+  invoiceBase: number,
   fallback?: Pick<PayMethodDef, "feeFlat" | "feePercent">,
 ): number {
-  if (feeMode !== "customer" || base <= 0) return 0;
+  if (feeMode !== "customer" || invoiceBase <= 0) return 0;
   const flat = Math.max(0, Math.floor(channel?.fee_flat ?? fallback?.feeFlat ?? 0));
-  const pct = Math.max(0, channel?.fee_percent ?? fallback?.feePercent ?? 0);
-  const fee = flat + Math.round((base * pct) / 100);
+  if (flat <= 0) return 0;
+  let pct = Math.max(0, channel?.fee_percent ?? fallback?.feePercent ?? 0);
+  if (pct <= 0) pct = 100;
+  const fee = Math.round((flat * pct) / 100);
   return fee > 0 ? fee : 0;
 }
 
@@ -139,10 +143,7 @@ export function methodCustomerFee(method: Pick<PayMethodDef, "feeMode" | "feeFla
       ? Math.max(...method.channels.map((ch) => channelCustomerFee(method.feeMode, ch, base)))
       : 0;
   }
-  const flat = Math.max(0, Math.floor(method.feeFlat || 0));
-  const pct = Math.max(0, method.feePercent || 0);
-  const fee = flat + Math.round((base * pct) / 100);
-  return fee > 0 ? fee : 0;
+  return channelCustomerFee(method.feeMode, { fee_flat: method.feeFlat, fee_percent: method.feePercent }, base);
 }
 
 /** True bila ada metode dengan biaya admin ke customer (untuk menahan auto-redirect). */

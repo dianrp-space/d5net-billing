@@ -68,6 +68,7 @@ type DokuIntegration = {
   partner_service_id?: string;
   expires_in_minutes: number;
   qr_enabled: boolean;
+  snap_auth_ready?: boolean;
   fee_mode?: string;
   channels?: DokuChannelFee[];
   webhook_path: string;
@@ -647,18 +648,26 @@ export function PaymentGWPage() {
               />
             </label>
             <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">RSA private key (PEM — untuk QRIS Direct)</span>
+              <span className="text-[var(--muted)]">RSA private key merchant (PEM — SNAP)</span>
               <textarea
                 className="input font-mono text-xs"
-                rows={3}
+                rows={4}
                 placeholder="-----BEGIN PRIVATE KEY-----"
                 value={dokuForm.private_key}
                 onChange={(e) => setDokuForm({ ...dokuForm, private_key: e.target.value })}
                 autoComplete="off"
                 spellCheck={false}
               />
-              <span className="text-[11px] text-[var(--muted)]">
-                {dokuQ.data?.has_private_key ? "Private key tersimpan (kosongkan bila tidak diganti)." : "Wajib untuk QRIS langsung."}
+              <span className="text-[11px] leading-relaxed text-[var(--muted)]">
+                Dashboard DOKU <strong>tidak menampilkan private key</strong>. Alurnya: generate pasangan RSA di
+                komputermu → upload <em>merchant public key</em> ke DOKU (API Keys) → simpan{" "}
+                <em>private key</em>-nya di sini. Jangan tempel DOKU Public Key / Merchant Public Key / Secret Key.
+                Header yang benar: <code>BEGIN PRIVATE KEY</code> atau <code>BEGIN RSA PRIVATE KEY</code>.{" "}
+                {dokuQ.data?.snap_auth_ready
+                  ? "Private key tersimpan & valid."
+                  : dokuQ.data?.has_private_key
+                    ? "Ada key tersimpan tapi bukan private key RSA yang valid — ganti."
+                    : "Tanpa ini, VA / e-wallet / QRIS SNAP tidak bisa dipakai."}
               </span>
             </label>
             <div className="grid grid-cols-3 gap-2">
@@ -737,7 +746,9 @@ export function PaymentGWPage() {
                   <option value="customer">Customer (ditambahkan ke tagihan)</option>
                 </select>
                 <span className="text-[11px] leading-relaxed text-[var(--muted)]">
-                  Mode berlaku semua channel. Flat/% diatur per channel di bawah (MDR bisa berbeda).
+                  Biaya dasar = MDR dari DOKU (mis. VA Rp4.000). Persen = berapa % dari biaya dasar itu yang
+                  dibebankan ke pelanggan — <strong>bukan</strong> % dari nominal tagihan. Contoh: dasar 4000 +
+                  50% → admin Rp2.000. Kosongkan persen = 100% (customer bayar penuh biaya dasar).
                 </span>
               </label>
               <div className="grid gap-2">
@@ -752,9 +763,15 @@ export function PaymentGWPage() {
                 ) : (
                   <div className="grid gap-2 lg:grid-cols-2">
                   {dokuForm.channels.map((ch) => {
+                    const snapOk = Boolean(dokuQ.data?.snap_auth_ready);
                     const blockedQR = ch.kind === "qr" && !dokuQ.data?.qr_enabled;
+                    const blockedSnap = (ch.kind === "va" || ch.kind === "ewallet") && !snapOk;
                     const blockedVA = ch.kind === "va" && !String(ch.partner_service_id || "").trim();
-                    const blocked = blockedQR || blockedVA;
+                    const blocked = blockedQR || blockedSnap || blockedVA;
+                    const mdr = Math.max(0, Math.floor(ch.fee_flat || 0));
+                    const share = (ch.fee_percent || 0) > 0 ? ch.fee_percent : 100;
+                    const feePreview =
+                      dokuForm.fee_mode === "customer" && mdr > 0 ? Math.round((mdr * share) / 100) : 0;
                     return (
                     <div
                       key={ch.id}
@@ -774,7 +791,11 @@ export function PaymentGWPage() {
                           <span className="ml-1 text-[11px] text-[var(--muted)]">({ch.kind})</span>
                           {blocked ? (
                             <span className="mt-0.5 block text-[10px] text-[var(--warn)]">
-                              {blockedQR ? "belum siap · lengkapi kredensial SNAP" : "belum siap · isi Partner Service ID SNAP"}
+                              {blockedQR
+                                ? "belum siap · private key + merchant/terminal/kode pos"
+                                : blockedSnap
+                                  ? "belum siap · RSA private key SNAP belum valid"
+                                  : "belum siap · isi Partner Service ID SNAP"}
                             </span>
                           ) : null}
                         </span>
@@ -793,36 +814,43 @@ export function PaymentGWPage() {
                         </label>
                       ) : null}
                       {dokuForm.fee_mode === "customer" ? (
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="grid gap-0.5 text-[11px]">
-                            <span className="text-[var(--muted)]">Flat (Rp)</span>
-                            <input
-                              className="input"
-                              type="number"
-                              min={0}
-                              step={500}
-                              disabled={!ch.enabled}
-                              value={ch.fee_flat}
-                              onChange={(e) =>
-                                patchDokuChannel(ch.id, { fee_flat: Number(e.target.value) || 0 })
-                              }
-                            />
-                          </label>
-                          <label className="grid gap-0.5 text-[11px]">
-                            <span className="text-[var(--muted)]">Persen (%)</span>
-                            <input
-                              className="input"
-                              type="number"
-                              min={0}
-                              max={100}
-                              step={0.1}
-                              disabled={!ch.enabled}
-                              value={ch.fee_percent}
-                              onChange={(e) =>
-                                patchDokuChannel(ch.id, { fee_percent: Number(e.target.value) || 0 })
-                              }
-                            />
-                          </label>
+                        <div className="grid gap-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="grid gap-0.5 text-[11px]">
+                              <span className="text-[var(--muted)]">Biaya dasar MDR (Rp)</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                step={500}
+                                disabled={!ch.enabled}
+                                value={ch.fee_flat}
+                                onChange={(e) =>
+                                  patchDokuChannel(ch.id, { fee_flat: Number(e.target.value) || 0 })
+                                }
+                              />
+                            </label>
+                            <label className="grid gap-0.5 text-[11px]">
+                              <span className="text-[var(--muted)]">% ke customer</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                max={100}
+                                step={1}
+                                disabled={!ch.enabled}
+                                value={ch.fee_percent}
+                                onChange={(e) =>
+                                  patchDokuChannel(ch.id, { fee_percent: Number(e.target.value) || 0 })
+                                }
+                              />
+                            </label>
+                          </div>
+                          <span className="text-[10px] text-[var(--muted)]">
+                            {mdr > 0
+                              ? `Customer bayar admin ${formatRp(feePreview)} (${share}% × dasar ${formatRp(mdr)}) · ditambah ke tagihan`
+                              : "Isi biaya dasar MDR dulu (mis. 4000)."}
+                          </span>
                         </div>
                       ) : (
                         <span className="text-[11px] text-[var(--muted)]">Merchant menanggung MDR</span>

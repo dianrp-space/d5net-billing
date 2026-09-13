@@ -82,9 +82,28 @@ func dokuVABinForChannel(cfg dokuIntegrationStored, channelID string) string {
 	return strings.TrimSpace(cfg.PartnerServiceID)
 }
 
+// dokuFeeFromBaseMDR: fee_flat = biaya dasar MDR (mis. Rp4.000 dari DOKU);
+// fee_percent = % dari biaya dasar yang dibebankan ke customer.
+// Persen kosong/0 = 100% (customer bayar penuh biaya dasar).
+func dokuFeeFromBaseMDR(flat int64, percent float64) int64 {
+	if flat <= 0 {
+		return 0
+	}
+	share := percent
+	if share <= 0 {
+		share = 100
+	}
+	fee := int64(math.Round(float64(flat) * share / 100))
+	if fee < 0 {
+		return 0
+	}
+	return fee
+}
+
 // dokuCustomerFeeForChannel menghitung biaya admin untuk satu channel Direct.
-func dokuCustomerFeeForChannel(cfg dokuIntegrationStored, channelID string, base int64) int64 {
-	if normalizeDokuFeeMode(cfg.FeeMode) != DokuFeeModeCustomer || base <= 0 {
+// invoiceBase hanya gate (tagihan harus > 0); persen dihitung dari fee_flat (MDR), bukan dari nominal invoice.
+func dokuCustomerFeeForChannel(cfg dokuIntegrationStored, channelID string, invoiceBase int64) int64 {
+	if normalizeDokuFeeMode(cfg.FeeMode) != DokuFeeModeCustomer || invoiceBase <= 0 {
 		return 0
 	}
 	fees := effectiveDokuChannels(cfg)
@@ -92,12 +111,5 @@ func dokuCustomerFeeForChannel(cfg dokuIntegrationStored, channelID string, base
 	if !ok || !f.Enabled {
 		return 0
 	}
-	fee := f.FeeFlat
-	if f.FeePercent > 0 {
-		fee += int64(math.Round(float64(base) * f.FeePercent / 100))
-	}
-	if fee < 0 {
-		return 0
-	}
-	return fee
+	return dokuFeeFromBaseMDR(f.FeeFlat, f.FeePercent)
 }
