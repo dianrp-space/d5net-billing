@@ -52,6 +52,7 @@ type DokuChannelFee = {
   enabled: boolean;
   fee_flat: number;
   fee_percent: number;
+  partner_service_id?: string;
 };
 
 type DokuIntegration = {
@@ -319,6 +320,7 @@ export function PaymentGWPage() {
         enabled: Boolean(c.enabled),
         fee_flat: c.fee_flat || 0,
         fee_percent: c.fee_percent || 0,
+        partner_service_id: c.partner_service_id || "",
       })),
     });
   }, [dokuQ.data]);
@@ -391,6 +393,7 @@ export function PaymentGWPage() {
             enabled: Boolean(c.enabled),
             fee_flat: Math.max(0, Math.floor(Number(c.fee_flat) || 0)),
             fee_percent: Math.min(100, Math.max(0, Number(c.fee_percent) || 0)),
+            partner_service_id: String(c.partner_service_id || "").trim() || undefined,
           })),
         }),
       }),
@@ -415,6 +418,7 @@ export function PaymentGWPage() {
           enabled: Boolean(c.enabled),
           fee_flat: c.fee_flat || 0,
           fee_percent: c.fee_percent || 0,
+          partner_service_id: c.partner_service_id || "",
         })),
       });
       void qc.invalidateQueries({ queryKey: ["integration-doku"] });
@@ -597,7 +601,7 @@ export function PaymentGWPage() {
             <p className="text-[11px] leading-relaxed text-[var(--muted)]">
               Pelanggan memilih channel di portal lalu bayar via <strong>DOKU Direct API</strong> (QRIS, VA, e-wallet,
               Alfamart/Indomaret). Untuk QRIS, lengkapi private key + merchant ID + terminal ID + kode pos. Untuk VA,
-              isi BIN (partner service ID).
+              isi Partner Service ID SNAP <strong>per bank</strong> di daftar channel di bawah.
             </p>
             {!dokuQ.data?.qr_enabled ? (
               <p className="rounded-lg border border-[var(--warn)]/40 bg-[var(--warn)]/10 px-3 py-2 text-[11px] leading-relaxed text-[var(--warn)]">
@@ -605,9 +609,13 @@ export function PaymentGWPage() {
                 terminal ID + kode pos lengkap.
               </p>
             ) : null}
-            {!String(dokuForm.partner_service_id || "").trim() ? (
+            {dokuForm.channels.some(
+              (c) => c.kind === "va" && c.enabled && !String(c.partner_service_id || "").trim(),
+            ) ? (
               <p className="rounded-lg border border-[var(--warn)]/40 bg-[var(--warn)]/10 px-3 py-2 text-[11px] leading-relaxed text-[var(--warn)]">
-                Channel <strong>Virtual Account</strong> tidak muncul di portal sampai BIN (partner service ID) diisi.
+                Channel <strong>VA</strong> memakai API <strong>SNAP</strong>. Isi{" "}
+                <strong>Partner Service ID</strong> dari halaman VA SNAP di DOKU BO (bukan Company Code Non-SNAP).
+                Tanpa itu channel tidak muncul di portal.
               </p>
             ) : null}
             <label className="flex items-center gap-2 text-sm">
@@ -686,19 +694,6 @@ export function PaymentGWPage() {
               </label>
             </div>
             <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">BIN VA (partner service ID)</span>
-              <input
-                className="input font-mono"
-                placeholder="dari DOKU BO · wajib untuk Virtual Account"
-                value={dokuForm.partner_service_id}
-                onChange={(e) => setDokuForm({ ...dokuForm, partner_service_id: e.target.value })}
-                autoComplete="off"
-              />
-              <span className="text-[11px] text-[var(--muted)]">
-                Nomor BIN/VA prefix dari dashboard DOKU. Channel VA tidak muncul di portal jika kosong.
-              </span>
-            </label>
-            <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
               <input
                 className="input"
@@ -748,7 +743,9 @@ export function PaymentGWPage() {
               <div className="grid gap-2">
                 <p className="text-sm font-medium">Channel Direct</p>
                 <p className="text-[11px] text-[var(--muted)]">
-                  Channel yang dicentang tampil di portal hanya jika prasyaratnya lengkap (lihat peringatan di atas).
+                  VA bank = Direct API <strong>SNAP</strong>. Isi Partner Service ID dari konfigurasi SNAP tiap bank
+                  (bukan popup Non-SNAP yang hanya punya Company Code). Merchant BIN di SNAP biasanya identitas merchant;
+                  yang kita kirim ke API create-VA adalah Partner Service ID.
                 </p>
                 {dokuForm.channels.length === 0 ? (
                   <p className="text-xs text-[var(--muted)]">Memuat katalog channel…</p>
@@ -756,12 +753,12 @@ export function PaymentGWPage() {
                   <div className="grid gap-2 lg:grid-cols-2">
                   {dokuForm.channels.map((ch) => {
                     const blockedQR = ch.kind === "qr" && !dokuQ.data?.qr_enabled;
-                    const blockedVA = ch.kind === "va" && !String(dokuForm.partner_service_id || "").trim();
+                    const blockedVA = ch.kind === "va" && !String(ch.partner_service_id || "").trim();
                     const blocked = blockedQR || blockedVA;
                     return (
                     <div
                       key={ch.id}
-                      className={`grid gap-2 rounded-lg border p-2 sm:grid-cols-[minmax(0,1fr)_5.5rem_5rem] sm:items-end ${
+                      className={`grid gap-2 rounded-lg border p-2 ${
                         blocked ? "border-[var(--warn)]/35 opacity-80" : "border-[var(--border)]"
                       }`}
                     >
@@ -777,13 +774,26 @@ export function PaymentGWPage() {
                           <span className="ml-1 text-[11px] text-[var(--muted)]">({ch.kind})</span>
                           {blocked ? (
                             <span className="mt-0.5 block text-[10px] text-[var(--warn)]">
-                              {blockedQR ? "belum siap · lengkapi kredensial SNAP" : "belum siap · isi BIN VA"}
+                              {blockedQR ? "belum siap · lengkapi kredensial SNAP" : "belum siap · isi Partner Service ID SNAP"}
                             </span>
                           ) : null}
                         </span>
                       </label>
+                      {ch.kind === "va" ? (
+                        <label className="grid gap-0.5 text-[11px]">
+                          <span className="text-[var(--muted)]">Partner Service ID (SNAP)</span>
+                          <input
+                            className="input font-mono"
+                            placeholder="dari VA SNAP · bukan Company Code Non-SNAP"
+                            disabled={!ch.enabled}
+                            value={ch.partner_service_id || ""}
+                            onChange={(e) => patchDokuChannel(ch.id, { partner_service_id: e.target.value })}
+                            autoComplete="off"
+                          />
+                        </label>
+                      ) : null}
                       {dokuForm.fee_mode === "customer" ? (
-                        <>
+                        <div className="grid grid-cols-2 gap-2">
                           <label className="grid gap-0.5 text-[11px]">
                             <span className="text-[var(--muted)]">Flat (Rp)</span>
                             <input
@@ -813,11 +823,9 @@ export function PaymentGWPage() {
                               }
                             />
                           </label>
-                        </>
+                        </div>
                       ) : (
-                        <span className="text-[11px] text-[var(--muted)] sm:col-span-2">
-                          Merchant menanggung MDR
-                        </span>
+                        <span className="text-[11px] text-[var(--muted)]">Merchant menanggung MDR</span>
                       )}
                     </div>
                     );

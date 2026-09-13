@@ -8,9 +8,10 @@ import (
 )
 
 type dokuChannelFeeStored struct {
-	Enabled    bool    `json:"enabled"`
-	FeeFlat    int64   `json:"fee_flat"`
-	FeePercent float64 `json:"fee_percent"`
+	Enabled          bool    `json:"enabled"`
+	FeeFlat          int64   `json:"fee_flat"`
+	FeePercent       float64 `json:"fee_percent"`
+	PartnerServiceID string  `json:"partner_service_id,omitempty"` // BIN VA per bank
 }
 
 func clampFeePercent(p float64) float64 {
@@ -26,6 +27,7 @@ func clampFeePercent(p float64) float64 {
 func effectiveDokuChannels(cfg dokuIntegrationStored) map[string]dokuChannelFeeStored {
 	out := make(map[string]dokuChannelFeeStored, len(payment.DokuChannelCatalog()))
 	legacy := normalizeDokuFeeMode(cfg.FeeMode) == DokuFeeModeCustomer && (cfg.FeeFlat > 0 || cfg.FeePercent > 0)
+	legacyBIN := strings.TrimSpace(cfg.PartnerServiceID)
 	for _, c := range payment.DokuChannelCatalog() {
 		fee := dokuChannelFeeStored{Enabled: c.DefaultOn}
 		if cfg.Channels != nil {
@@ -43,6 +45,11 @@ func effectiveDokuChannels(cfg dokuIntegrationStored) map[string]dokuChannelFeeS
 			fee.FeeFlat = 0
 		}
 		fee.FeePercent = clampFeePercent(fee.FeePercent)
+		fee.PartnerServiceID = strings.TrimSpace(fee.PartnerServiceID)
+		// Legacy: satu BIN global dipakai semua VA yang belum punya BIN sendiri.
+		if c.NeedsVABin && fee.PartnerServiceID == "" && legacyBIN != "" {
+			fee.PartnerServiceID = legacyBIN
+		}
 		out[c.ID] = fee
 	}
 	return out
@@ -56,9 +63,23 @@ func dokuChannelViews(cfg dokuIntegrationStored) []dokuChannelFeeView {
 		out = append(out, dokuChannelFeeView{
 			ID: c.ID, Label: c.Label, Kind: c.Kind,
 			Enabled: f.Enabled, FeeFlat: f.FeeFlat, FeePercent: f.FeePercent,
+			PartnerServiceID: f.PartnerServiceID,
 		})
 	}
 	return out
+}
+
+// dokuVABinForChannel mengembalikan Company Code / BIN untuk satu channel VA.
+func dokuVABinForChannel(cfg dokuIntegrationStored, channelID string) string {
+	fees := effectiveDokuChannels(cfg)
+	f, ok := fees[strings.ToLower(strings.TrimSpace(channelID))]
+	if !ok {
+		return strings.TrimSpace(cfg.PartnerServiceID)
+	}
+	if bin := strings.TrimSpace(f.PartnerServiceID); bin != "" {
+		return bin
+	}
+	return strings.TrimSpace(cfg.PartnerServiceID)
 }
 
 // dokuCustomerFeeForChannel menghitung biaya admin untuk satu channel Direct.

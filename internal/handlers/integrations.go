@@ -74,12 +74,13 @@ type dokuIntegrationStored struct {
 }
 
 type dokuChannelFeeView struct {
-	ID         string  `json:"id"`
-	Label      string  `json:"label"`
-	Kind       string  `json:"kind"`
-	Enabled    bool    `json:"enabled"`
-	FeeFlat    int64   `json:"fee_flat"`
-	FeePercent float64 `json:"fee_percent"`
+	ID               string  `json:"id"`
+	Label            string  `json:"label"`
+	Kind             string  `json:"kind"`
+	Enabled          bool    `json:"enabled"`
+	FeeFlat          int64   `json:"fee_flat"`
+	FeePercent       float64 `json:"fee_percent"`
+	PartnerServiceID string  `json:"partner_service_id,omitempty"`
 }
 
 type dokuIntegrationView struct {
@@ -92,7 +93,7 @@ type dokuIntegrationView struct {
 	MerchantID       string               `json:"merchant_id"`
 	TerminalID       string               `json:"terminal_id"`
 	PostalCode       string               `json:"postal_code"`
-	PartnerServiceID string               `json:"partner_service_id"`
+	PartnerServiceID string               `json:"partner_service_id"` // legacy fallback BIN
 	ExpiresInMinutes int                  `json:"expires_in_minutes"`
 	QREnabled        bool                 `json:"qr_enabled"`
 	FeeMode          string               `json:"fee_mode"`
@@ -103,10 +104,11 @@ type dokuIntegrationView struct {
 }
 
 type dokuChannelFeePut struct {
-	ID         string  `json:"id"`
-	Enabled    bool    `json:"enabled"`
-	FeeFlat    int64   `json:"fee_flat"`
-	FeePercent float64 `json:"fee_percent"`
+	ID               string  `json:"id"`
+	Enabled          bool    `json:"enabled"`
+	FeeFlat          int64   `json:"fee_flat"`
+	FeePercent       float64 `json:"fee_percent"`
+	PartnerServiceID string  `json:"partner_service_id,omitempty"`
 }
 
 type dokuIntegrationPut struct {
@@ -439,7 +441,10 @@ func registerIntegrations(api huma.API, d *Deps) {
 					flat = 0
 				}
 				cur.Channels[id] = dokuChannelFeeStored{
-					Enabled: ch.Enabled, FeeFlat: flat, FeePercent: clampFeePercent(ch.FeePercent),
+					Enabled:          ch.Enabled,
+					FeeFlat:          flat,
+					FeePercent:       clampFeePercent(ch.FeePercent),
+					PartnerServiceID: strings.TrimSpace(ch.PartnerServiceID),
 				}
 			}
 			// Hapus fee global legacy setelah channel tersimpan.
@@ -1093,7 +1098,7 @@ func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payO
 			if cat.NeedsSNAP && !dokuQRReady(cfg, d) {
 				continue
 			}
-			if cat.NeedsVABin && strings.TrimSpace(cfg.PartnerServiceID) == "" {
+			if cat.NeedsVABin && dokuVABinForChannel(cfg, ch.ID) == "" {
 				continue
 			}
 			channels = append(channels, ch)

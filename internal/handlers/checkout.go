@@ -136,6 +136,18 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	if err != nil {
 		return nil, err
 	}
+	if providerName == payment.ProviderDoku && channel != "" {
+		if cat, ok := payment.LookupDokuChannel(channel); ok && cat.NeedsVABin {
+			if doku, ok := prov.(*payment.DokuProvider); ok {
+				cfg, _ := loadDokuIntegration(ctx, d, tid)
+				bin := dokuVABinForChannel(cfg, channel)
+				if bin == "" {
+					return nil, httpx.BadRequest("BIN VA untuk " + cat.Label + " belum diisi di Integrasi → DOKU")
+				}
+				doku.WithPartnerServiceID(bin)
+			}
+		}
+	}
 	req := payment.IntentRequest{
 		TenantID: tid, CustomerID: inv.CustomerID, InvoiceID: inv.ID,
 		Amount: chargeAmount, ReturnURL: returnURL, Channel: channel,
