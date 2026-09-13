@@ -70,6 +70,7 @@ export type ClientPortalData = {
     invoice_id?: string;
     amount: number;
     method: string;
+    sandbox?: boolean;
     status: string;
     paid_at?: string;
     created_at?: string;

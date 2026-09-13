@@ -15,6 +15,7 @@ type PaymentRow = {
   invoice_number?: string;
   amount: number;
   method: string;
+  sandbox?: boolean;
   reference?: string | null;
   status: string;
   paid_at?: string | null;
@@ -124,7 +125,7 @@ export function PaymentsPage() {
           paymentWhen(p),
           customerLabel(p),
           p.invoice_number || "—",
-          paymentMethodLabel(p.method),
+          paymentMethodLabel(p.method, p.sandbox),
           formatRp(p.amount),
           paymentStatusLabel(p.status),
           trashed ? (

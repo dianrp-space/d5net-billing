@@ -667,6 +667,7 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 		Amount:     amount,
 		Method:     payment.MethodFromProvider(provider),
 		Status:     "paid",
+		Sandbox:    intentSandbox(pi.Metadata),
 		Reference:  &ref,
 	}
 	if err := d.Store.RecordPayment(ctx, p); err != nil {

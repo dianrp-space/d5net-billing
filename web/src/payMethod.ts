@@ -163,17 +163,19 @@ export function dokuChannelsFromMethod(method: PayMethodDef | undefined): DokuCh
 }
 
 /** Label for a stored method/provider id. Unknown values are shown as-is (never forced to "manual"). */
-export function paymentMethodLabel(method?: string | null) {
+export function paymentMethodLabel(method?: string | null, sandbox?: boolean | null) {
   const key = String(method || "").trim().toLowerCase();
   if (!key) return "—";
   const fromCatalog = PORTAL_PAY_METHODS.find((m) => m.id === key);
-  if (fromCatalog) return fromCatalog.label;
-  if (key === "drp" || key === "qr" || key === PAY_METHOD_QRIS) return "QRIS";
-  if (key === "duitku_pop" || key === "duitkupop" || key === "pop") return "Duitku Payment Gateway";
-  if (key === PAY_METHOD_DOKU) return "DOKU";
-  if (key === PAY_METHOD_TUNAI || key === "cash" || key === "kasir" || key === "manual") return "Tunai";
-  if (key === PAY_METHOD_TRANSFER || key === "bank" || key === "va") return "Transfer";
-  return String(method).trim();
+  let label: string;
+  if (fromCatalog) label = fromCatalog.label;
+  else if (key === "drp" || key === "qr" || key === PAY_METHOD_QRIS) label = "QRIS";
+  else if (key === "duitku_pop" || key === "duitkupop" || key === "pop") label = "Duitku Payment Gateway";
+  else if (key === PAY_METHOD_DOKU) label = "DOKU";
+  else if (key === PAY_METHOD_TUNAI || key === "cash" || key === "kasir" || key === "manual") label = "Tunai";
+  else if (key === PAY_METHOD_TRANSFER || key === "bank" || key === "va") label = "Transfer";
+  else label = String(method).trim();
+  return sandbox ? `Sandbox · ${label}` : label;
 }
 
 export function getSavedPayMethod(slug?: string): PayMethodId {

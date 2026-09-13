@@ -89,6 +89,7 @@ type Payment struct {
 	Method        string        `json:"method"`
 	Reference     *string       `json:"reference,omitempty"`
 	Status        string        `json:"status"`
+	Sandbox       bool          `json:"sandbox"`
 	PaidAt        *time.Time    `json:"paid_at,omitempty"`
 	CreatedAt     time.Time     `json:"created_at"`
 	DeletedAt     *time.Time    `json:"deleted_at,omitempty"`
@@ -296,9 +297,9 @@ func (s *Store) RecordPayment(ctx context.Context, p *Payment) error {
 		paidAt = &now
 	}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO payments (tenant_id, customer_id, invoice_id, amount, method, reference, status, paid_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at
-	`, p.TenantID, p.CustomerID, p.InvoiceID, p.Amount, method, p.Reference, status, paidAt).Scan(&p.ID, &p.CreatedAt)
+		INSERT INTO payments (tenant_id, customer_id, invoice_id, amount, method, reference, status, paid_at, sandbox)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, created_at
+	`, p.TenantID, p.CustomerID, p.InvoiceID, p.Amount, method, p.Reference, status, paidAt, p.Sandbox).Scan(&p.ID, &p.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -355,7 +356,7 @@ func (s *Store) ListPayments(ctx context.Context, tenantID xid.ID, search string
 	}
 	args = append(args, limit, offset)
 	rows, err := s.Pool.Query(ctx, `
-		SELECT p.id, p.tenant_id, p.customer_id, p.invoice_id, p.amount, p.method, p.reference, p.status, p.paid_at, p.created_at, p.deleted_at,
+		SELECT p.id, p.tenant_id, p.customer_id, p.invoice_id, p.amount, p.method, p.reference, p.status, p.sandbox, p.paid_at, p.created_at, p.deleted_at,
 		       COALESCE(c.full_name, ''), COALESCE(c.customer_code, ''), COALESCE(i.invoice_number, '')
 		FROM payments p
 		LEFT JOIN customers c ON c.id = p.customer_id AND c.tenant_id = p.tenant_id
@@ -368,7 +369,7 @@ func (s *Store) ListPayments(ctx context.Context, tenantID xid.ID, search string
 	var list []Payment
 	for rows.Next() {
 		var p Payment
-		if err := rows.Scan(&p.ID, &p.TenantID, &p.CustomerID, &p.InvoiceID, &p.Amount, &p.Method, &p.Reference, &p.Status, &p.PaidAt, &p.CreatedAt, &p.DeletedAt, &p.CustomerName, &p.CustomerCode, &p.InvoiceNumber); err != nil {
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.CustomerID, &p.InvoiceID, &p.Amount, &p.Method, &p.Reference, &p.Status, &p.Sandbox, &p.PaidAt, &p.CreatedAt, &p.DeletedAt, &p.CustomerName, &p.CustomerCode, &p.InvoiceNumber); err != nil {
 			return nil, 0, err
 		}
 		list = append(list, p)
@@ -384,7 +385,7 @@ func (s *Store) GetPayment(ctx context.Context, tenantID, id xid.ID) (*Payment, 
 		return nil, err
 	}
 	row := s.Pool.QueryRow(ctx, `
-		SELECT p.id, p.tenant_id, p.customer_id, p.invoice_id, p.amount, p.method, p.reference, p.status, p.paid_at, p.created_at, p.deleted_at,
+		SELECT p.id, p.tenant_id, p.customer_id, p.invoice_id, p.amount, p.method, p.reference, p.status, p.sandbox, p.paid_at, p.created_at, p.deleted_at,
 		       COALESCE(c.full_name, ''), COALESCE(c.customer_code, ''), COALESCE(i.invoice_number, '')
 		FROM payments p
 		LEFT JOIN customers c ON c.id = p.customer_id AND c.tenant_id = p.tenant_id
@@ -392,7 +393,7 @@ func (s *Store) GetPayment(ctx context.Context, tenantID, id xid.ID) (*Payment, 
 		WHERE p.tenant_id=$1 AND p.id=$2
 	`, tenantID, id)
 	var p Payment
-	err := row.Scan(&p.ID, &p.TenantID, &p.CustomerID, &p.InvoiceID, &p.Amount, &p.Method, &p.Reference, &p.Status, &p.PaidAt, &p.CreatedAt, &p.DeletedAt, &p.CustomerName, &p.CustomerCode, &p.InvoiceNumber)
+	err := row.Scan(&p.ID, &p.TenantID, &p.CustomerID, &p.InvoiceID, &p.Amount, &p.Method, &p.Reference, &p.Status, &p.Sandbox, &p.PaidAt, &p.CreatedAt, &p.DeletedAt, &p.CustomerName, &p.CustomerCode, &p.InvoiceNumber)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -902,7 +903,7 @@ func (s *Store) ListCustomerPayments(ctx context.Context, tenantID xid.ID, custo
 		limit = 20
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT p.id, p.tenant_id, p.customer_id, p.invoice_id, p.amount, p.method, p.reference, p.status, p.paid_at, p.created_at,
+		SELECT p.id, p.tenant_id, p.customer_id, p.invoice_id, p.amount, p.method, p.reference, p.status, p.sandbox, p.paid_at, p.created_at,
 		       COALESCE(i.invoice_number, '')
 		FROM payments p
 		LEFT JOIN invoices i ON i.id = p.invoice_id AND i.tenant_id = p.tenant_id
@@ -916,7 +917,7 @@ func (s *Store) ListCustomerPayments(ctx context.Context, tenantID xid.ID, custo
 	var list []Payment
 	for rows.Next() {
 		var p Payment
-		if err := rows.Scan(&p.ID, &p.TenantID, &p.CustomerID, &p.InvoiceID, &p.Amount, &p.Method, &p.Reference, &p.Status, &p.PaidAt, &p.CreatedAt, &p.InvoiceNumber); err != nil {
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.CustomerID, &p.InvoiceID, &p.Amount, &p.Method, &p.Reference, &p.Status, &p.Sandbox, &p.PaidAt, &p.CreatedAt, &p.InvoiceNumber); err != nil {
 			return nil, err
 		}
 		list = append(list, p)

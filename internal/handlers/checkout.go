@@ -69,6 +69,19 @@ func metaString(m map[string]any, key string) string {
 	return ""
 }
 
+// intentSandbox true bila intent dibuat di mode sandbox (atau simulasi sandbox).
+func intentSandbox(m map[string]any) bool {
+	if m == nil {
+		return false
+	}
+	for _, k := range []string{"sandbox_sim", "duitku_sandbox", "doku_sandbox"} {
+		if v, ok := m[k].(bool); ok && v {
+			return true
+		}
+	}
+	return false
+}
+
 func invoiceRemaining(inv *store.Invoice) int64 {
 	if inv == nil {
 		return 0

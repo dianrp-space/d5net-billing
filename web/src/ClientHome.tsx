@@ -761,7 +761,7 @@ export function ClientHome({
           (p.items_summary || "").trim() || "—",
           p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—",
           formatRp(p.amount),
-          paymentMethodLabel(p.method),
+          paymentMethodLabel(p.method, p.sandbox),
           paymentStatusLabel(p.status),
           action,
         ]
@@ -770,7 +770,7 @@ export function ClientHome({
           (p.items_summary || "").trim() || "—",
           p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—",
           formatRp(p.amount),
-          paymentMethodLabel(p.method),
+          paymentMethodLabel(p.method, p.sandbox),
           paymentStatusLabel(p.status),
           action,
         ];
@@ -1159,7 +1159,7 @@ export function ClientHome({
                       ) : null}
                       <p className="text-base font-bold">{formatRp(p.amount)}</p>
                       <p className="text-xs text-[var(--muted)]">
-                        {paymentMethodLabel(p.method)}
+                        {paymentMethodLabel(p.method, p.sandbox)}
                         {" · "}
                         {p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—"}
                       </p>
