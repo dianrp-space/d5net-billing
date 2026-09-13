@@ -16,3 +16,8 @@ data/router-backups/
 data/whatsapp/
 data/db-backups/
 
+#rsa key
+doku-public.pem
+doku-private.pem
+doku-private-pkcs8.pem
+
