@@ -6042,6 +6042,7 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 
 	var prov payment.Provider
 	var perr error
+	var webhookTenantID *xid.ID
 	reason := ""
 	if parsed.ExternalID != "" {
 		if pi, ierr := d.Store.GetPaymentIntentByExternalID(ctx, parsed.ExternalID); ierr == nil && pi != nil {
@@ -6056,6 +6057,9 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 				if perr != nil {
 					reason = perr.Error()
 				}
+			} else {
+				tid := pi.TenantID
+				webhookTenantID = &tid
 			}
 		} else {
 			slog.Info("payment webhook: no matching payment intent",
@@ -6070,6 +6074,9 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 				if perr != nil {
 					reason = perr.Error()
 				}
+			} else {
+				tid := t.ID
+				webhookTenantID = &tid
 			}
 		} else {
 			reason = "unknown tenant: " + strings.TrimSpace(input.Tenant)
@@ -6090,6 +6097,15 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 
 	var event *payment.WebhookEvent
 	verified, verr := prov.VerifyWebhook(ctx, headers, raw)
+	if verr != nil && webhookTenantID != nil {
+		// Kredensial sandbox & produksi tersimpan bersamaan: callback yang
+		// dibuat di env satunya tetap valid walau mode aktif sudah pindah.
+		if altProv, altEvent, altErr := verifyPaymentWebhookBothEnvs(ctx, d, *webhookTenantID, providerName, headers, raw); altErr == nil {
+			prov = altProv
+			verified = altEvent
+			verr = nil
+		}
+	}
 	if verr != nil {
 		softFail := d.Config != nil && d.Config.AppEnv == "development"
 		if softFail {

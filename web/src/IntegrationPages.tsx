@@ -39,6 +39,12 @@ type DuitkuIntegration = {
   sandbox: boolean;
   merchant_code: string;
   api_key?: string;
+  sandbox_merchant_code: string;
+  sandbox_api_key?: string;
+  prod_merchant_code: string;
+  prod_api_key?: string;
+  sandbox_configured: boolean;
+  prod_configured: boolean;
   expires_in_minutes: number;
   fee_mode?: string;
   fee_flat?: number;
@@ -54,6 +60,12 @@ type DokuIntegration = {
   sandbox: boolean;
   client_id: string;
   secret_key?: string;
+  sandbox_client_id: string;
+  sandbox_secret_key?: string;
+  prod_client_id: string;
+  prod_secret_key?: string;
+  sandbox_configured: boolean;
+  prod_configured: boolean;
   expires_in_minutes: number;
   fee_mode?: string;
   fee_flat?: number;
@@ -257,8 +269,10 @@ export function PaymentGWPage() {
   const [duitkuForm, setDuitkuForm] = useState({
     enabled: false,
     sandbox: true,
-    merchant_code: "",
-    api_key: "",
+    sandbox_merchant_code: "",
+    sandbox_api_key: "",
+    prod_merchant_code: "",
+    prod_api_key: "",
     expires_in_minutes: 60,
     fee_mode: "merchant",
     fee_flat: 0,
@@ -267,40 +281,65 @@ export function PaymentGWPage() {
   const [dokuForm, setDokuForm] = useState({
     enabled: false,
     sandbox: true,
-    client_id: "",
-    secret_key: "",
+    sandbox_client_id: "",
+    sandbox_secret_key: "",
+    prod_client_id: "",
+    prod_secret_key: "",
     expires_in_minutes: 60,
     fee_mode: "merchant",
     fee_flat: 0,
     fee_percent: 0,
   });
 
+  function duitkuFromView(v: DuitkuIntegration | undefined, fallbackSandbox = true) {
+    if (!v) return null;
+    // Fallback legacy satu-slot ke kedua kolom agar data lama tidak hilang di UI.
+    const sbm = v.sandbox_merchant_code || (!v.sandbox ? "" : v.merchant_code || "");
+    const sbk = v.sandbox_api_key || (!v.sandbox ? "" : v.api_key || "");
+    const prm = v.prod_merchant_code || (v.sandbox ? "" : v.merchant_code || "");
+    const prk = v.prod_api_key || (v.sandbox ? "" : v.api_key || "");
+    return {
+      enabled: v.enabled,
+      sandbox: v.configured || v.sandbox_configured || v.prod_configured ? v.sandbox : fallbackSandbox,
+      sandbox_merchant_code: sbm || "",
+      sandbox_api_key: sbk || "",
+      prod_merchant_code: prm || "",
+      prod_api_key: prk || "",
+      expires_in_minutes: v.expires_in_minutes || 60,
+      fee_mode: v.fee_mode === "customer" ? "customer" : "merchant",
+      fee_flat: v.fee_flat || 0,
+      fee_percent: v.fee_percent || 0,
+    };
+  }
+
+  function dokuFromView(v: DokuIntegration | undefined, fallbackSandbox = true) {
+    if (!v) return null;
+    const sbc = v.sandbox_client_id || (!v.sandbox ? "" : v.client_id || "");
+    const sbk = v.sandbox_secret_key || (!v.sandbox ? "" : v.secret_key || "");
+    const prc = v.prod_client_id || (v.sandbox ? "" : v.client_id || "");
+    const prk = v.prod_secret_key || (v.sandbox ? "" : v.secret_key || "");
+    return {
+      enabled: v.enabled,
+      sandbox: v.configured || v.sandbox_configured || v.prod_configured ? v.sandbox : fallbackSandbox,
+      sandbox_client_id: sbc || "",
+      sandbox_secret_key: sbk || "",
+      prod_client_id: prc || "",
+      prod_secret_key: prk || "",
+      expires_in_minutes: v.expires_in_minutes || 60,
+      fee_mode: v.fee_mode === "customer" ? "customer" : "merchant",
+      fee_flat: v.fee_flat || 0,
+      fee_percent: v.fee_percent || 0,
+    };
+  }
+
   useEffect(() => {
-    if (!duitkuQ.data) return;
-    setDuitkuForm({
-      enabled: duitkuQ.data.enabled,
-      sandbox: duitkuQ.data.configured ? duitkuQ.data.sandbox : true,
-      merchant_code: duitkuQ.data.merchant_code || "",
-      api_key: duitkuQ.data.api_key || "",
-      expires_in_minutes: duitkuQ.data.expires_in_minutes || 60,
-      fee_mode: duitkuQ.data.fee_mode === "customer" ? "customer" : "merchant",
-      fee_flat: duitkuQ.data.fee_flat || 0,
-      fee_percent: duitkuQ.data.fee_percent || 0,
-    });
+    const next = duitkuFromView(duitkuQ.data);
+    if (next) setDuitkuForm(next);
   }, [duitkuQ.data]);
 
   useEffect(() => {
-    if (!dokuQ.data) return;
-    setDokuForm({
-      enabled: dokuQ.data.enabled,
-      sandbox: dokuQ.data.configured ? dokuQ.data.sandbox : true,
-      client_id: dokuQ.data.client_id || "",
-      secret_key: dokuQ.data.secret_key || "",
-      expires_in_minutes: dokuQ.data.expires_in_minutes || 60,
-      fee_mode: dokuQ.data.fee_mode === "customer" ? "customer" : "merchant",
-      fee_flat: dokuQ.data.fee_flat || 0,
-      fee_percent: dokuQ.data.fee_percent || 0,
-    });
+    const next = dokuFromView(dokuQ.data);
+    if (next) setDokuForm(next);
   }, [dokuQ.data]);
 
   const saveDuitku = useMutation({
@@ -310,8 +349,10 @@ export function PaymentGWPage() {
         body: JSON.stringify({
           enabled: duitkuForm.enabled,
           sandbox: duitkuForm.sandbox,
-          merchant_code: duitkuForm.merchant_code.trim(),
-          api_key: duitkuForm.api_key.trim() || undefined,
+          sandbox_merchant_code: duitkuForm.sandbox_merchant_code.trim(),
+          sandbox_api_key: duitkuForm.sandbox_api_key.trim() || undefined,
+          prod_merchant_code: duitkuForm.prod_merchant_code.trim(),
+          prod_api_key: duitkuForm.prod_api_key.trim() || undefined,
           expires_in_minutes: Math.min(1440, Math.max(1, duitkuForm.expires_in_minutes || 60)),
           fee_mode: duitkuForm.fee_mode === "customer" ? "customer" : "merchant",
           fee_flat: Math.max(0, Math.floor(Number(duitkuForm.fee_flat) || 0)),
@@ -320,18 +361,17 @@ export function PaymentGWPage() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(["integration-duitku"], data);
-      setDuitkuForm({
-        enabled: data.enabled,
-        sandbox: data.sandbox,
-        merchant_code: data.merchant_code || "",
-        api_key: data.api_key || duitkuForm.api_key,
-        expires_in_minutes: data.expires_in_minutes || duitkuForm.expires_in_minutes,
-        fee_mode: data.fee_mode === "customer" ? "customer" : "merchant",
-        fee_flat: data.fee_flat || 0,
-        fee_percent: data.fee_percent || 0,
-      });
+      const next = duitkuFromView(data);
+      if (next) {
+        // Pertahankan secret yang baru diketik bila server menyembunyikannya.
+        setDuitkuForm({
+          ...next,
+          sandbox_api_key: next.sandbox_api_key || duitkuForm.sandbox_api_key,
+          prod_api_key: next.prod_api_key || duitkuForm.prod_api_key,
+        });
+      }
       void qc.invalidateQueries({ queryKey: ["integration-duitku"] });
-      void toastSuccess("Duitku disimpan");
+      void toastSuccess("Duitku disimpan (sandbox & produksi)");
     },
     onError: (e: Error) => void toastError(e.message),
   });
@@ -363,8 +403,10 @@ export function PaymentGWPage() {
         body: JSON.stringify({
           enabled: dokuForm.enabled,
           sandbox: dokuForm.sandbox,
-          client_id: dokuForm.client_id.trim(),
-          secret_key: dokuForm.secret_key.trim() || undefined,
+          sandbox_client_id: dokuForm.sandbox_client_id.trim(),
+          sandbox_secret_key: dokuForm.sandbox_secret_key.trim() || undefined,
+          prod_client_id: dokuForm.prod_client_id.trim(),
+          prod_secret_key: dokuForm.prod_secret_key.trim() || undefined,
           expires_in_minutes: Math.min(1440, Math.max(1, dokuForm.expires_in_minutes || 60)),
           fee_mode: dokuForm.fee_mode === "customer" ? "customer" : "merchant",
           fee_flat: Math.max(0, Math.floor(Number(dokuForm.fee_flat) || 0)),
@@ -373,18 +415,16 @@ export function PaymentGWPage() {
       }),
     onSuccess: (data) => {
       qc.setQueryData(["integration-doku"], data);
-      setDokuForm({
-        enabled: data.enabled,
-        sandbox: data.sandbox,
-        client_id: data.client_id || "",
-        secret_key: data.secret_key || dokuForm.secret_key,
-        expires_in_minutes: data.expires_in_minutes || dokuForm.expires_in_minutes,
-        fee_mode: data.fee_mode === "customer" ? "customer" : "merchant",
-        fee_flat: data.fee_flat || 0,
-        fee_percent: data.fee_percent || 0,
-      });
+      const next = dokuFromView(data);
+      if (next) {
+        setDokuForm({
+          ...next,
+          sandbox_secret_key: next.sandbox_secret_key || dokuForm.sandbox_secret_key,
+          prod_secret_key: next.prod_secret_key || dokuForm.prod_secret_key,
+        });
+      }
       void qc.invalidateQueries({ queryKey: ["integration-doku"] });
-      void toastSuccess("DOKU disimpan");
+      void toastSuccess("DOKU disimpan (sandbox & produksi)");
     },
     onError: (e: Error) => void toastError(e.message),
   });
@@ -402,7 +442,8 @@ export function PaymentGWPage() {
     <Section title="Payment Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
         Aktifkan <strong>Duitku</strong> atau <strong>DOKU Checkout</strong> untuk pembayaran online (VA, e-wallet,
-        retail, QRIS). Kredensial disimpan terenkripsi.
+        retail, QRIS). Kredensial <strong>sandbox & produksi tersimpan bersamaan</strong> — tinggal pilih mode aktif,
+        tidak perlu input ulang. Kredensial disimpan terenkripsi.
       </p>
       {loading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
@@ -437,8 +478,13 @@ export function PaymentGWPage() {
                 <div className="flex min-w-0 items-center gap-3">
                   <PgLogo provider="duitku" className="h-6 w-auto max-w-[8rem] object-contain object-left" />
                   <span className="text-[11px] text-[var(--muted)]">
-                    {duitkuQ.data?.configured ? "kunci tersimpan" : "belum dikonfigurasi"}
+                    {duitkuQ.data?.sandbox_configured || duitkuQ.data?.prod_configured
+                      ? `sandbox ${duitkuQ.data?.sandbox_configured ? "tersimpan" : "kosong"} · produksi ${duitkuQ.data?.prod_configured ? "tersimpan" : "kosong"}`
+                      : duitkuQ.data?.configured
+                        ? "kunci tersimpan"
+                        : "belum dikonfigurasi"}
                     {duitkuForm.enabled ? " · aktif" : " · nonaktif"}
+                    {` · mode ${duitkuForm.sandbox ? "sandbox" : "produksi"}`}
                   </span>
                 </div>
                 <label className="flex shrink-0 items-center gap-2 text-sm">
@@ -455,14 +501,34 @@ export function PaymentGWPage() {
               Pelanggan diarahkan ke <strong>halaman bayar Duitku</strong> (bukan API v2 / MD5). Callback memakai HMAC-SHA256.
               Isi callback URL di bawah ke dashboard Duitku.
             </p>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={duitkuForm.sandbox}
-                onChange={(e) => setDuitkuForm({ ...duitkuForm, sandbox: e.target.checked })}
-              />
-              Sandbox (api-sandbox.duitku.com)
-            </label>
+            <div className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Mode aktif untuk transaksi baru</span>
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Mode Duitku aktif">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={duitkuForm.sandbox}
+                  className={duitkuForm.sandbox ? "btn" : "btn-ghost"}
+                  onClick={() => setDuitkuForm({ ...duitkuForm, sandbox: true })}
+                >
+                  Sandbox
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!duitkuForm.sandbox}
+                  className={!duitkuForm.sandbox ? "btn" : "btn-ghost"}
+                  onClick={() => setDuitkuForm({ ...duitkuForm, sandbox: false })}
+                >
+                  Produksi
+                </button>
+              </div>
+              <span className="text-[11px] text-[var(--muted)]">
+                {duitkuForm.sandbox
+                  ? "Transaksi baru memakai api-sandbox.duitku.com + kredensial sandbox."
+                  : "Transaksi baru memakai api-prod.duitku.com + kredensial produksi. Callback lama dari env satunya tetap valid."}
+              </span>
+            </div>
             {duitkuForm.sandbox ? (
               <p className="text-[11px] leading-relaxed text-[var(--muted)]">
                 Dashboard Duitku sandbox tidak punya tandai lunas. Saat sandbox aktif, portal pelanggan dan daftar
@@ -470,26 +536,64 @@ export function PaymentGWPage() {
                 sama.
               </p>
             ) : null}
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Merchant code</span>
-              <input
-                className="input"
-                placeholder="Dxxxxx"
-                value={duitkuForm.merchant_code}
-                onChange={(e) => setDuitkuForm({ ...duitkuForm, merchant_code: e.target.value })}
-                autoComplete="off"
-              />
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">API key</span>
-              <SecretInput
-                name="duitku-api-key"
-                placeholder="API key Duitku"
-                value={duitkuForm.api_key}
-                onChange={(e) => setDuitkuForm({ ...duitkuForm, api_key: e.target.value })}
-                autoComplete="new-password"
-              />
-            </label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid content-start gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
+                <p className="flex items-center justify-between text-sm font-medium">
+                  Sandbox
+                  <span className="text-[10px] font-normal text-[var(--muted)]">
+                    {duitkuQ.data?.sandbox_configured ? "tersimpan" : "kosong"}
+                  </span>
+                </p>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Merchant code (sandbox)</span>
+                  <input
+                    className="input"
+                    placeholder="Dxxxxx sandbox"
+                    value={duitkuForm.sandbox_merchant_code}
+                    onChange={(e) => setDuitkuForm({ ...duitkuForm, sandbox_merchant_code: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">API key (sandbox)</span>
+                  <SecretInput
+                    name="duitku-sandbox-api-key"
+                    placeholder="API key Duitku sandbox"
+                    value={duitkuForm.sandbox_api_key}
+                    onChange={(e) => setDuitkuForm({ ...duitkuForm, sandbox_api_key: e.target.value })}
+                    autoComplete="new-password"
+                  />
+                </label>
+              </div>
+              <div className="grid content-start gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
+                <p className="flex items-center justify-between text-sm font-medium">
+                  Produksi
+                  <span className="text-[10px] font-normal text-[var(--muted)]">
+                    {duitkuQ.data?.prod_configured ? "tersimpan" : "kosong"}
+                  </span>
+                </p>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Merchant code (produksi)</span>
+                  <input
+                    className="input"
+                    placeholder="Dxxxxx produksi"
+                    value={duitkuForm.prod_merchant_code}
+                    onChange={(e) => setDuitkuForm({ ...duitkuForm, prod_merchant_code: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">API key (produksi)</span>
+                  <SecretInput
+                    name="duitku-prod-api-key"
+                    placeholder="API key Duitku produksi"
+                    value={duitkuForm.prod_api_key}
+                    onChange={(e) => setDuitkuForm({ ...duitkuForm, prod_api_key: e.target.value })}
+                    autoComplete="new-password"
+                  />
+                </label>
+              </div>
+            </div>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
               <input
@@ -601,8 +705,13 @@ export function PaymentGWPage() {
                 <div className="flex min-w-0 items-center gap-3">
                   <PgLogo provider="doku" className="h-6 w-auto max-w-[8rem] object-contain object-left" />
                   <span className="text-[11px] text-[var(--muted)]">
-                    {dokuQ.data?.configured ? "kunci tersimpan" : "belum dikonfigurasi"}
+                    {dokuQ.data?.sandbox_configured || dokuQ.data?.prod_configured
+                      ? `sandbox ${dokuQ.data?.sandbox_configured ? "tersimpan" : "kosong"} · produksi ${dokuQ.data?.prod_configured ? "tersimpan" : "kosong"}`
+                      : dokuQ.data?.configured
+                        ? "kunci tersimpan"
+                        : "belum dikonfigurasi"}
                     {dokuForm.enabled ? " · aktif" : " · nonaktif"}
+                    {` · mode ${dokuForm.sandbox ? "sandbox" : "produksi"}`}
                   </span>
                 </div>
                 <label className="flex shrink-0 items-center gap-2 text-sm">
@@ -619,34 +728,92 @@ export function PaymentGWPage() {
               Pelanggan diarahkan ke <strong>halaman bayar DOKU Checkout</strong> (VA, e-wallet, QRIS, retail) di tab
               yang sama. Cukup Client ID + Secret Key dari dashboard DOKU.
             </p>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={dokuForm.sandbox}
-                onChange={(e) => setDokuForm({ ...dokuForm, sandbox: e.target.checked })}
-              />
-              Sandbox (api-sandbox.doku.com)
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Client ID</span>
-              <input
-                className="input"
-                placeholder="BRN-xxxx / MCH-xxxx"
-                value={dokuForm.client_id}
-                onChange={(e) => setDokuForm({ ...dokuForm, client_id: e.target.value })}
-                autoComplete="off"
-              />
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="text-[var(--muted)]">Secret key</span>
-              <SecretInput
-                name="doku-secret-key"
-                placeholder="SK-…"
-                value={dokuForm.secret_key}
-                onChange={(e) => setDokuForm({ ...dokuForm, secret_key: e.target.value })}
-                autoComplete="new-password"
-              />
-            </label>
+            <div className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">Mode aktif untuk transaksi baru</span>
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Mode DOKU aktif">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={dokuForm.sandbox}
+                  className={dokuForm.sandbox ? "btn" : "btn-ghost"}
+                  onClick={() => setDokuForm({ ...dokuForm, sandbox: true })}
+                >
+                  Sandbox
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!dokuForm.sandbox}
+                  className={!dokuForm.sandbox ? "btn" : "btn-ghost"}
+                  onClick={() => setDokuForm({ ...dokuForm, sandbox: false })}
+                >
+                  Produksi
+                </button>
+              </div>
+              <span className="text-[11px] text-[var(--muted)]">
+                {dokuForm.sandbox
+                  ? "Transaksi baru memakai api-sandbox.doku.com + kredensial sandbox."
+                  : "Transaksi baru memakai api.doku.com + kredensial produksi. Callback lama dari env satunya tetap valid."}
+              </span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid content-start gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
+                <p className="flex items-center justify-between text-sm font-medium">
+                  Sandbox
+                  <span className="text-[10px] font-normal text-[var(--muted)]">
+                    {dokuQ.data?.sandbox_configured ? "tersimpan" : "kosong"}
+                  </span>
+                </p>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Client ID (sandbox)</span>
+                  <input
+                    className="input"
+                    placeholder="BRN-xxxx / MCH-xxxx sandbox"
+                    value={dokuForm.sandbox_client_id}
+                    onChange={(e) => setDokuForm({ ...dokuForm, sandbox_client_id: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Secret key (sandbox)</span>
+                  <SecretInput
+                    name="doku-sandbox-secret-key"
+                    placeholder="SK-… sandbox"
+                    value={dokuForm.sandbox_secret_key}
+                    onChange={(e) => setDokuForm({ ...dokuForm, sandbox_secret_key: e.target.value })}
+                    autoComplete="new-password"
+                  />
+                </label>
+              </div>
+              <div className="grid content-start gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
+                <p className="flex items-center justify-between text-sm font-medium">
+                  Produksi
+                  <span className="text-[10px] font-normal text-[var(--muted)]">
+                    {dokuQ.data?.prod_configured ? "tersimpan" : "kosong"}
+                  </span>
+                </p>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Client ID (produksi)</span>
+                  <input
+                    className="input"
+                    placeholder="BRN-xxxx / MCH-xxxx produksi"
+                    value={dokuForm.prod_client_id}
+                    onChange={(e) => setDokuForm({ ...dokuForm, prod_client_id: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Secret key (produksi)</span>
+                  <SecretInput
+                    name="doku-prod-secret-key"
+                    placeholder="SK-… produksi"
+                    value={dokuForm.prod_secret_key}
+                    onChange={(e) => setDokuForm({ ...dokuForm, prod_secret_key: e.target.value })}
+                    autoComplete="new-password"
+                  />
+                </label>
+              </div>
+            </div>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
               <input

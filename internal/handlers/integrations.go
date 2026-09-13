@@ -31,6 +31,13 @@ type duitkuIntegrationStored struct {
 	Sandbox          bool   `json:"sandbox"`
 	Enabled          bool   `json:"enabled"`
 	ExpiresInMinutes int    `json:"expires_in_minutes"`
+	// Kredensial per-environment agar sandbox & produksi tersimpan bersamaan.
+	// Field legacy MerchantCode/APIKey tetap dipertahankan sebagai fallback
+	// migrasi dan selalu disinkron ke env yang aktif saat save.
+	SandboxMerchantCode string `json:"sandbox_merchant_code,omitempty"`
+	SandboxAPIKey       string `json:"sandbox_api_key,omitempty"`
+	ProdMerchantCode    string `json:"prod_merchant_code,omitempty"`
+	ProdAPIKey          string `json:"prod_api_key,omitempty"`
 	// FeeMode: "customer" = biaya admin ditambahkan ke tagihan; selain itu merchant.
 	FeeMode    string  `json:"fee_mode"`
 	FeeFlat    int64   `json:"fee_flat,omitempty"` // biaya dasar MDR
@@ -43,6 +50,12 @@ type duitkuIntegrationView struct {
 	Sandbox          bool    `json:"sandbox"`
 	MerchantCode     string  `json:"merchant_code"`
 	APIKey           string  `json:"api_key,omitempty"`
+	SandboxMerchantCode string `json:"sandbox_merchant_code"`
+	SandboxAPIKey       string `json:"sandbox_api_key,omitempty"`
+	ProdMerchantCode    string `json:"prod_merchant_code"`
+	ProdAPIKey          string `json:"prod_api_key,omitempty"`
+	SandboxConfigured bool   `json:"sandbox_configured"`
+	ProdConfigured    bool   `json:"prod_configured"`
 	ExpiresInMinutes int     `json:"expires_in_minutes"`
 	FeeMode          string  `json:"fee_mode"`
 	FeeFlat          int64   `json:"fee_flat"`
@@ -57,6 +70,10 @@ type duitkuIntegrationPut struct {
 	Sandbox          bool    `json:"sandbox"`
 	MerchantCode     string  `json:"merchant_code"`
 	APIKey           string  `json:"api_key,omitempty"`
+	SandboxMerchantCode string `json:"sandbox_merchant_code,omitempty"`
+	SandboxAPIKey       string `json:"sandbox_api_key,omitempty"`
+	ProdMerchantCode    string `json:"prod_merchant_code,omitempty"`
+	ProdAPIKey          string `json:"prod_api_key,omitempty"`
 	ExpiresInMinutes int     `json:"expires_in_minutes,omitempty"`
 	FeeMode          string  `json:"fee_mode,omitempty"`
 	FeeFlat          int64   `json:"fee_flat,omitempty"`
@@ -74,6 +91,16 @@ type dokuIntegrationStored struct {
 	Sandbox          bool   `json:"sandbox"`
 	Enabled          bool   `json:"enabled"`
 	ExpiresInMinutes int    `json:"expires_in_minutes"`
+	// Kredensial per-environment agar sandbox & produksi tersimpan bersamaan.
+	// Field legacy ClientID/SecretKey/PrivateKey tetap sebagai fallback migrasi
+	// dan disinkron ke env yang aktif saat save. Merchant/terminal/postal/BIN
+	// tetap global (shared) karena tidak diedit dari UI.
+	SandboxClientID  string `json:"sandbox_client_id,omitempty"`
+	SandboxSecretKey string `json:"sandbox_secret_key,omitempty"`
+	SandboxPrivateKey string `json:"sandbox_private_key,omitempty"`
+	ProdClientID     string `json:"prod_client_id,omitempty"`
+	ProdSecretKey    string `json:"prod_secret_key,omitempty"`
+	ProdPrivateKey   string `json:"prod_private_key,omitempty"`
 	// FeeMode: "customer" = biaya admin ditambahkan ke tagihan (customer bayar
 	// lebih); selain itu (kosong/"merchant") = merchant menanggung (default).
 	FeeMode    string                          `json:"fee_mode"`
@@ -98,7 +125,15 @@ type dokuIntegrationView struct {
 	Sandbox          bool                 `json:"sandbox"`
 	ClientID         string               `json:"client_id"`
 	SecretKey        string               `json:"secret_key,omitempty"`
+	SandboxClientID  string               `json:"sandbox_client_id"`
+	SandboxSecretKey string               `json:"sandbox_secret_key,omitempty"`
+	ProdClientID     string               `json:"prod_client_id"`
+	ProdSecretKey    string               `json:"prod_secret_key,omitempty"`
+	SandboxConfigured bool                `json:"sandbox_configured"`
+	ProdConfigured    bool                `json:"prod_configured"`
 	HasPrivateKey    bool                 `json:"has_private_key"`
+	HasSandboxPrivateKey bool             `json:"has_sandbox_private_key"`
+	HasProdPrivateKey    bool             `json:"has_prod_private_key"`
 	MerchantID       string               `json:"merchant_id"`
 	TerminalID       string               `json:"terminal_id"`
 	PostalCode       string               `json:"postal_code"`
@@ -128,7 +163,13 @@ type dokuIntegrationPut struct {
 	Sandbox          bool                `json:"sandbox"`
 	ClientID         string              `json:"client_id"`
 	SecretKey        string              `json:"secret_key,omitempty"`
+	SandboxClientID  string              `json:"sandbox_client_id,omitempty"`
+	SandboxSecretKey string              `json:"sandbox_secret_key,omitempty"`
+	ProdClientID     string              `json:"prod_client_id,omitempty"`
+	ProdSecretKey    string              `json:"prod_secret_key,omitempty"`
 	PrivateKey       string              `json:"private_key,omitempty"`
+	SandboxPrivateKey string             `json:"sandbox_private_key,omitempty"`
+	ProdPrivateKey    string             `json:"prod_private_key,omitempty"`
 	MerchantID       string              `json:"merchant_id,omitempty"`
 	TerminalID       string              `json:"terminal_id,omitempty"`
 	PostalCode       string              `json:"postal_code,omitempty"`
@@ -337,25 +378,70 @@ func registerIntegrations(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		merchant := strings.TrimSpace(input.Body.MerchantCode)
-		if merchant == "" {
-			merchant = strings.TrimSpace(cur.MerchantCode)
-		}
-		if input.Body.Enabled && merchant == "" {
-			return nil, httpx.BadRequest("merchant code Duitku wajib diisi")
-		}
-		if input.Body.Enabled && strings.TrimSpace(input.Body.APIKey) == "" && cur.APIKey == "" {
-			return nil, httpx.BadRequest("API key Duitku wajib diisi")
-		}
 		cur.Enabled = input.Body.Enabled
 		cur.Sandbox = input.Body.Sandbox
-		cur.MerchantCode = merchant
+		// Kredensial per-env: field baru diutamakan, field legacy dipetakan ke
+		// env yang aktif agar klien lama tetap berfungsi.
+		sandboxMerchant := strings.TrimSpace(input.Body.SandboxMerchantCode)
+		prodMerchant := strings.TrimSpace(input.Body.ProdMerchantCode)
+		legacyMerchant := strings.TrimSpace(input.Body.MerchantCode)
+		if legacyMerchant != "" && sandboxMerchant == "" && prodMerchant == "" {
+			if input.Body.Sandbox {
+				sandboxMerchant = legacyMerchant
+			} else {
+				prodMerchant = legacyMerchant
+			}
+		}
+		if sandboxMerchant != "" {
+			cur.SandboxMerchantCode = sandboxMerchant
+		}
+		if prodMerchant != "" {
+			cur.ProdMerchantCode = prodMerchant
+		}
+		if v := strings.TrimSpace(input.Body.SandboxAPIKey); v != "" {
+			enc, err := d.Encryptor.EncryptString(v)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			cur.SandboxAPIKey = enc
+		}
+		if v := strings.TrimSpace(input.Body.ProdAPIKey); v != "" {
+			enc, err := d.Encryptor.EncryptString(v)
+			if err != nil {
+				return nil, httpx.Internal(err)
+			}
+			cur.ProdAPIKey = enc
+		}
 		if v := strings.TrimSpace(input.Body.APIKey); v != "" {
 			enc, err := d.Encryptor.EncryptString(v)
 			if err != nil {
 				return nil, httpx.Internal(err)
 			}
-			cur.APIKey = enc
+			if input.Body.Sandbox {
+				cur.SandboxAPIKey = enc
+			} else {
+				cur.ProdAPIKey = enc
+			}
+		}
+		activeMerchant, activeKeyEnc := duitkuActiveCredsStored(cur)
+		// Fallback: bila slot per-env masih kosong tapi legacy terisi (data lama
+		// yang belum termigrasi), pakai legacy untuk validasi.
+		if activeMerchant == "" {
+			activeMerchant = strings.TrimSpace(cur.MerchantCode)
+		}
+		if activeKeyEnc == "" {
+			activeKeyEnc = cur.APIKey
+		}
+		if input.Body.Enabled && activeMerchant == "" {
+			return nil, httpx.BadRequest("merchant code Duitku wajib diisi (sandbox / produksi sesuai mode aktif)")
+		}
+		if input.Body.Enabled && activeKeyEnc == "" {
+			return nil, httpx.BadRequest("API key Duitku wajib diisi (sandbox / produksi sesuai mode aktif)")
+		}
+		// Sinkronkan legacy ke env aktif untuk kompatibilitas pembaca lama.
+		cur.MerchantCode = activeMerchant
+		if activeKeyEnc != "" {
+			cur.APIKey = activeKeyEnc
 		}
 		if input.Body.ExpiresInMinutes > 0 {
 			cur.ExpiresInMinutes = payment.ClampDuitkuExpiryMinutes(input.Body.ExpiresInMinutes)
@@ -425,20 +511,92 @@ func registerIntegrations(api huma.API, d *Deps) {
 		}
 		cur.Enabled = input.Body.Enabled
 		cur.Sandbox = input.Body.Sandbox
-		cur.ClientID = clientID
-		if v := strings.TrimSpace(input.Body.SecretKey); v != "" {
+		// Kredensial per-env: field baru diutamakan, field legacy dipetakan ke
+		// env yang aktif agar klien lama tetap berfungsi.
+		sandboxClient := strings.TrimSpace(input.Body.SandboxClientID)
+		prodClient := strings.TrimSpace(input.Body.ProdClientID)
+		legacyClient := strings.TrimSpace(input.Body.ClientID)
+		if legacyClient != "" && sandboxClient == "" && prodClient == "" {
+			if input.Body.Sandbox {
+				sandboxClient = legacyClient
+			} else {
+				prodClient = legacyClient
+			}
+		}
+		if sandboxClient != "" {
+			cur.SandboxClientID = sandboxClient
+		}
+		if prodClient != "" {
+			cur.ProdClientID = prodClient
+		}
+		encryptTo := func(plain string, dst *string) error {
+			v := strings.TrimSpace(plain)
+			if v == "" {
+				return nil
+			}
 			enc, err := d.Encryptor.EncryptString(v)
 			if err != nil {
-				return nil, httpx.Internal(err)
+				return err
 			}
-			cur.SecretKey = enc
+			*dst = enc
+			return nil
+		}
+		if err := encryptTo(input.Body.SandboxSecretKey, &cur.SandboxSecretKey); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := encryptTo(input.Body.ProdSecretKey, &cur.ProdSecretKey); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if v := strings.TrimSpace(input.Body.SecretKey); v != "" {
+			if input.Body.Sandbox {
+				if err := encryptTo(v, &cur.SandboxSecretKey); err != nil {
+					return nil, httpx.Internal(err)
+				}
+			} else {
+				if err := encryptTo(v, &cur.ProdSecretKey); err != nil {
+					return nil, httpx.Internal(err)
+				}
+			}
+		}
+		if err := encryptTo(input.Body.SandboxPrivateKey, &cur.SandboxPrivateKey); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if err := encryptTo(input.Body.ProdPrivateKey, &cur.ProdPrivateKey); err != nil {
+			return nil, httpx.Internal(err)
 		}
 		if v := strings.TrimSpace(input.Body.PrivateKey); v != "" {
-			enc, err := d.Encryptor.EncryptString(v)
-			if err != nil {
-				return nil, httpx.Internal(err)
+			if input.Body.Sandbox {
+				if err := encryptTo(v, &cur.SandboxPrivateKey); err != nil {
+					return nil, httpx.Internal(err)
+				}
+			} else {
+				if err := encryptTo(v, &cur.ProdPrivateKey); err != nil {
+					return nil, httpx.Internal(err)
+				}
 			}
-			cur.PrivateKey = enc
+		}
+		activeClient, activeSecretEnc, _ := dokuActiveCredsStored(cur)
+		if activeClient == "" {
+			activeClient = strings.TrimSpace(cur.ClientID)
+		}
+		if activeSecretEnc == "" {
+			activeSecretEnc = cur.SecretKey
+		}
+		if input.Body.Enabled && activeClient == "" {
+			return nil, httpx.BadRequest("client ID DOKU wajib diisi (sandbox / produksi sesuai mode aktif)")
+		}
+		if input.Body.Enabled && activeSecretEnc == "" {
+			return nil, httpx.BadRequest("secret key DOKU wajib diisi (sandbox / produksi sesuai mode aktif)")
+		}
+		// Sinkronkan legacy ke env aktif untuk kompatibilitas pembaca lama.
+		cur.ClientID = activeClient
+		if activeSecretEnc != "" {
+			cur.SecretKey = activeSecretEnc
+		}
+		if _, _, activePriv := dokuActiveCredsStored(cur); activePriv != "" {
+			cur.PrivateKey = activePriv
+		} else if strings.TrimSpace(cur.PrivateKey) == "" {
+			// Pertahankan legacy bila kedua slot per-env masih kosong.
 		}
 		if v := strings.TrimSpace(input.Body.MerchantID); v != "" {
 			cur.MerchantID = v
@@ -827,9 +985,92 @@ func loadDuitkuIntegration(ctx context.Context, d *Deps, tid xid.ID) (duitkuInte
 	var s duitkuIntegrationStored
 	err := d.Store.GetSettingJSON(ctx, tid, settingDuitku, &s)
 	if errors.Is(err, store.ErrNotFound) {
-		return duitkuIntegrationStored{}, nil
+		return duitkuIntegrationStored{Sandbox: true}, nil
 	}
-	return s, err
+	if err != nil {
+		return s, err
+	}
+	migrateDuitkuLegacy(&s)
+	return s, nil
+}
+
+// migrateDuitkuLegacy menyalin kredensial lama satu-slot ke slot per-env agar
+// tenant lama tidak kehilangan kredensial saat upgrade.
+func migrateDuitkuLegacy(s *duitkuIntegrationStored) {
+	if s == nil {
+		return
+	}
+	legacyMerchant := strings.TrimSpace(s.MerchantCode)
+	if legacyMerchant != "" {
+		if s.Sandbox {
+			if strings.TrimSpace(s.SandboxMerchantCode) == "" {
+				s.SandboxMerchantCode = legacyMerchant
+			}
+		} else {
+			if strings.TrimSpace(s.ProdMerchantCode) == "" {
+				s.ProdMerchantCode = legacyMerchant
+			}
+		}
+		if strings.TrimSpace(s.SandboxMerchantCode) == "" && strings.TrimSpace(s.ProdMerchantCode) == "" {
+			// Data sangat lama tanpa flag jelas: isi kedua slot agar tidak hilang.
+			s.SandboxMerchantCode = legacyMerchant
+			s.ProdMerchantCode = legacyMerchant
+		}
+	}
+	if strings.TrimSpace(s.APIKey) != "" {
+		if s.Sandbox {
+			if strings.TrimSpace(s.SandboxAPIKey) == "" {
+				s.SandboxAPIKey = s.APIKey
+			}
+		} else {
+			if strings.TrimSpace(s.ProdAPIKey) == "" {
+				s.ProdAPIKey = s.APIKey
+			}
+		}
+		if strings.TrimSpace(s.SandboxAPIKey) == "" && strings.TrimSpace(s.ProdAPIKey) == "" {
+			s.SandboxAPIKey = s.APIKey
+			s.ProdAPIKey = s.APIKey
+		}
+	}
+}
+
+// duitkuActiveCredsStored mengembalikan merchant + apiKey terenkripsi untuk env aktif.
+func duitkuActiveCredsStored(cfg duitkuIntegrationStored) (merchant, apiKeyEnc string) {
+	if cfg.Sandbox {
+		return strings.TrimSpace(cfg.SandboxMerchantCode), cfg.SandboxAPIKey
+	}
+	return strings.TrimSpace(cfg.ProdMerchantCode), cfg.ProdAPIKey
+}
+
+func duitkuSandboxCreds(d *Deps, cfg duitkuIntegrationStored) (merchant, apiKey string) {
+	merchant = strings.TrimSpace(cfg.SandboxMerchantCode)
+	if merchant == "" && cfg.Sandbox {
+		merchant = strings.TrimSpace(cfg.MerchantCode)
+	}
+	apiKey = decryptSecret(d, cfg.SandboxAPIKey)
+	if apiKey == "" && cfg.Sandbox {
+		apiKey = decryptSecret(d, cfg.APIKey)
+	}
+	return merchant, apiKey
+}
+
+func duitkuProdCreds(d *Deps, cfg duitkuIntegrationStored) (merchant, apiKey string) {
+	merchant = strings.TrimSpace(cfg.ProdMerchantCode)
+	if merchant == "" && !cfg.Sandbox {
+		merchant = strings.TrimSpace(cfg.MerchantCode)
+	}
+	apiKey = decryptSecret(d, cfg.ProdAPIKey)
+	if apiKey == "" && !cfg.Sandbox {
+		apiKey = decryptSecret(d, cfg.APIKey)
+	}
+	return merchant, apiKey
+}
+
+func duitkuActiveCreds(d *Deps, cfg duitkuIntegrationStored) (merchant, apiKey string) {
+	if cfg.Sandbox {
+		return duitkuSandboxCreds(d, cfg)
+	}
+	return duitkuProdCreds(d, cfg)
 }
 
 func loadMessagingIntegration(ctx context.Context, d *Deps, tid xid.ID) (messagingIntegrationStored, error) {
@@ -947,15 +1188,22 @@ func paymentWebhookURLFor(ctx context.Context, d *Deps, tid xid.ID, origin, refe
 }
 
 func duitkuView(ctx context.Context, d *Deps, tid xid.ID, s duitkuIntegrationStored, origin, referer, proto, forwardedHost, host string) duitkuIntegrationView {
-	apiKey := decryptSecret(d, s.APIKey)
-	merchant := strings.TrimSpace(s.MerchantCode)
+	activeMerchant, activeKey := duitkuActiveCreds(d, s)
+	sandboxMerchant, sandboxKey := duitkuSandboxCreds(d, s)
+	prodMerchant, prodKey := duitkuProdCreds(d, s)
 	webhookURL := paymentWebhookURLFor(ctx, d, tid, origin, referer, proto, forwardedHost, host, payment.ProviderDuitku)
 	return duitkuIntegrationView{
-		Configured:       merchant != "" && s.APIKey != "",
+		Configured:       activeMerchant != "" && activeKey != "",
 		Enabled:          s.Enabled,
 		Sandbox:          s.Sandbox,
-		MerchantCode:     merchant,
-		APIKey:           apiKey,
+		MerchantCode:     activeMerchant,
+		APIKey:           activeKey,
+		SandboxMerchantCode: sandboxMerchant,
+		SandboxAPIKey:       sandboxKey,
+		ProdMerchantCode:    prodMerchant,
+		ProdAPIKey:          prodKey,
+		SandboxConfigured: sandboxMerchant != "" && sandboxKey != "",
+		ProdConfigured:    prodMerchant != "" && prodKey != "",
 		ExpiresInMinutes: payment.ClampDuitkuExpiryMinutes(s.ExpiresInMinutes),
 		FeeMode:          normalizeDokuFeeMode(s.FeeMode),
 		FeeFlat:          s.FeeFlat,
@@ -970,9 +1218,110 @@ func loadDokuIntegration(ctx context.Context, d *Deps, tid xid.ID) (dokuIntegrat
 	var s dokuIntegrationStored
 	err := d.Store.GetSettingJSON(ctx, tid, settingDoku, &s)
 	if errors.Is(err, store.ErrNotFound) {
-		return dokuIntegrationStored{}, nil
+		return dokuIntegrationStored{Sandbox: true}, nil
 	}
-	return s, err
+	if err != nil {
+		return s, err
+	}
+	migrateDokuLegacy(&s)
+	return s, nil
+}
+
+// migrateDokuLegacy menyalin kredensial lama satu-slot ke slot per-env.
+func migrateDokuLegacy(s *dokuIntegrationStored) {
+	if s == nil {
+		return
+	}
+	legacyClient := strings.TrimSpace(s.ClientID)
+	if legacyClient != "" {
+		if s.Sandbox {
+			if strings.TrimSpace(s.SandboxClientID) == "" {
+				s.SandboxClientID = legacyClient
+			}
+		} else {
+			if strings.TrimSpace(s.ProdClientID) == "" {
+				s.ProdClientID = legacyClient
+			}
+		}
+		if strings.TrimSpace(s.SandboxClientID) == "" && strings.TrimSpace(s.ProdClientID) == "" {
+			s.SandboxClientID = legacyClient
+			s.ProdClientID = legacyClient
+		}
+	}
+	if strings.TrimSpace(s.SecretKey) != "" {
+		if s.Sandbox {
+			if strings.TrimSpace(s.SandboxSecretKey) == "" {
+				s.SandboxSecretKey = s.SecretKey
+			}
+		} else {
+			if strings.TrimSpace(s.ProdSecretKey) == "" {
+				s.ProdSecretKey = s.SecretKey
+			}
+		}
+		if strings.TrimSpace(s.SandboxSecretKey) == "" && strings.TrimSpace(s.ProdSecretKey) == "" {
+			s.SandboxSecretKey = s.SecretKey
+			s.ProdSecretKey = s.SecretKey
+		}
+	}
+	if strings.TrimSpace(s.PrivateKey) != "" {
+		if s.Sandbox {
+			if strings.TrimSpace(s.SandboxPrivateKey) == "" {
+				s.SandboxPrivateKey = s.PrivateKey
+			}
+		} else {
+			if strings.TrimSpace(s.ProdPrivateKey) == "" {
+				s.ProdPrivateKey = s.PrivateKey
+			}
+		}
+	}
+}
+
+// dokuActiveCredsStored mengembalikan clientID + secret terenkripsi + private
+// terenkripsi untuk env aktif.
+func dokuActiveCredsStored(cfg dokuIntegrationStored) (clientID, secretEnc, privateEnc string) {
+	if cfg.Sandbox {
+		return strings.TrimSpace(cfg.SandboxClientID), cfg.SandboxSecretKey, cfg.SandboxPrivateKey
+	}
+	return strings.TrimSpace(cfg.ProdClientID), cfg.ProdSecretKey, cfg.ProdPrivateKey
+}
+
+func dokuSandboxCreds(d *Deps, cfg dokuIntegrationStored) (clientID, secret, priv string) {
+	clientID = strings.TrimSpace(cfg.SandboxClientID)
+	if clientID == "" && cfg.Sandbox {
+		clientID = strings.TrimSpace(cfg.ClientID)
+	}
+	secret = decryptSecret(d, cfg.SandboxSecretKey)
+	if secret == "" && cfg.Sandbox {
+		secret = decryptSecret(d, cfg.SecretKey)
+	}
+	priv = decryptSecret(d, cfg.SandboxPrivateKey)
+	if priv == "" && cfg.Sandbox {
+		priv = decryptSecret(d, cfg.PrivateKey)
+	}
+	return clientID, secret, priv
+}
+
+func dokuProdCreds(d *Deps, cfg dokuIntegrationStored) (clientID, secret, priv string) {
+	clientID = strings.TrimSpace(cfg.ProdClientID)
+	if clientID == "" && !cfg.Sandbox {
+		clientID = strings.TrimSpace(cfg.ClientID)
+	}
+	secret = decryptSecret(d, cfg.ProdSecretKey)
+	if secret == "" && !cfg.Sandbox {
+		secret = decryptSecret(d, cfg.SecretKey)
+	}
+	priv = decryptSecret(d, cfg.ProdPrivateKey)
+	if priv == "" && !cfg.Sandbox {
+		priv = decryptSecret(d, cfg.PrivateKey)
+	}
+	return clientID, secret, priv
+}
+
+func dokuActiveCreds(d *Deps, cfg dokuIntegrationStored) (clientID, secret, priv string) {
+	if cfg.Sandbox {
+		return dokuSandboxCreds(d, cfg)
+	}
+	return dokuProdCreds(d, cfg)
 }
 
 func dokuQRReady(s dokuIntegrationStored, d *Deps) bool {
@@ -982,13 +1331,25 @@ func dokuQRReady(s dokuIntegrationStored, d *Deps) bool {
 	return strings.TrimSpace(s.MerchantID) != "" && strings.TrimSpace(s.TerminalID) != "" && strings.TrimSpace(s.PostalCode) != ""
 }
 
-// dokuSNAPAuthReady: client ID + RSA private key (wajib token B2B untuk VA/e-wallet/QRIS SNAP).
+// dokuSNAPAuthReady: client ID (env aktif) + RSA private key (env aktif, fallback
+// legacy) wajib untuk token B2B VA/e-wallet/QRIS SNAP.
 func dokuSNAPAuthReady(s dokuIntegrationStored, d *Deps) bool {
-	if strings.TrimSpace(s.ClientID) == "" {
-		return false
+	clientID, _, priv := dokuActiveCreds(d, s)
+	if clientID == "" {
+		clientID = strings.TrimSpace(s.ClientID)
 	}
-	priv := decryptSecret(d, s.PrivateKey)
 	if priv == "" {
+		priv = decryptSecret(d, s.PrivateKey)
+	}
+	if priv == "" {
+		// Fallback: private key di env mana pun (UI lama hanya simpan satu).
+		if p := decryptSecret(d, s.SandboxPrivateKey); p != "" {
+			priv = p
+		} else if p := decryptSecret(d, s.ProdPrivateKey); p != "" {
+			priv = p
+		}
+	}
+	if clientID == "" || priv == "" {
 		return false
 	}
 	return payment.ValidateDokuPrivateKeyPEM(priv) == nil
@@ -996,13 +1357,28 @@ func dokuSNAPAuthReady(s dokuIntegrationStored, d *Deps) bool {
 
 func dokuView(ctx context.Context, d *Deps, tid xid.ID, s dokuIntegrationStored, origin, referer, proto, forwardedHost, host string) dokuIntegrationView {
 	webhookURL := paymentWebhookURLFor(ctx, d, tid, origin, referer, proto, forwardedHost, host, payment.ProviderDoku)
+	activeClient, activeSecret, activePriv := dokuActiveCreds(d, s)
+	sandboxClient, sandboxSecret, sandboxPriv := dokuSandboxCreds(d, s)
+	prodClient, prodSecret, prodPriv := dokuProdCreds(d, s)
+	hasPriv := activePriv != ""
+	if !hasPriv {
+		hasPriv = decryptSecret(d, s.PrivateKey) != ""
+	}
 	return dokuIntegrationView{
-		Configured:       strings.TrimSpace(s.ClientID) != "" && s.SecretKey != "",
+		Configured:       activeClient != "" && activeSecret != "",
 		Enabled:          s.Enabled,
 		Sandbox:          s.Sandbox,
-		ClientID:         strings.TrimSpace(s.ClientID),
-		SecretKey:        decryptSecret(d, s.SecretKey),
-		HasPrivateKey:    decryptSecret(d, s.PrivateKey) != "",
+		ClientID:         activeClient,
+		SecretKey:        activeSecret,
+		SandboxClientID:  sandboxClient,
+		SandboxSecretKey: sandboxSecret,
+		ProdClientID:     prodClient,
+		ProdSecretKey:    prodSecret,
+		SandboxConfigured: sandboxClient != "" && sandboxSecret != "",
+		ProdConfigured:    prodClient != "" && prodSecret != "",
+		HasPrivateKey:    hasPriv,
+		HasSandboxPrivateKey: sandboxPriv != "",
+		HasProdPrivateKey:    prodPriv != "",
 		MerchantID:       strings.TrimSpace(s.MerchantID),
 		TerminalID:       strings.TrimSpace(s.TerminalID),
 		PostalCode:       strings.TrimSpace(s.PostalCode),
@@ -1162,14 +1538,16 @@ func duitkuCredentialsReady(d *Deps, cfg duitkuIntegrationStored) bool {
 	if !cfg.Enabled {
 		return false
 	}
-	return strings.TrimSpace(cfg.MerchantCode) != "" && decryptSecret(d, cfg.APIKey) != ""
+	merchant, apiKey := duitkuActiveCreds(d, cfg)
+	return merchant != "" && apiKey != ""
 }
 
 func dokuCredentialsReady(d *Deps, cfg dokuIntegrationStored) bool {
 	if !cfg.Enabled {
 		return false
 	}
-	return strings.TrimSpace(cfg.ClientID) != "" && decryptSecret(d, cfg.SecretKey) != ""
+	clientID, secret, _ := dokuActiveCreds(d, cfg)
+	return clientID != "" && secret != ""
 }
 
 func duitkuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
@@ -1188,7 +1566,7 @@ func dokuPaymentReady(ctx context.Context, d *Deps, tenantID xid.ID) bool {
 }
 
 // resolvePaymentProvider resolves the gateway for the provider from the
-// tenant's own integration credentials.
+// tenant's own integration credentials (env aktif sesuai toggle sandbox).
 func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name string) (payment.Provider, error) {
 	name = normalizePaymentProviderName(name)
 	if name == payment.ProviderManual {
@@ -1199,11 +1577,11 @@ func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name 
 		if !cfg.Enabled {
 			return nil, httpx.BadRequest("Duitku POP belum diaktifkan di Integrasi")
 		}
-		apiKey := decryptSecret(d, cfg.APIKey)
-		if strings.TrimSpace(cfg.MerchantCode) == "" || apiKey == "" {
-			return nil, httpx.BadRequest("Duitku POP belum dikonfigurasi")
+		merchant, apiKey := duitkuActiveCreds(d, cfg)
+		if merchant == "" || apiKey == "" {
+			return nil, httpx.BadRequest("Duitku POP belum dikonfigurasi (isi kredensial sandbox / produksi sesuai mode aktif)")
 		}
-		return payment.NewDuitkuProvider(cfg.MerchantCode, apiKey, cfg.Sandbox, cfg.ExpiresInMinutes), nil
+		return payment.NewDuitkuProvider(merchant, apiKey, cfg.Sandbox, cfg.ExpiresInMinutes), nil
 	}
 	if name != payment.ProviderDoku {
 		return nil, httpx.BadRequest("payment gateway tidak dikenali")
@@ -1212,14 +1590,99 @@ func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name 
 	if !cfg.Enabled {
 		return nil, httpx.BadRequest("DOKU belum diaktifkan di Integrasi")
 	}
-	if strings.TrimSpace(cfg.ClientID) == "" || decryptSecret(d, cfg.SecretKey) == "" {
-		return nil, httpx.BadRequest("DOKU belum dikonfigurasi (client ID & secret key)")
+	clientID, secret, priv := dokuActiveCreds(d, cfg)
+	if clientID == "" || secret == "" {
+		return nil, httpx.BadRequest("DOKU belum dikonfigurasi (client ID & secret key sandbox / produksi sesuai mode aktif)")
+	}
+	if priv == "" {
+		priv = decryptSecret(d, cfg.PrivateKey)
 	}
 	return payment.NewDokuProvider(
-		cfg.ClientID,
-		decryptSecret(d, cfg.SecretKey),
-		decryptSecret(d, cfg.PrivateKey),
+		clientID,
+		secret,
+		priv,
 		cfg.MerchantID, cfg.TerminalID, cfg.PostalCode,
 		cfg.Sandbox, cfg.ExpiresInMinutes,
 	).WithPartnerServiceID(cfg.PartnerServiceID), nil
+}
+
+// resolvePaymentProviderForEnv membangun provider untuk env tertentu (bukan
+// env aktif). Dipakai untuk verifikasi webhook dua-env: callback yang dibuat
+// saat sandbox tetap valid walau mode sudah dipindah ke produksi, dan sebaliknya.
+func resolvePaymentProviderForEnv(ctx context.Context, d *Deps, tenantID xid.ID, name string, sandbox bool) (payment.Provider, error) {
+	name = normalizePaymentProviderName(name)
+	if name == payment.ProviderManual {
+		return d.Payments.Get(payment.ProviderManual)
+	}
+	if name == payment.ProviderDuitku {
+		cfg, _ := loadDuitkuIntegration(ctx, d, tenantID)
+		if !cfg.Enabled {
+			return nil, httpx.BadRequest("Duitku POP belum diaktifkan di Integrasi")
+		}
+		var merchant, apiKey string
+		if sandbox {
+			merchant, apiKey = duitkuSandboxCreds(d, cfg)
+		} else {
+			merchant, apiKey = duitkuProdCreds(d, cfg)
+		}
+		if merchant == "" || apiKey == "" {
+			return nil, httpx.BadRequest("Duitku POP belum dikonfigurasi untuk env tersebut")
+		}
+		return payment.NewDuitkuProvider(merchant, apiKey, sandbox, cfg.ExpiresInMinutes), nil
+	}
+	if name != payment.ProviderDoku {
+		return nil, httpx.BadRequest("payment gateway tidak dikenali")
+	}
+	cfg, _ := loadDokuIntegration(ctx, d, tenantID)
+	if !cfg.Enabled {
+		return nil, httpx.BadRequest("DOKU belum diaktifkan di Integrasi")
+	}
+	var clientID, secret, priv string
+	if sandbox {
+		clientID, secret, priv = dokuSandboxCreds(d, cfg)
+	} else {
+		clientID, secret, priv = dokuProdCreds(d, cfg)
+	}
+	if clientID == "" || secret == "" {
+		return nil, httpx.BadRequest("DOKU belum dikonfigurasi untuk env tersebut")
+	}
+	if priv == "" {
+		priv = decryptSecret(d, cfg.PrivateKey)
+	}
+	return payment.NewDokuProvider(
+		clientID, secret, priv,
+		cfg.MerchantID, cfg.TerminalID, cfg.PostalCode,
+		sandbox, cfg.ExpiresInMinutes,
+	).WithPartnerServiceID(cfg.PartnerServiceID), nil
+}
+
+// verifyPaymentWebhookBothEnvs mencoba verifikasi dengan env aktif dulu, lalu
+// env satunya. Mengembalikan provider yang berhasil verifikasi.
+func verifyPaymentWebhookBothEnvs(ctx context.Context, d *Deps, tenantID xid.ID, providerName string, headers map[string]string, raw []byte) (payment.Provider, *payment.WebhookEvent, error) {
+	prov, err := resolvePaymentProvider(ctx, d, tenantID, providerName)
+	if err != nil {
+		return nil, nil, err
+	}
+	if ev, verr := prov.VerifyWebhook(ctx, headers, raw); verr == nil {
+		return prov, ev, nil
+	} else {
+		// Simpan error env aktif; coba env satunya sebelum menyerah.
+		activeIsSandbox := true
+		switch normalizePaymentProviderName(providerName) {
+		case payment.ProviderDuitku:
+			if cfg, _ := loadDuitkuIntegration(ctx, d, tenantID); true {
+				activeIsSandbox = cfg.Sandbox
+			}
+		case payment.ProviderDoku:
+			if cfg, _ := loadDokuIntegration(ctx, d, tenantID); true {
+				activeIsSandbox = cfg.Sandbox
+			}
+		}
+		if alt, aerr := resolvePaymentProviderForEnv(ctx, d, tenantID, providerName, !activeIsSandbox); aerr == nil {
+			if ev, verr2 := alt.VerifyWebhook(ctx, headers, raw); verr2 == nil {
+				return alt, ev, nil
+			}
+		}
+		return nil, nil, verr
+	}
 }
