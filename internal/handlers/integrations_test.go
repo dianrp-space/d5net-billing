@@ -60,6 +60,32 @@ func TestDuitkuViewReturnsDecryptedKeyAndCallbackURL(t *testing.T) {
 	}
 }
 
+func TestDokuCustomerFee(t *testing.T) {
+	// Merchant menanggung → 0.
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "", FeeFlat: 2500, FeePercent: 1}, 150000); got != 0 {
+		t.Fatalf("merchant mode fee = %d, want 0", got)
+	}
+	// Customer: flat + persen dibulatkan.
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 2500, FeePercent: 1}, 150000); got != 4000 {
+		t.Fatalf("customer fee = %d, want 4000", got)
+	}
+	// Flat saja.
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 3000}, 150000); got != 3000 {
+		t.Fatalf("flat fee = %d, want 3000", got)
+	}
+	// Persen saja, pembulatan.
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeePercent: 0.7}, 100000); got != 700 {
+		t.Fatalf("percent fee = %d, want 700", got)
+	}
+	// Base 0 → 0.
+	if got := dokuCustomerFee(dokuIntegrationStored{FeeMode: "customer", FeeFlat: 2500}, 0); got != 0 {
+		t.Fatalf("zero base fee = %d, want 0", got)
+	}
+	if normalizeDokuFeeMode("CUSTOMER") != DokuFeeModeCustomer || normalizeDokuFeeMode("merchant") != "" {
+		t.Fatal("normalizeDokuFeeMode")
+	}
+}
+
 func TestSandboxSimExternalID(t *testing.T) {
 	got := sandboxSimExternalID(&store.Invoice{InvoiceNumber: "INV-TES-1"})
 	if !strings.Contains(got, "INV-TES-1-SIM-") {
@@ -107,6 +133,9 @@ func TestDokuViewReturnsDecryptedSecretsAndCallbackURL(t *testing.T) {
 	}
 	if paymentWebhookPathFor("doku") != "/api/webhooks/payment/doku" {
 		t.Fatalf("doku path = %q", paymentWebhookPathFor("doku"))
+	}
+	if len(view.Channels) == 0 {
+		t.Fatal("expected channel catalog in view")
 	}
 }
 

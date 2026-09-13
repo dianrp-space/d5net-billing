@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -60,38 +61,94 @@ type dokuIntegrationStored struct {
 	MerchantID       string `json:"merchant_id"`
 	TerminalID       string `json:"terminal_id"`
 	PostalCode       string `json:"postal_code"`
+	PartnerServiceID string `json:"partner_service_id"`
 	Sandbox          bool   `json:"sandbox"`
 	Enabled          bool   `json:"enabled"`
 	ExpiresInMinutes int    `json:"expires_in_minutes"`
+	// FeeMode: "customer" = biaya admin ditambahkan ke tagihan (customer bayar
+	// lebih); selain itu (kosong/"merchant") = merchant menanggung (default).
+	FeeMode    string                          `json:"fee_mode"`
+	FeeFlat    int64                           `json:"fee_flat,omitempty"` // legacy global
+	FeePercent float64                         `json:"fee_percent,omitempty"`
+	Channels   map[string]dokuChannelFeeStored `json:"channels,omitempty"`
+}
+
+type dokuChannelFeeView struct {
+	ID         string  `json:"id"`
+	Label      string  `json:"label"`
+	Kind       string  `json:"kind"`
+	Enabled    bool    `json:"enabled"`
+	FeeFlat    int64   `json:"fee_flat"`
+	FeePercent float64 `json:"fee_percent"`
 }
 
 type dokuIntegrationView struct {
-	Configured       bool   `json:"configured"`
-	Enabled          bool   `json:"enabled"`
-	Sandbox          bool   `json:"sandbox"`
-	ClientID         string `json:"client_id"`
-	SecretKey        string `json:"secret_key,omitempty"`
-	HasPrivateKey    bool   `json:"has_private_key"`
-	MerchantID       string `json:"merchant_id"`
-	TerminalID       string `json:"terminal_id"`
-	PostalCode       string `json:"postal_code"`
-	ExpiresInMinutes int    `json:"expires_in_minutes"`
-	QREnabled        bool   `json:"qr_enabled"`
-	WebhookPath      string `json:"webhook_path"`
-	WebhookURL       string `json:"webhook_url"`
-	WebhookBaseHint  string `json:"webhook_base_hint"`
+	Configured       bool                 `json:"configured"`
+	Enabled          bool                 `json:"enabled"`
+	Sandbox          bool                 `json:"sandbox"`
+	ClientID         string               `json:"client_id"`
+	SecretKey        string               `json:"secret_key,omitempty"`
+	HasPrivateKey    bool                 `json:"has_private_key"`
+	MerchantID       string               `json:"merchant_id"`
+	TerminalID       string               `json:"terminal_id"`
+	PostalCode       string               `json:"postal_code"`
+	PartnerServiceID string               `json:"partner_service_id"`
+	ExpiresInMinutes int                  `json:"expires_in_minutes"`
+	QREnabled        bool                 `json:"qr_enabled"`
+	FeeMode          string               `json:"fee_mode"`
+	Channels         []dokuChannelFeeView `json:"channels"`
+	WebhookPath      string               `json:"webhook_path"`
+	WebhookURL       string               `json:"webhook_url"`
+	WebhookBaseHint  string               `json:"webhook_base_hint"`
+}
+
+type dokuChannelFeePut struct {
+	ID         string  `json:"id"`
+	Enabled    bool    `json:"enabled"`
+	FeeFlat    int64   `json:"fee_flat"`
+	FeePercent float64 `json:"fee_percent"`
 }
 
 type dokuIntegrationPut struct {
-	Enabled          bool   `json:"enabled"`
-	Sandbox          bool   `json:"sandbox"`
-	ClientID         string `json:"client_id"`
-	SecretKey        string `json:"secret_key,omitempty"`
-	PrivateKey       string `json:"private_key,omitempty"`
-	MerchantID       string `json:"merchant_id,omitempty"`
-	TerminalID       string `json:"terminal_id,omitempty"`
-	PostalCode       string `json:"postal_code,omitempty"`
-	ExpiresInMinutes int    `json:"expires_in_minutes,omitempty"`
+	Enabled          bool                `json:"enabled"`
+	Sandbox          bool                `json:"sandbox"`
+	ClientID         string              `json:"client_id"`
+	SecretKey        string              `json:"secret_key,omitempty"`
+	PrivateKey       string              `json:"private_key,omitempty"`
+	MerchantID       string              `json:"merchant_id,omitempty"`
+	TerminalID       string              `json:"terminal_id,omitempty"`
+	PostalCode       string              `json:"postal_code,omitempty"`
+	PartnerServiceID string              `json:"partner_service_id,omitempty"`
+	ExpiresInMinutes int                 `json:"expires_in_minutes,omitempty"`
+	FeeMode          string              `json:"fee_mode,omitempty"`
+	Channels         []dokuChannelFeePut `json:"channels,omitempty"`
+}
+
+// DokuFeeModeCustomer menandai biaya admin dibebankan ke customer.
+const DokuFeeModeCustomer = "customer"
+
+// normalizeDokuFeeMode memvalidasi mode fee; selain "customer" dianggap merchant.
+func normalizeDokuFeeMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), DokuFeeModeCustomer) {
+		return DokuFeeModeCustomer
+	}
+	return ""
+}
+
+// dokuCustomerFee menghitung biaya admin yang dibebankan ke customer (0 bila
+// merchant yang menanggung atau konfigurasi kosong). Dibulatkan ke rupiah.
+func dokuCustomerFee(cfg dokuIntegrationStored, base int64) int64 {
+	if normalizeDokuFeeMode(cfg.FeeMode) != DokuFeeModeCustomer || base <= 0 {
+		return 0
+	}
+	fee := cfg.FeeFlat
+	if cfg.FeePercent > 0 {
+		fee += int64(math.Round(float64(base) * cfg.FeePercent / 100))
+	}
+	if fee < 0 {
+		return 0
+	}
+	return fee
 }
 
 type payOptionView struct {
@@ -100,6 +157,9 @@ type payOptionView struct {
 	Description string `json:"description"`
 	Kind        string `json:"kind"`
 	Sandbox     bool   `json:"sandbox"`
+	// FeeMode: merchant/customer. Channels berisi metode Direct + fee masing-masing.
+	FeeMode  string               `json:"fee_mode,omitempty"`
+	Channels []dokuChannelFeeView `json:"channels,omitempty"`
 }
 
 type messagingIntegrationStored struct {
@@ -362,8 +422,29 @@ func registerIntegrations(api huma.API, d *Deps) {
 		if v := strings.TrimSpace(input.Body.PostalCode); v != "" {
 			cur.PostalCode = v
 		}
+		cur.PartnerServiceID = strings.TrimSpace(input.Body.PartnerServiceID)
 		if input.Body.ExpiresInMinutes > 0 {
 			cur.ExpiresInMinutes = payment.ClampDokuExpiryMinutes(input.Body.ExpiresInMinutes)
+		}
+		cur.FeeMode = normalizeDokuFeeMode(input.Body.FeeMode)
+		if len(input.Body.Channels) > 0 {
+			cur.Channels = make(map[string]dokuChannelFeeStored, len(input.Body.Channels))
+			for _, ch := range input.Body.Channels {
+				id := strings.ToLower(strings.TrimSpace(ch.ID))
+				if _, ok := payment.LookupDokuChannel(id); !ok {
+					continue
+				}
+				flat := ch.FeeFlat
+				if flat < 0 {
+					flat = 0
+				}
+				cur.Channels[id] = dokuChannelFeeStored{
+					Enabled: ch.Enabled, FeeFlat: flat, FeePercent: clampFeePercent(ch.FeePercent),
+				}
+			}
+			// Hapus fee global legacy setelah channel tersimpan.
+			cur.FeeFlat = 0
+			cur.FeePercent = 0
 		}
 		if err := d.Store.UpsertSettingJSON(ctx, tid, settingDoku, cur); err != nil {
 			return nil, httpx.Internal(err)
@@ -877,8 +958,11 @@ func dokuView(ctx context.Context, d *Deps, tid xid.ID, s dokuIntegrationStored,
 		MerchantID:       strings.TrimSpace(s.MerchantID),
 		TerminalID:       strings.TrimSpace(s.TerminalID),
 		PostalCode:       strings.TrimSpace(s.PostalCode),
+		PartnerServiceID: strings.TrimSpace(s.PartnerServiceID),
 		ExpiresInMinutes: payment.ClampDokuExpiryMinutes(s.ExpiresInMinutes),
 		QREnabled:        dokuQRReady(s, d),
+		FeeMode:          normalizeDokuFeeMode(s.FeeMode),
+		Channels:         dokuChannelViews(s),
 		WebhookPath:      paymentWebhookPathFor(payment.ProviderDoku),
 		WebhookURL:       webhookURL,
 		WebhookBaseHint:  webhookURL,
@@ -1000,13 +1084,34 @@ func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payO
 		})
 	}
 	if cfg, _ := loadDokuIntegration(ctx, d, tenantID); dokuCredentialsReady(d, cfg) {
-		out = append(out, payOptionView{
+		channels := make([]dokuChannelFeeView, 0)
+		for _, ch := range dokuChannelViews(cfg) {
+			if !ch.Enabled {
+				continue
+			}
+			cat, _ := payment.LookupDokuChannel(ch.ID)
+			if cat.NeedsSNAP && !dokuQRReady(cfg, d) {
+				continue
+			}
+			if cat.NeedsVABin && strings.TrimSpace(cfg.PartnerServiceID) == "" {
+				continue
+			}
+			channels = append(channels, ch)
+		}
+		opt := payOptionView{
 			Provider:    payment.ProviderDoku,
 			Label:       "DOKU",
-			Description: "Halaman bayar DOKU (VA, kartu, e-wallet, QRIS, retail)",
-			Kind:        "redirect",
+			Description: "Bayar langsung: QRIS, VA, e-wallet, Alfamart/Indomaret",
+			Kind:        "direct",
 			Sandbox:     cfg.Sandbox,
-		})
+			Channels:    channels,
+		}
+		if normalizeDokuFeeMode(cfg.FeeMode) == DokuFeeModeCustomer {
+			opt.FeeMode = DokuFeeModeCustomer
+		}
+		if len(channels) > 0 {
+			out = append(out, opt)
+		}
 	}
 	return out
 }
@@ -1074,5 +1179,5 @@ func resolvePaymentProvider(ctx context.Context, d *Deps, tenantID xid.ID, name 
 		decryptSecret(d, cfg.PrivateKey),
 		cfg.MerchantID, cfg.TerminalID, cfg.PostalCode,
 		cfg.Sandbox, cfg.ExpiresInMinutes,
-	), nil
+	).WithPartnerServiceID(cfg.PartnerServiceID), nil
 }

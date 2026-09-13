@@ -10,8 +10,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func testRSAPrivateKey(t *testing.T) string {
@@ -27,105 +25,70 @@ func testRSAPrivateKey(t *testing.T) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
 }
 
-func TestDokuCreateIntent(t *testing.T) {
-	var gotHeaders http.Header
-	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/checkout/v1/payment" {
-			t.Errorf("path = %s", r.URL.Path)
-		}
-		gotHeaders = r.Header.Clone()
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+func TestDokuCreateIntentRequiresChannel(t *testing.T) {
+	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", "", "", "", "", true, 60)
+	_, err := p.CreateIntent(t.Context(), IntentRequest{Amount: 150000, MerchantOrderID: "INV-1"})
+	if err == nil || !strings.Contains(err.Error(), "channel") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDokuCreateQRIntent(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/authorization/v1/access-token/b2b", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"message":["SUCCESS"],"response":{"order":{"invoice_number":"INV-1"},"payment":{"url":"https://sandbox.doku.com/checkout-link-v2/abc","token_id":"tok-9","expired_date":"20260911235959"}}}`))
+		_, _ = w.Write([]byte(`{"accessToken":"tok-test","expiresIn":"900"}`))
+	})
+	mux.HandleFunc("/snap-adapter/b2b/v1.0/qr/qr-mpm-generate", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"responseCode":"2004700","qrContent":"00020101021226650016ID.CO.DOKU.WWW011893600","referenceNo":"REF-QR-1"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", testRSAPrivateKey(t), "MALL1", "T001", "28111", true, 60)
+	p.baseOverride = srv.URL
+	res, err := p.CreateIntent(t.Context(), IntentRequest{
+		Amount: 150000, MerchantOrderID: "INV-QR-1", Channel: "qris",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.QRString == "" || res.QRImageBase64 == "" {
+		t.Fatalf("missing QR: %+v", res)
+	}
+	if res.Metadata["doku_kind"] != DokuKindQR {
+		t.Fatalf("meta = %v", res.Metadata)
+	}
+}
+
+func TestDokuCreateRetailAlfamart(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"order":{"invoice_number":"INV-R1"},"online_to_offline_info":{"payment_code":"6059000000000205","expired_date":"20260913120000"}}`))
 	}))
 	defer srv.Close()
-
 	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", "", "", "", "", true, 60)
 	p.baseOverride = srv.URL
 	res, err := p.CreateIntent(t.Context(), IntentRequest{
-		InvoiceID:       xid.MustParse("11111111-1111-1111-1111-111111111111"),
-		Amount:          150000,
-		MerchantOrderID: "INV-D5N-2026090001-092026ABCDEF",
-		Email:           "budi@example.id",
-		Phone:           "081234567890",
-		CustomerName:    "Budi",
-		ProductDetails:  "Tagihan",
-		ReturnURL:       "https://isp.example.id/client",
+		Amount: 50000, MerchantOrderID: "INV-R1", Channel: "retail_alfamart", CustomerName: "Budi",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.CheckoutURL != "https://sandbox.doku.com/checkout-link-v2/abc" {
-		t.Fatalf("url = %q", res.CheckoutURL)
+	if gotPath != DokuAlfaPath {
+		t.Fatalf("path = %s", gotPath)
 	}
-	if res.ExternalID != "INV-D5N-2026090001-092026ABCDEF" || res.Status != "pending" {
-		t.Fatalf("%+v", res)
-	}
-	if gotHeaders.Get("Client-Id") != "MCH-TEST-1" {
-		t.Fatalf("client-id = %q", gotHeaders.Get("Client-Id"))
-	}
-	if sig := gotHeaders.Get("Signature"); !strings.HasPrefix(sig, "HMACSHA256=") {
-		t.Fatalf("signature = %q", sig)
-	}
-	if gotHeaders.Get("Request-Timestamp") == "" || gotHeaders.Get("Request-Id") == "" {
-		t.Fatal("missing request headers")
-	}
-	order, _ := gotBody["order"].(map[string]any)
-	if order["invoice_number"] != "INV-D5N-2026090001-092026ABCDEF" {
-		t.Fatalf("order = %v", order)
-	}
-	if order["amount"] != float64(150000) {
-		t.Fatalf("amount = %v", order["amount"])
-	}
-	pay, _ := gotBody["payment"].(map[string]any)
-	if pay["payment_due_date"] != float64(60) {
-		t.Fatalf("due = %v", pay)
-	}
-	cust, _ := gotBody["customer"].(map[string]any)
-	if cust["phone"] != "6281234567890" {
-		t.Fatalf("customer = %v", cust)
-	}
-	if res.ExpiresAt == nil {
-		t.Fatal("expected expiry from expired_date")
+	if res.Metadata["payment_code"] != "6059000000000205" {
+		t.Fatalf("meta = %v", res.Metadata)
 	}
 }
 
-func TestDokuCallbackURLIsWebhookNotReturn(t *testing.T) {
-	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"message":["SUCCESS"],"response":{"order":{"invoice_number":"INV-9"},"payment":{"url":"https://sandbox.doku.com/x","token_id":"t","expired_date":"20260911235959"}}}`))
-	}))
-	defer srv.Close()
+func TestDokuCreateVARequiresBIN(t *testing.T) {
 	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", "", "", "", "", true, 60)
-	p.baseOverride = srv.URL
-	_, err := p.CreateIntent(t.Context(), IntentRequest{
-		Amount:          50000,
-		MerchantOrderID: "INV-9",
-		ReturnURL:       "https://isp.example.id/client/dashboard",
-		CallbackURL:     "https://isp.example.id/api/webhooks/payment/doku",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	order, _ := gotBody["order"].(map[string]any)
-	if order["callback_url"] != "https://isp.example.id/api/webhooks/payment/doku" {
-		t.Fatalf("callback_url = %v (notifikasi lunas tidak akan sampai)", order["callback_url"])
-	}
-}
-
-func TestDokuCreateIntentError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error_messages":["order.amount must greater than 0"]}`))
-	}))
-	defer srv.Close()
-	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", "", "", "", "", true, 60)
-	p.baseOverride = srv.URL
-	_, err := p.CreateIntent(t.Context(), IntentRequest{Amount: 100, MerchantOrderID: "INV-1"})
-	if err == nil || !strings.Contains(err.Error(), "order.amount") {
+	_, err := p.CreateIntent(t.Context(), IntentRequest{Amount: 100, MerchantOrderID: "INV-1", Channel: "va_bca"})
+	if err == nil || !strings.Contains(err.Error(), "BIN") {
 		t.Fatalf("err = %v", err)
 	}
 }

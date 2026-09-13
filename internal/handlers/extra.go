@@ -1517,6 +1517,7 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		XForwardedProto string `header:"X-Forwarded-Proto"`
 		Body            struct {
 			Provider  string `json:"provider"`
+			Channel   string `json:"channel"`
 			ReturnURL string `json:"return_url"`
 		}
 	}) (*struct{ Body store.PaymentIntent }, error) {
@@ -1533,7 +1534,7 @@ func registerOpsExtra(api huma.API, d *Deps) {
 		if returnURL == "" {
 			returnURL = origin
 		}
-		pi, err := checkoutInvoice(ctx, d, tid, inv, input.Body.Provider, returnURL, origin)
+		pi, err := checkoutInvoice(ctx, d, tid, inv, input.Body.Provider, input.Body.Channel, returnURL, origin)
 		if err != nil {
 			return nil, err
 		}

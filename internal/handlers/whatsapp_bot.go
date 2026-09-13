@@ -349,7 +349,21 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 			return
 		}
 		origin := appPublicOrigin(ctx, d, tid, "", "", "", "", "")
-		pi, err := checkoutInvoice(ctx, d, tid, &target, opts[0].Provider, "", origin)
+		channel := ""
+		if opts[0].Provider == payment.ProviderDoku {
+			if len(opts[0].Channels) == 0 {
+				_ = client.SendText(ctx, phone, "Metode DOKU belum dikonfigurasi. Hubungi admin.")
+				return
+			}
+			channel = opts[0].Channels[0].ID
+			for _, ch := range opts[0].Channels {
+				if ch.ID == "qris" {
+					channel = "qris"
+					break
+				}
+			}
+		}
+		pi, err := checkoutInvoice(ctx, d, tid, &target, opts[0].Provider, channel, "", origin)
 		if err != nil {
 			msg := "Gagal membuat pembayaran. Coba lagi atau hubungi admin."
 			if strings.Contains(err.Error(), "URL publik") {
@@ -357,6 +371,29 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 			}
 			_ = client.SendText(ctx, phone, msg)
 			return
+		}
+		// Direct: tampilkan nomor VA / kode gerai / QR bila ada; e-wallet butuh URL.
+		if pi.Metadata != nil {
+			if code := strings.TrimSpace(fmt.Sprint(pi.Metadata["va_number"])); code != "" && code != "<nil>" {
+				_ = client.SendText(ctx, phone, fmt.Sprintf("Transfer VA %s:\n%s\nNominal %s%s",
+					fmt.Sprint(pi.Metadata["va_bank"]), code, formatRupiahID(pi.Amount), extra))
+				return
+			}
+			if code := strings.TrimSpace(fmt.Sprint(pi.Metadata["payment_code"])); code != "" && code != "<nil>" {
+				_ = client.SendText(ctx, phone, fmt.Sprintf("Bayar di %s dengan kode:\n%s\nNominal %s%s",
+					fmt.Sprint(pi.Metadata["retail_label"]), code, formatRupiahID(pi.Amount), extra))
+				return
+			}
+		}
+		if pi.QRString != "" {
+			png, err := qrcode.Encode(pi.QRString, qrcode.Medium, 512)
+			if err == nil && len(png) > 0 {
+				caption := fmt.Sprintf("Scan QRIS untuk membayar %s (%s).%s",
+					target.InvoiceNumber, formatRupiahID(pi.Amount), extra)
+				if err := client.SendImage(ctx, phone, caption, png); err == nil {
+					return
+				}
+			}
 		}
 		if strings.TrimSpace(pi.CheckoutURL) == "" {
 			_ = client.SendText(ctx, phone, "Link bayar belum tersedia. Hubungi admin.")

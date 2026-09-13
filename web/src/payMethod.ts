@@ -13,10 +13,35 @@ export type PayMethodId =
   | typeof PAY_METHOD_TUNAI
   | typeof PAY_METHOD_TRANSFER;
 
+export type DokuChannelOption = {
+  id: string;
+  label: string;
+  kind: string;
+  enabled?: boolean;
+  fee_flat?: number;
+  fee_percent?: number;
+};
+
+export type PayOption = {
+  provider: string;
+  label: string;
+  description: string;
+  kind: string;
+  sandbox?: boolean;
+  fee_mode?: string;
+  fee_flat?: number;
+  fee_percent?: number;
+  channels?: DokuChannelOption[];
+};
+
 export type PayMethodDef = {
   id: PayMethodId;
   label: string;
   description: string;
+  feeMode?: string;
+  feeFlat?: number;
+  feePercent?: number;
+  channels?: DokuChannelOption[];
 };
 
 export const PORTAL_PAY_METHODS: PayMethodDef[] = [
@@ -28,17 +53,9 @@ export const PORTAL_PAY_METHODS: PayMethodDef[] = [
   {
     id: PAY_METHOD_DOKU,
     label: "DOKU",
-    description: "Halaman bayar DOKU (VA, kartu, e-wallet, QRIS, retail)",
+    description: "QRIS, VA bank, e-wallet, Alfamart/Indomaret",
   },
 ];
-
-export type PayOption = {
-  provider: string;
-  label: string;
-  description: string;
-  kind: string;
-  sandbox?: boolean;
-};
 
 export type PayableInvoice = {
   id?: string;
@@ -84,6 +101,10 @@ export function payOptionsToMethods(options: PayOption[] | null | undefined): Pa
       id,
       label: opt.label || paymentMethodLabel(id),
       description: opt.description || "",
+      feeMode: opt.fee_mode,
+      feeFlat: opt.fee_flat,
+      feePercent: opt.fee_percent,
+      channels: opt.channels,
     });
   }
   return out;
@@ -94,6 +115,43 @@ export function payOptionsHasDuitkuSandbox(options: PayOption[] | null | undefin
   return Boolean(
     options?.some((opt) => opt.sandbox && providerToPayMethod(opt.provider) === PAY_METHOD_DUITKU),
   );
+}
+
+/** Biaya admin untuk channel DOKU (atau fee global legacy di method). */
+export function channelCustomerFee(
+  feeMode: string | undefined,
+  channel: Pick<DokuChannelOption, "fee_flat" | "fee_percent"> | null | undefined,
+  base: number,
+  fallback?: Pick<PayMethodDef, "feeFlat" | "feePercent">,
+): number {
+  if (feeMode !== "customer" || base <= 0) return 0;
+  const flat = Math.max(0, Math.floor(channel?.fee_flat ?? fallback?.feeFlat ?? 0));
+  const pct = Math.max(0, channel?.fee_percent ?? fallback?.feePercent ?? 0);
+  const fee = flat + Math.round((base * pct) / 100);
+  return fee > 0 ? fee : 0;
+}
+
+/** Biaya admin yang dibebankan ke customer untuk metode ini (0 bila merchant tanggung). */
+export function methodCustomerFee(method: Pick<PayMethodDef, "feeMode" | "feeFlat" | "feePercent" | "channels">, base: number): number {
+  if (method.feeMode !== "customer" || base <= 0) return 0;
+  if (method.channels?.length) {
+    return method.channels.some((ch) => channelCustomerFee(method.feeMode, ch, base) > 0)
+      ? Math.max(...method.channels.map((ch) => channelCustomerFee(method.feeMode, ch, base)))
+      : 0;
+  }
+  const flat = Math.max(0, Math.floor(method.feeFlat || 0));
+  const pct = Math.max(0, method.feePercent || 0);
+  const fee = flat + Math.round((base * pct) / 100);
+  return fee > 0 ? fee : 0;
+}
+
+/** True bila ada metode dengan biaya admin ke customer (untuk menahan auto-redirect). */
+export function payMethodsHaveCustomerFee(methods: PayMethodDef[], base: number): boolean {
+  return methods.some((m) => methodCustomerFee(m, base) > 0);
+}
+
+export function dokuChannelsFromMethod(method: PayMethodDef | undefined): DokuChannelOption[] {
+  return (method?.channels || []).filter((c) => c.enabled !== false);
 }
 
 /** Label for a stored method/provider id. Unknown values are shown as-is (never forced to "manual"). */

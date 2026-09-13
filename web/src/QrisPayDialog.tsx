@@ -93,12 +93,37 @@ export function QrisPayDialog({
   const expired = isExpired(current?.status);
   const img = current?.qr_image_base64 || "";
   const checkoutURL = String(current?.checkout_url || "").trim();
-  const isRedirect = Boolean(checkoutURL) && !img;
-  const live = Boolean(img || checkoutURL) && !paid && !cancelled && !expired;
+  const meta = current?.metadata || {};
+  const vaNumber = String(meta.va_number || "").trim();
+  const vaBank = String(meta.va_bank || "").trim();
+  const paymentCode = String(meta.payment_code || "").trim();
+  const dokuKind = String(meta.doku_kind || "").trim().toLowerCase();
+  const isCodePay = Boolean(vaNumber || paymentCode) && !img;
+  const isRedirect = Boolean(checkoutURL) && !img && !isCodePay;
+  const live = Boolean(img || checkoutURL || isCodePay) && !paid && !cancelled && !expired;
+
+  const dialogTitle =
+    title ||
+    (vaNumber
+      ? `Bayar VA · ${invoiceNumber}`
+      : paymentCode
+        ? `Bayar retail · ${invoiceNumber}`
+        : isRedirect
+          ? `Bayar · ${invoiceNumber}`
+          : `Bayar QRIS · ${invoiceNumber}`);
 
   useEffect(() => {
     setCurrent(intent);
   }, [intent]);
+
+  async function copyText(value: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      void toastSuccess(`${label} disalin`);
+    } catch {
+      void toastError("Gagal menyalin");
+    }
+  }
 
   async function refreshStatus(opts?: { silent?: boolean }): Promise<QrisIntent | null> {
     if (!pollPath) return null;
@@ -146,10 +171,12 @@ export function QrisPayDialog({
   async function onCancel() {
     if (!cancelPath) return;
     const ok = await confirm({
-      title: isRedirect ? "Batalkan pembayaran?" : "Batalkan QRIS?",
-      description: isRedirect
-        ? "Link pembayaran ini tidak dipakai lagi di aplikasi. Selesaikan di Duitku jika sudah dibuka."
-        : "Kode QR ini tidak bisa dipakai lagi setelah dibatalkan.",
+      title: isCodePay ? "Batalkan pembayaran?" : isRedirect ? "Batalkan pembayaran?" : "Batalkan QRIS?",
+      description: isCodePay
+        ? "Kode/VA ini tidak dipakai lagi di aplikasi setelah dibatalkan."
+        : isRedirect
+          ? "Link pembayaran ini tidak dipakai lagi di aplikasi. Selesaikan di e-wallet jika sudah dibuka."
+          : "Kode QR ini tidak bisa dipakai lagi setelah dibatalkan.",
       confirmLabel: "Batalkan",
       danger: true,
     });
@@ -160,10 +187,10 @@ export function QrisPayDialog({
       setCurrent(next);
       if (isPaid(next.status)) {
         onPaid?.();
-        void toastSuccess("Pembayaran QRIS diterima");
+        void toastSuccess("Pembayaran diterima");
         return;
       }
-      void toastSuccess(isRedirect ? "Pembayaran dibatalkan" : "QRIS dibatalkan");
+      void toastSuccess("Pembayaran dibatalkan");
       onCancelled?.();
     } catch (e: unknown) {
       void toastError(e instanceof Error ? e.message : "Gagal membatalkan pembayaran");
@@ -206,17 +233,61 @@ export function QrisPayDialog({
   }
 
   return (
-    <FormDialog open={open} title={title || (isRedirect ? `Bayar · ${invoiceNumber}` : `Bayar QRIS · ${invoiceNumber}`)} onClose={onClose}>
+    <FormDialog open={open} title={dialogTitle} onClose={onClose}>
       {paid ? (
         <p className="text-sm font-medium text-[var(--ok)]">Pembayaran diterima. Tagihan akan ditandai lunas.</p>
       ) : cancelled ? (
-        <p className="text-sm font-medium text-[var(--muted)]">
-          {isRedirect ? "Pembayaran dibatalkan. Buat ulang jika ingin membayar." : "QRIS dibatalkan. Buat ulang jika ingin membayar."}
-        </p>
+        <p className="text-sm font-medium text-[var(--muted)]">Pembayaran dibatalkan. Buat ulang jika ingin membayar.</p>
       ) : expired ? (
-        <p className="text-sm font-medium text-[var(--warn)]">
-          {isRedirect ? "Link pembayaran kedaluwarsa. Buat ulang dari tombol bayar." : "QRIS kedaluwarsa. Buat ulang dari tombol Bayar QRIS."}
-        </p>
+        <p className="text-sm font-medium text-[var(--warn)]">Pembayaran kedaluwarsa. Buat ulang dari tombol bayar.</p>
+      ) : isCodePay ? (
+        <div className="grid justify-items-center gap-3 text-center">
+          <div>
+            <p className="text-xs text-[var(--muted)]">Total pembayaran</p>
+            <p className="text-lg font-bold">{formatRp(payAmount)}</p>
+          </div>
+          {vaNumber ? (
+            <div className="grid w-full gap-1">
+              <p className="text-xs text-[var(--muted)]">{vaBank || "Nomor Virtual Account"}</p>
+              <p className="break-all font-mono text-xl font-bold tracking-wide">{vaNumber}</p>
+              <button type="button" className="btn-ghost mx-auto w-fit text-sm" onClick={() => void copyText(vaNumber, "Nomor VA")}>
+                Salin nomor VA
+              </button>
+            </div>
+          ) : (
+            <div className="grid w-full gap-1">
+              <p className="text-xs text-[var(--muted)]">Kode pembayaran</p>
+              <p className="break-all font-mono text-xl font-bold tracking-wide">{paymentCode}</p>
+              <button
+                type="button"
+                className="btn-ghost mx-auto w-fit text-sm"
+                onClick={() => void copyText(paymentCode, "Kode pembayaran")}
+              >
+                Salin kode
+              </button>
+            </div>
+          )}
+          {expires ? (
+            <p className="text-[11px] text-[var(--muted)]">Berlaku sampai {expires.toLocaleString("id-ID")}</p>
+          ) : null}
+          <p className="max-w-xs text-[11px] leading-relaxed text-[var(--muted)]">
+            {vaNumber
+              ? "Transfer tepat sejumlah di atas ke VA tersebut. Status tagihan terbarui otomatis setelah berhasil."
+              : "Tunjukkan kode di kasir Alfamart/Indomaret. Bayar tepat sejumlah di atas."}
+          </p>
+          <div className="mt-1 flex w-full flex-wrap justify-center gap-2">
+            {pollPath ? (
+              <button type="button" className="btn" disabled={checking || cancelling} onClick={() => void onCheckPaid()}>
+                {checking ? "Mengecek…" : "Aku sudah bayar"}
+              </button>
+            ) : null}
+            {cancelPath ? (
+              <button type="button" className="btn-ghost" disabled={checking || cancelling} onClick={() => void onCancel()}>
+                {cancelling ? "Membatalkan…" : "Batalkan"}
+              </button>
+            ) : null}
+          </div>
+        </div>
       ) : isRedirect ? (
         <div className="grid justify-items-center gap-3 text-center">
           <div>
@@ -229,12 +300,13 @@ export function QrisPayDialog({
             </p>
           ) : null}
           <p className="max-w-xs text-[11px] leading-relaxed text-[var(--muted)]">
-            Selesaikan di halaman pembayaran (VA, e-wallet, retail, atau QRIS). Setelah bayar, status tagihan
-            terbarui otomatis.
+            {dokuKind === "ewallet"
+              ? "Selesaikan di aplikasi e-wallet. Setelah bayar, status tagihan terbarui otomatis."
+              : "Selesaikan di halaman pembayaran. Setelah bayar, status tagihan terbarui otomatis."}
           </p>
           <div className="mt-1 flex w-full flex-wrap justify-center gap-2">
             <button type="button" className="btn" disabled={checking} onClick={openCheckout}>
-              Buka halaman pembayaran
+              {dokuKind === "ewallet" ? "Buka e-wallet" : "Buka halaman pembayaran"}
             </button>
             {pollPath ? (
               <button type="button" className="btn-ghost" disabled={checking} onClick={() => void onCheckPaid()}>
@@ -258,11 +330,12 @@ export function QrisPayDialog({
           <div>
             <p className="text-xs text-[var(--muted)]">Bayar tepat sebesar</p>
             <p className="text-lg font-bold">{formatRp(payAmount)}</p>
-            <p className="mt-1 max-w-xs text-[11px] leading-relaxed text-[var(--muted)]">
-              Nominal ini sudah termasuk <strong>kode unik</strong>
-              {current?.unique_digit ? ` (${current.unique_digit})` : " 3 digit"} untuk konfirmasi otomatis. Bayar
-              persis jumlah itu, jangan dibulatkan.
-            </p>
+            {current?.unique_digit ? (
+              <p className="mt-1 max-w-xs text-[11px] leading-relaxed text-[var(--muted)]">
+                Nominal ini sudah termasuk <strong>kode unik</strong> ({current.unique_digit}) untuk konfirmasi
+                otomatis. Bayar persis jumlah itu, jangan dibulatkan.
+              </p>
+            ) : null}
           </div>
           {expires ? (
             <p className="text-[11px] text-[var(--muted)]">

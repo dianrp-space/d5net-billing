@@ -1,13 +1,29 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "./api";
 import { useAppDialog } from "./confirm";
 import { IconChat, IconCopy, IconMail, IconSend, IconTrash, IconWhatsApp } from "./icons";
 import { swalAlert, toastError, toastSuccess } from "./swal";
 import { usePersistedTab } from "./navPersist";
-import { FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
+import { formatRp, FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
+
+const PG_LOGO = {
+  duitku: "/pg/duitku.svg",
+  doku: "/pg/doku.svg",
+} as const;
+
+function PgLogo({ provider, className }: { provider: keyof typeof PG_LOGO; className?: string }) {
+  return (
+    <img
+      src={PG_LOGO[provider]}
+      alt=""
+      className={className || "h-4 w-auto max-w-[4.5rem] object-contain object-left"}
+      loading="lazy"
+      decoding="async"
+    />
+  );
+}
 
 type OutboundWebhook = {
   id: string;
@@ -29,6 +45,15 @@ type DuitkuIntegration = {
   webhook_base_hint: string;
 };
 
+type DokuChannelFee = {
+  id: string;
+  label: string;
+  kind: string;
+  enabled: boolean;
+  fee_flat: number;
+  fee_percent: number;
+};
+
 type DokuIntegration = {
   configured: boolean;
   enabled: boolean;
@@ -39,8 +64,11 @@ type DokuIntegration = {
   merchant_id: string;
   terminal_id: string;
   postal_code: string;
+  partner_service_id?: string;
   expires_in_minutes: number;
   qr_enabled: boolean;
+  fee_mode?: string;
+  channels?: DokuChannelFee[];
   webhook_path: string;
   webhook_url: string;
   webhook_base_hint: string;
@@ -227,6 +255,8 @@ export function WebhooksIntegrationPage() {
 
 export function PaymentGWPage() {
   const qc = useQueryClient();
+  const [tab, setTab] = usePersistedTab("payment-gw", "duitku", ["duitku", "doku"]);
+  const current = tab === "doku" ? "doku" : "duitku";
   const duitkuQ = useQuery({
     queryKey: ["integration-duitku"],
     queryFn: () => api<DuitkuIntegration>("/api/integrations/duitku"),
@@ -251,7 +281,10 @@ export function PaymentGWPage() {
     merchant_id: "",
     terminal_id: "",
     postal_code: "",
+    partner_service_id: "",
     expires_in_minutes: 60,
+    fee_mode: "merchant",
+    channels: [] as DokuChannelFee[],
   });
 
   useEffect(() => {
@@ -276,7 +309,17 @@ export function PaymentGWPage() {
       merchant_id: dokuQ.data.merchant_id || "",
       terminal_id: dokuQ.data.terminal_id || "",
       postal_code: dokuQ.data.postal_code || "",
+      partner_service_id: dokuQ.data.partner_service_id || "",
       expires_in_minutes: dokuQ.data.expires_in_minutes || 60,
+      fee_mode: dokuQ.data.fee_mode === "customer" ? "customer" : "merchant",
+      channels: (dokuQ.data.channels || []).map((c) => ({
+        id: c.id,
+        label: c.label,
+        kind: c.kind,
+        enabled: Boolean(c.enabled),
+        fee_flat: c.fee_flat || 0,
+        fee_percent: c.fee_percent || 0,
+      })),
     });
   }, [dokuQ.data]);
 
@@ -340,7 +383,15 @@ export function PaymentGWPage() {
           merchant_id: dokuForm.merchant_id.trim() || undefined,
           terminal_id: dokuForm.terminal_id.trim() || undefined,
           postal_code: dokuForm.postal_code.trim() || undefined,
+          partner_service_id: dokuForm.partner_service_id.trim() || undefined,
           expires_in_minutes: Math.min(1440, Math.max(1, dokuForm.expires_in_minutes || 60)),
+          fee_mode: dokuForm.fee_mode === "customer" ? "customer" : "merchant",
+          channels: dokuForm.channels.map((c) => ({
+            id: c.id,
+            enabled: Boolean(c.enabled),
+            fee_flat: Math.max(0, Math.floor(Number(c.fee_flat) || 0)),
+            fee_percent: Math.min(100, Math.max(0, Number(c.fee_percent) || 0)),
+          })),
         }),
       }),
     onSuccess: (data) => {
@@ -354,7 +405,17 @@ export function PaymentGWPage() {
         merchant_id: data.merchant_id || "",
         terminal_id: data.terminal_id || "",
         postal_code: data.postal_code || "",
+        partner_service_id: data.partner_service_id || "",
         expires_in_minutes: data.expires_in_minutes || dokuForm.expires_in_minutes,
+        fee_mode: data.fee_mode === "customer" ? "customer" : "merchant",
+        channels: (data.channels || []).map((c) => ({
+          id: c.id,
+          label: c.label,
+          kind: c.kind,
+          enabled: Boolean(c.enabled),
+          fee_flat: c.fee_flat || 0,
+          fee_percent: c.fee_percent || 0,
+        })),
       });
       void qc.invalidateQueries({ queryKey: ["integration-doku"] });
       void toastSuccess("DOKU disimpan");
@@ -362,23 +423,67 @@ export function PaymentGWPage() {
     onError: (e: Error) => void toastError(e.message),
   });
 
+  function patchDokuChannel(id: string, patch: Partial<DokuChannelFee>) {
+    setDokuForm((prev) => ({
+      ...prev,
+      channels: prev.channels.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+    }));
+  }
+
   return (
     <Section title="Payment Gateway">
       <p className="mb-4 text-sm text-[var(--muted)]">
         Aktifkan <strong>Duitku</strong> untuk pembayaran online (VA, e-wallet, retail, QRIS) atau{" "}
-        <strong>DOKU</strong> (halaman bayar + QRIS langsung). Kredensial disimpan terenkripsi.
+        <strong>DOKU Direct</strong> (QRIS, VA, e-wallet, Alfamart/Indomaret di portal). Kredensial disimpan
+        terenkripsi.
       </p>
       {loading ? (
         <p className="text-[var(--muted)]">Memuat...</p>
       ) : (
-        <Accordion type="multiple" className="grid max-w-xl gap-3">
-          <ProviderAccordionItem
-            value="duitku"
-            title="Duitku"
-            enabled={duitkuForm.enabled}
-            configured={Boolean(duitkuQ.data?.configured)}
-            onToggle={(v) => setDuitkuForm({ ...duitkuForm, enabled: v })}
-          >
+        <Tabs
+          value={current}
+          onValueChange={(v) => {
+            if (v === "duitku" || v === "doku") setTab(v);
+          }}
+          className="max-w-xl space-y-0"
+        >
+          <TabsList aria-label="Payment Gateway">
+            <TabsTrigger value="duitku" className="min-w-[7.5rem]">
+              <PgLogo provider="duitku" />
+              <span className="sr-only">Duitku</span>
+              {duitkuForm.enabled ? (
+                <span className="rounded bg-[var(--ok)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ok)]">aktif</span>
+              ) : null}
+            </TabsTrigger>
+            <TabsTrigger value="doku" className="min-w-[7.5rem]">
+              <PgLogo provider="doku" />
+              <span className="sr-only">DOKU</span>
+              {dokuForm.enabled ? (
+                <span className="rounded bg-[var(--ok)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ok)]">aktif</span>
+              ) : null}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="duitku">
+            <div className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-3">
+                  <PgLogo provider="duitku" className="h-6 w-auto max-w-[8rem] object-contain object-left" />
+                  <span className="text-[11px] text-[var(--muted)]">
+                    {duitkuQ.data?.configured ? "kunci tersimpan" : "belum dikonfigurasi"}
+                    {duitkuForm.enabled ? " · aktif" : " · nonaktif"}
+                  </span>
+                </div>
+                <label className="flex shrink-0 items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={duitkuForm.enabled}
+                    onChange={(e) => setDuitkuForm({ ...duitkuForm, enabled: e.target.checked })}
+                  />
+                  Aktif
+                </label>
+              </div>
+              <div className="grid gap-2">
             <p className="text-[11px] leading-relaxed text-[var(--muted)]">
               Pelanggan diarahkan ke <strong>halaman bayar Duitku</strong> (bukan API v2 / MD5). Callback memakai HMAC-SHA256.
               Isi callback URL di bawah ke dashboard Duitku.
@@ -465,19 +570,34 @@ export function PaymentGWPage() {
             <button type="button" className="btn w-fit" disabled={saveDuitku.isPending} onClick={() => saveDuitku.mutate()}>
               {saveDuitku.isPending ? "Menyimpan..." : "Simpan"}
             </button>
-          </ProviderAccordionItem>
+              </div>
+            </div>
+          </TabsContent>
 
-          <ProviderAccordionItem
-            value="doku"
-            title="DOKU"
-            enabled={dokuForm.enabled}
-            configured={Boolean(dokuQ.data?.configured)}
-            onToggle={(v) => setDokuForm({ ...dokuForm, enabled: v })}
-          >
+          <TabsContent value="doku">
+            <div className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-3">
+                  <PgLogo provider="doku" className="h-6 w-auto max-w-[8rem] object-contain object-left" />
+                  <span className="text-[11px] text-[var(--muted)]">
+                    {dokuQ.data?.configured ? "kunci tersimpan" : "belum dikonfigurasi"}
+                    {dokuForm.enabled ? " · aktif" : " · nonaktif"}
+                  </span>
+                </div>
+                <label className="flex shrink-0 items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={dokuForm.enabled}
+                    onChange={(e) => setDokuForm({ ...dokuForm, enabled: e.target.checked })}
+                  />
+                  Aktif
+                </label>
+              </div>
+              <div className="grid gap-2">
             <p className="text-[11px] leading-relaxed text-[var(--muted)]">
-              Pelanggan membayar di <strong>halaman bayar DOKU</strong> (VA, kartu, e-wallet, QRIS, retail).
-              Untuk QRIS langsung (gambar QR di portal & bot WA), lengkapi juga private key + merchant ID +
-              terminal ID + kode pos.
+              Pelanggan memilih channel di portal lalu bayar via <strong>DOKU Direct API</strong> (QRIS, VA, e-wallet,
+              Alfamart/Indomaret). Untuk QRIS, lengkapi private key + merchant ID + terminal ID + kode pos. Untuk VA,
+              isi BIN (partner service ID).
             </p>
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -555,6 +675,19 @@ export function PaymentGWPage() {
               </label>
             </div>
             <label className="grid gap-1 text-sm">
+              <span className="text-[var(--muted)]">BIN VA (partner service ID)</span>
+              <input
+                className="input font-mono"
+                placeholder="dari DOKU BO · wajib untuk Virtual Account"
+                value={dokuForm.partner_service_id}
+                onChange={(e) => setDokuForm({ ...dokuForm, partner_service_id: e.target.value })}
+                autoComplete="off"
+              />
+              <span className="text-[11px] text-[var(--muted)]">
+                Nomor BIN/VA prefix dari dashboard DOKU. Channel VA tidak muncul di portal jika kosong.
+              </span>
+            </label>
+            <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
               <input
                 className="input"
@@ -586,6 +719,91 @@ export function PaymentGWPage() {
                 Invoice DOKU berlaku {ttlHint(dokuForm.expires_in_minutes)}.
               </span>
             </label>
+            <div className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
+              <label className="grid gap-1 text-sm">
+                <span className="text-[var(--muted)]">Biaya admin ditanggung</span>
+                <select
+                  className="input"
+                  value={dokuForm.fee_mode}
+                  onChange={(e) => setDokuForm({ ...dokuForm, fee_mode: e.target.value })}
+                >
+                  <option value="merchant">Merchant (dipotong dari settlement)</option>
+                  <option value="customer">Customer (ditambahkan ke tagihan)</option>
+                </select>
+                <span className="text-[11px] leading-relaxed text-[var(--muted)]">
+                  Mode berlaku semua channel. Flat/% diatur per channel di bawah (MDR bisa berbeda).
+                </span>
+              </label>
+              <div className="grid gap-2">
+                <p className="text-sm font-medium">Channel Direct</p>
+                {dokuForm.channels.length === 0 ? (
+                  <p className="text-xs text-[var(--muted)]">Memuat katalog channel…</p>
+                ) : (
+                  dokuForm.channels.map((ch) => (
+                    <div
+                      key={ch.id}
+                      className="grid gap-2 rounded-lg border border-[var(--border)] p-2 sm:grid-cols-[minmax(0,1.2fr)_auto_auto_auto] sm:items-end"
+                    >
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={ch.enabled}
+                          onChange={(e) => patchDokuChannel(ch.id, { enabled: e.target.checked })}
+                        />
+                        <span>
+                          <span className="font-medium">{ch.label}</span>
+                          <span className="ml-1 text-[11px] text-[var(--muted)]">({ch.kind})</span>
+                        </span>
+                      </label>
+                      {dokuForm.fee_mode === "customer" ? (
+                        <>
+                          <label className="grid gap-0.5 text-[11px]">
+                            <span className="text-[var(--muted)]">Flat (Rp)</span>
+                            <input
+                              className="input"
+                              type="number"
+                              min={0}
+                              step={500}
+                              disabled={!ch.enabled}
+                              value={ch.fee_flat}
+                              onChange={(e) =>
+                                patchDokuChannel(ch.id, { fee_flat: Number(e.target.value) || 0 })
+                              }
+                            />
+                          </label>
+                          <label className="grid gap-0.5 text-[11px]">
+                            <span className="text-[var(--muted)]">Persen (%)</span>
+                            <input
+                              className="input"
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={0.1}
+                              disabled={!ch.enabled}
+                              value={ch.fee_percent}
+                              onChange={(e) =>
+                                patchDokuChannel(ch.id, { fee_percent: Number(e.target.value) || 0 })
+                              }
+                            />
+                          </label>
+                          <span className="text-[10px] text-[var(--muted)] sm:pb-2">
+                            contoh{" "}
+                            {formatRp(
+                              Math.max(0, Math.floor(ch.fee_flat)) +
+                                Math.round((150000 * Math.max(0, ch.fee_percent)) / 100),
+                            )}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-[11px] text-[var(--muted)] sm:col-span-3">
+                          Merchant menanggung MDR channel ini
+                        </span>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Callback URL DOKU · /api/webhooks/payment/doku</span>
               <div className="flex gap-2">
@@ -602,53 +820,12 @@ export function PaymentGWPage() {
             <button type="button" className="btn w-fit" disabled={saveDoku.isPending} onClick={() => saveDoku.mutate()}>
               {saveDoku.isPending ? "Menyimpan..." : "Simpan"}
             </button>
-          </ProviderAccordionItem>
-        </Accordion>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       )}
     </Section>
-  );
-}
-
-function ProviderAccordionItem({
-  value,
-  title,
-  enabled,
-  configured,
-  onToggle,
-  children,
-}: {
-  value: string;
-  title: string;
-  enabled: boolean;
-  configured: boolean;
-  onToggle: (v: boolean) => void;
-  children: ReactNode;
-}) {
-  return (
-    <AccordionItem value={value} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3">
-      <div className="flex items-center gap-2">
-        <AccordionTrigger className="min-w-0 flex-1 py-3 hover:no-underline">
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium">{title}</span>
-            <span className="mt-0.5 block text-[10px] text-[var(--muted)]">
-              {configured ? "kunci tersimpan" : "belum dikonfigurasi"}
-              {enabled ? " · aktif" : " · nonaktif"}
-            </span>
-          </span>
-        </AccordionTrigger>
-        <label
-          className="flex shrink-0 items-center gap-2 py-3 text-sm"
-          onClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <input type="checkbox" checked={enabled} onChange={(e) => onToggle(e.target.checked)} />
-          Aktif
-        </label>
-      </div>
-      <AccordionContent>
-        <div className="grid gap-2">{children}</div>
-      </AccordionContent>
-    </AccordionItem>
   );
 }
 

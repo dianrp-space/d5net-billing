@@ -27,6 +27,8 @@ type IntentRequest struct {
 	Phone           string
 	CustomerName    string
 	ProductDetails  string
+	// Channel is the DOKU Direct channel id (qris, va_bca, …). Empty = legacy Checkout.
+	Channel string
 }
 
 type IntentResult struct {

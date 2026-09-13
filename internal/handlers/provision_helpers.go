@@ -629,13 +629,20 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 		return nil // idempotent
 	}
 
+	// Tagihan asli (tanpa biaya admin). Untuk DOKU dengan surcharge, pi.Amount
+	// = base + fee, sedangkan yang dilunasi ke invoice hanya base.
+	base := pi.Amount
+	if b := metaInt64(pi.Metadata, "base_amount"); b > 0 {
+		base = b
+	}
 	amount := event.Amount
 	if amount <= 0 {
-		amount = pi.Amount
+		amount = base
 	}
-	if invRemaining := pi.Amount; invRemaining > 0 && amount > invRemaining {
-		// Unique-digit QRIS may be a few hundred rupiah above the invoice remainder.
-		amount = invRemaining
+	if base > 0 && amount > base {
+		// Biaya admin customer / unique-digit QRIS bisa di atas tagihan; yang
+		// dicatat sebagai pembayaran invoice tetap sebesar tagihan asli.
+		amount = base
 	}
 
 	var invoiceID *xid.ID
