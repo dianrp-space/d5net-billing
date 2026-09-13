@@ -3436,6 +3436,116 @@ func registerInvoices(api huma.API, d *Deps) {
 		return &struct{ Body map[string]string }{Body: map[string]string{"status": "restored"}}, nil
 	})
 	huma.Register(api, huma.Operation{
+		OperationID: "apply-invoice-discount", Method: http.MethodPost, Path: "/api/invoices/{id}/apply-discount",
+		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		ID xid.ID `path:"id"`
+	}) (*struct {
+		Body struct {
+			DiscountName   string `json:"discount_name"`
+			DiscountAmount int64  `json:"discount_amount"`
+			TotalAmount    int64  `json:"total_amount"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		inv, items, err := d.Store.GetInvoice(ctx, tid, input.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, httpx.NotFound("tagihan tidak ditemukan")
+		} else if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		switch strings.ToLower(strings.TrimSpace(inv.Status)) {
+		case "paid", "void", "cancelled":
+			return nil, httpx.BadRequest("tagihan sudah lunas / tidak bisa diubah")
+		}
+		if inv.SubscriptionID == nil || xid.IsNil(*inv.SubscriptionID) {
+			return nil, httpx.BadRequest("hanya tagihan langganan yang bisa diterapkan aturan diskon")
+		}
+		if inv.DiscountAmount > 0 {
+			return nil, httpx.BadRequest("tagihan ini sudah punya diskon manual")
+		}
+		for _, it := range items {
+			// Engine menandai diskon bawaan di deskripsi: "Nama −20%".
+			if strings.Contains(it.Description, "−") && strings.HasSuffix(strings.TrimSpace(it.Description), ")") {
+				return nil, httpx.BadRequest("diskon sudah termasuk saat tagihan dibuat (lihat deskripsi item)")
+			}
+		}
+		sub, err := d.Store.GetSubscription(ctx, tid, *inv.SubscriptionID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		plan, err := d.Store.GetPlan(ctx, tid, sub.PlanID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		cust, err := d.Store.GetCustomer(ctx, tid, sub.CustomerID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		var lateFee int64
+		var planBase int64
+		for _, it := range items {
+			if strings.HasPrefix(strings.TrimSpace(it.Description), "Denda keterlambatan") {
+				lateFee += it.Amount
+			} else {
+				planBase += it.Amount
+			}
+		}
+		if planBase <= 0 {
+			return nil, httpx.BadRequest("tidak ada nominal langganan yang bisa didiskon")
+		}
+		disc, err := d.Store.FindBestPlanDiscount(ctx, tid, plan.ID, cust.ID, time.Now().Format("2006-01-02"), planBase)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if disc == nil {
+			return nil, httpx.BadRequest("tidak ada aturan diskon yang cocok untuk tagihan ini")
+		}
+		discountAmt := disc.Value
+		if disc.Kind == store.DiscountKindPercent {
+			discountAmt = int64(math.Round(float64(planBase) * float64(disc.Value) / 100))
+		}
+		if discountAmt > planBase {
+			discountAmt = planBase
+		}
+		if discountAmt <= 0 {
+			return nil, httpx.BadRequest("tidak ada aturan diskon yang cocok untuk tagihan ini")
+		}
+		taxPct := plan.TaxPercent
+		if pct, terr := d.Store.EffectiveTaxPercent(ctx, tid); terr == nil {
+			taxPct = pct
+		}
+		taxable := planBase - discountAmt
+		tax := int64(math.Round(float64(taxable) * taxPct / 100))
+		total := taxable + tax + lateFee
+		if total <= 0 {
+			return nil, httpx.BadRequest("total baru tidak valid")
+		}
+		if total < inv.PaidAmount {
+			return nil, httpx.BadRequest("total baru lebih kecil dari yang sudah dibayar")
+		}
+		if err := d.Store.SetInvoiceDiscountAmounts(ctx, tid, inv.ID, discountAmt, tax, total); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		auditEvent(ctx, d, AuditInvoiceDiscount, "invoice", &inv.ID, map[string]any{
+			"invoice_number": inv.InvoiceNumber, "discount": disc.Name, "discount_amount": discountAmt, "total": total,
+		})
+		out := &struct {
+			Body struct {
+				DiscountName   string `json:"discount_name"`
+				DiscountAmount int64  `json:"discount_amount"`
+				TotalAmount    int64  `json:"total_amount"`
+			}
+		}{}
+		out.Body.DiscountName = disc.Name
+		out.Body.DiscountAmount = discountAmt
+		out.Body.TotalAmount = total
+		return out, nil
+	})
+	huma.Register(api, huma.Operation{
 		OperationID: "purge-invoice", Method: http.MethodDelete, Path: "/api/invoices/{id}/purge",
 		Tags: []string{"Invoices"}, Security: []map[string][]string{{"bearer": {}}},
 	}, func(ctx context.Context, input *struct {

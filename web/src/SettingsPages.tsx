@@ -91,6 +91,13 @@ function clampDueDay(n: number | undefined) {
   return Math.min(28, v);
 }
 
+function clampLateFeePercent(n: number | undefined) {
+  if (n === undefined || n === null) return 5;
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 0) return 0;
+  return Math.min(100, v);
+}
+
 const PERM_PRESETS: { key: string; label: string; hint: string }[] = [
   { key: "*", label: "Semua akses (*)", hint: "Akses penuh ke semua menu" },
   { key: "dashboard", label: "Dashboard", hint: "Halaman dashboard" },
@@ -117,6 +124,7 @@ export function GeneralSettingsPage() {
           isolir_grace_days?: number;
           billing_cycle_start_day?: number;
           invoice_due_day?: number;
+          late_fee_percent?: number;
           primary_color?: string;
         }
       >("/api/settings/branding"),
@@ -127,6 +135,7 @@ export function GeneralSettingsPage() {
   const [isolirGraceDays, setIsolirGraceDays] = useState(0);
   const [cycleStartDay, setCycleStartDay] = useState(1);
   const [dueDay, setDueDay] = useState(10);
+  const [lateFeePercent, setLateFeePercent] = useState(5);
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY);
   const [err, setErr] = useState("");
 
@@ -138,6 +147,7 @@ export function GeneralSettingsPage() {
     setIsolirGraceDays(clampIsolirGrace(q.data.isolir_grace_days));
     setCycleStartDay(clampCycleStartDay(q.data.billing_cycle_start_day));
     setDueDay(clampDueDay(q.data.invoice_due_day));
+    setLateFeePercent(clampLateFeePercent(q.data.late_fee_percent));
     setPrimaryColor(parseHexColor(q.data.primary_color) || DEFAULT_PRIMARY);
   }, [q.data]);
 
@@ -149,6 +159,7 @@ export function GeneralSettingsPage() {
       isolir_grace_days: clampIsolirGrace(isolirGraceDays),
       billing_cycle_start_day: clampCycleStartDay(cycleStartDay),
       invoice_due_day: clampDueDay(dueDay),
+      late_fee_percent: clampLateFeePercent(lateFeePercent),
       primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
       ...extra,
     };
@@ -321,6 +332,23 @@ export function GeneralSettingsPage() {
               <span className="text-xs text-[var(--muted)]">
                 Tanggal kalender (1–28) jatuh tempo semua invoice. Paket / harga per cluster bisa override. Contoh: 10 =
                 jatuh tempo tiap tanggal 10.
+              </span>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Denda keterlambatan (%)</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={100}
+                step={0.5}
+                value={lateFeePercent}
+                onChange={(e) => setLateFeePercent(clampLateFeePercent(Number(e.target.value)))}
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Persen dari total tunggakan, otomatis ditambahkan sebagai item saat tagihan baru terbit bila pelanggan
+                punya tunggakan. 0 = nonaktif. Berlaku untuk tagihan berikutnya, bukan yang sudah terbit.
               </span>
             </label>
 

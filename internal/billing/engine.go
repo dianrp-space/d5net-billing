@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dianrp-space/d5net-billing/internal/store"
@@ -114,9 +115,13 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 	subtotal, tax := e.CalculateInvoiceAmount(plan, prorateDays, periodDays)
 
 	var lateFee int64
+	lateFeePct := defaultLateFeePercent
+	if pct := e.store.LateFeePercent(ctx, tenantID); pct >= 0 {
+		lateFeePct = pct
+	}
 	overdue, err := e.store.SumOverdueUnpaidForSubscription(ctx, tenantID, subscriptionID)
 	if err == nil && overdue > 0 {
-		lateFee = ApplyLateFee(overdue, defaultLateFeePercent)
+		lateFee = ApplyLateFee(overdue, lateFeePct)
 	}
 
 	dueDay := e.store.ResolvePlanDueDay(ctx, tenantID, plan.ID, cust.ClusterID, plan.DueDay)
@@ -153,7 +158,7 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 	}
 	if lateFee > 0 {
 		items = append(items, store.InvoiceItem{
-			Description: fmt.Sprintf("Denda keterlambatan %.0f%%", defaultLateFeePercent),
+			Description: fmt.Sprintf("Denda keterlambatan %s", formatLateFeePercent(lateFeePct)),
 			Quantity:    1,
 			UnitPrice:   lateFee,
 			Amount:      lateFee,
@@ -274,6 +279,14 @@ func ApplyLateFee(amount int64, percent float64) int64 {
 		return 0
 	}
 	return int64(math.Round(float64(amount) * percent / 100))
+}
+
+// formatLateFeePercent mencetak "5%" atau "2,5%" ala id-ID.
+func formatLateFeePercent(pct float64) string {
+	if pct == math.Trunc(pct) {
+		return strconv.FormatInt(int64(pct), 10) + "%"
+	}
+	return strings.Replace(strconv.FormatFloat(pct, 'f', -1, 64), ".", ",", 1) + "%"
 }
 
 // PlanChangeQuote is the mid-cycle charge when switching plans before next_bill_at.

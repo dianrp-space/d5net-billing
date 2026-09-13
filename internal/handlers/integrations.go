@@ -68,7 +68,7 @@ type duitkuIntegrationView struct {
 type duitkuIntegrationPut struct {
 	Enabled          bool    `json:"enabled"`
 	Sandbox          bool    `json:"sandbox"`
-	MerchantCode     string  `json:"merchant_code"`
+	MerchantCode     string  `json:"merchant_code,omitempty"`
 	APIKey           string  `json:"api_key,omitempty"`
 	SandboxMerchantCode string `json:"sandbox_merchant_code,omitempty"`
 	SandboxAPIKey       string `json:"sandbox_api_key,omitempty"`
@@ -161,7 +161,7 @@ type dokuChannelFeePut struct {
 type dokuIntegrationPut struct {
 	Enabled          bool                `json:"enabled"`
 	Sandbox          bool                `json:"sandbox"`
-	ClientID         string              `json:"client_id"`
+	ClientID         string              `json:"client_id,omitempty"`
 	SecretKey        string              `json:"secret_key,omitempty"`
 	SandboxClientID  string              `json:"sandbox_client_id,omitempty"`
 	SandboxSecretKey string              `json:"sandbox_secret_key,omitempty"`

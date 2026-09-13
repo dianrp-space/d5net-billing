@@ -543,8 +543,26 @@ func (s *Store) DeleteInvoice(ctx context.Context, tenantID, id xid.ID) error {
 	return tx.Commit(ctx)
 }
 
-func (s *Store) RestoreInvoice(ctx context.Context, tenantID, id xid.ID) error {
-	inv, _, err := s.GetInvoiceIncludingDeleted(ctx, tenantID, id)
+// SetInvoiceDiscountAmounts menimpa diskon/pajak/total tagihan berjalan
+// (dipakai aksi "terapkan aturan diskon"). Tagihan sampah tidak tersentuh.
+func (s *Store) SetInvoiceDiscountAmounts(ctx context.Context, tenantID, id xid.ID, discount, tax, total int64) error {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE invoices SET discount_amount=$3, tax_amount=$4, total_amount=$5, updated_at=NOW()
+		WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL
+	`, tenantID, id, discount, tax, total)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) RestoreInvoice(ctx context.Context, tenantID, id xid.ID) error {	inv, _, err := s.GetInvoiceIncludingDeleted(ctx, tenantID, id)
 	if err != nil {
 		return err
 	}

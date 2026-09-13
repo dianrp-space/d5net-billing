@@ -34,6 +34,7 @@ const (
 	AuditInvoiceDelete     = "invoice.delete"
 	AuditInvoiceRestore    = "invoice.restore"
 	AuditInvoicePurge      = "invoice.purge"
+	AuditInvoiceDiscount   = "invoice.apply_discount"
 	AuditCustomerStatus    = "customer.batch_status"
 	AuditCustomerDelete    = "customer.delete"
 	AuditCustomerDismantle = "customer.dismantle"

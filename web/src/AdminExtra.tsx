@@ -5,7 +5,7 @@ import echarts from "./echarts";
 import { api, apiDownload, getToken } from "./api";
 import { useAppDialog } from "./confirm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconTrash, IconUndo, IconZap } from "./icons";
+import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconTicket, IconTrash, IconUndo, IconZap } from "./icons";
 import { ListToolbar, matchesQuery } from "./ListToolbar";
 import { toastError, toastSuccess } from "./swal";
 import { PAY_METHOD_TUNAI, payOptionsHasDuitkuSandbox, type PayOption } from "./payMethod";
@@ -1031,6 +1031,18 @@ export function InvoiceActions({
     },
     onError: (e: Error) => void toastError(e.message || "Gagal hapus permanen"),
   });
+  const applyDiscount = useMutation({
+    mutationFn: () =>
+      api<{ discount_name: string; discount_amount: number; total_amount: number }>(
+        `/api/invoices/${id}/apply-discount`,
+        { method: "POST" },
+      ),
+    onSuccess: (r) => {
+      void toastSuccess(`Diskon "${r.discount_name}" diterapkan (${formatRp(r.discount_amount)}). Total baru ${formatRp(r.total_amount)}`);
+      refreshBilling();
+    },
+    onError: (e: Error) => void toastError(e.message || "Gagal menerapkan diskon"),
+  });
   const [pdfBusy, setPdfBusy] = useState(false);
 
   return (
@@ -1067,6 +1079,23 @@ export function InvoiceActions({
           }}
         >
           <IconZap />
+        </IconButton>
+      )}
+      {unpaid && (
+        <IconButton
+          label="Terapkan aturan diskon"
+          disabled={applyDiscount.isPending}
+          onClick={() => {
+            void confirm({
+              title: "Terapkan aturan diskon?",
+              description: `Hitung ulang ${invoiceNumber} dengan aturan diskon yang berlaku hari ini (diskon terbaik untuk pelanggan & paket ini). Hanya untuk tagihan yang belum memuat diskon.`,
+              confirmLabel: "Terapkan",
+            }).then((ok) => {
+              if (ok) applyDiscount.mutate();
+            });
+          }}
+        >
+          <IconTicket />
         </IconButton>
       )}
       <IconButton

@@ -61,6 +61,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			IsolirGraceDays      int     `json:"isolir_grace_days"`
 			BillingCycleStartDay int     `json:"billing_cycle_start_day"`
 			InvoiceDueDay        int     `json:"invoice_due_day"`
+			LateFeePercent       float64 `json:"late_fee_percent"`
 			PrimaryColor         string  `json:"primary_color"`
 		}
 	}, error) {
@@ -89,6 +90,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				IsolirGraceDays      int     `json:"isolir_grace_days"`
 				BillingCycleStartDay int     `json:"billing_cycle_start_day"`
 				InvoiceDueDay        int     `json:"invoice_due_day"`
+			LateFeePercent       float64 `json:"late_fee_percent"`
 				PrimaryColor         string  `json:"primary_color"`
 			}
 		}{}
@@ -99,6 +101,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out.Body.IsolirGraceDays = gen.IsolirGraceDays
 		out.Body.BillingCycleStartDay = gen.BillingCycleStartDay
 		out.Body.InvoiceDueDay = gen.InvoiceDueDay
+		out.Body.LateFeePercent = gen.LateFeePercent
 		out.Body.PrimaryColor = gen.PrimaryColor
 		return out, nil
 	})
@@ -115,6 +118,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			IsolirGraceDays      int     `json:"isolir_grace_days"`
 			BillingCycleStartDay int     `json:"billing_cycle_start_day"`
 			InvoiceDueDay        int     `json:"invoice_due_day"`
+			LateFeePercent       float64 `json:"late_fee_percent"`
 			PrimaryColor         string  `json:"primary_color"`
 			LogoURL              *string `json:"logo_url,omitempty"`
 			FaviconURL           *string `json:"favicon_url,omitempty"`
@@ -136,6 +140,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			IsolirGraceDays      int     `json:"isolir_grace_days"`
 			BillingCycleStartDay int     `json:"billing_cycle_start_day"`
 			InvoiceDueDay        int     `json:"invoice_due_day"`
+			LateFeePercent       float64 `json:"late_fee_percent"`
 			PrimaryColor         string  `json:"primary_color"`
 		}
 	}, error) {
@@ -170,6 +175,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			IsolirGraceDays:      input.Body.IsolirGraceDays,
 			BillingCycleStartDay: input.Body.BillingCycleStartDay,
 			InvoiceDueDay:        input.Body.InvoiceDueDay,
+			LateFeePercent:       input.Body.LateFeePercent,
 			PrimaryColor:         input.Body.PrimaryColor,
 		})
 		if err := d.Store.UpsertGeneralSettings(ctx, tid, gen); err != nil {
@@ -192,6 +198,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				IsolirGraceDays      int     `json:"isolir_grace_days"`
 				BillingCycleStartDay int     `json:"billing_cycle_start_day"`
 				InvoiceDueDay        int     `json:"invoice_due_day"`
+			LateFeePercent       float64 `json:"late_fee_percent"`
 				PrimaryColor         string  `json:"primary_color"`
 			}
 		}{}
@@ -202,6 +209,7 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out.Body.IsolirGraceDays = gen.IsolirGraceDays
 		out.Body.BillingCycleStartDay = gen.BillingCycleStartDay
 		out.Body.InvoiceDueDay = gen.InvoiceDueDay
+		out.Body.LateFeePercent = gen.LateFeePercent
 		out.Body.PrimaryColor = gen.PrimaryColor
 		return out, nil
 	})

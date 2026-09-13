@@ -25,6 +25,9 @@ type GeneralSettings struct {
 	// InvoiceDueDay is the tenant default calendar day (1–28) invoices fall due.
 	// Plans and cluster offers may override it.
 	InvoiceDueDay int `json:"invoice_due_day"`
+	// LateFeePercent is denda keterlambatan (%) atas total tunggakan saat
+	// tagihan baru terbit. 0 = nonaktif.
+	LateFeePercent float64 `json:"late_fee_percent"`
 }
 
 func DefaultGeneralSettings() GeneralSettings {
@@ -34,6 +37,7 @@ func DefaultGeneralSettings() GeneralSettings {
 		PrimaryColor:         "",
 		BillingCycleStartDay: 1,
 		InvoiceDueDay:        10,
+		LateFeePercent:       5,
 	}
 }
 
@@ -96,6 +100,12 @@ func NormalizeGeneralSettings(g GeneralSettings) GeneralSettings {
 		g.BillingCycleStartDay = 28
 	}
 	g.InvoiceDueDay = ClampDueDay(g.InvoiceDueDay, def.InvoiceDueDay)
+	if g.LateFeePercent < 0 {
+		g.LateFeePercent = 0
+	}
+	if g.LateFeePercent > 100 {
+		g.LateFeePercent = 100
+	}
 	return g
 }
 
@@ -167,4 +177,16 @@ func (s *Store) InvoiceDueDay(ctx context.Context, tenantID xid.ID) int {
 		return DefaultGeneralSettings().InvoiceDueDay
 	}
 	return ClampDueDay(g.InvoiceDueDay, DefaultGeneralSettings().InvoiceDueDay)
+}
+
+// LateFeePercent is denda keterlambatan (%) atas tunggakan (0 = nonaktif).
+func (s *Store) LateFeePercent(ctx context.Context, tenantID xid.ID) float64 {
+	g, err := s.GetGeneralSettings(ctx, tenantID)
+	if err != nil {
+		return DefaultGeneralSettings().LateFeePercent
+	}
+	if g.LateFeePercent < 0 || g.LateFeePercent > 100 {
+		return DefaultGeneralSettings().LateFeePercent
+	}
+	return g.LateFeePercent
 }
