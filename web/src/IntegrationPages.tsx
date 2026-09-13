@@ -445,7 +445,7 @@ export function PaymentGWPage() {
           onValueChange={(v) => {
             if (v === "duitku" || v === "doku") setTab(v);
           }}
-          className="max-w-xl space-y-0"
+          className="w-full max-w-5xl space-y-0"
         >
           <TabsList aria-label="Payment Gateway">
             <TabsTrigger value="duitku" className="min-w-[7.5rem]">
@@ -599,6 +599,17 @@ export function PaymentGWPage() {
               Alfamart/Indomaret). Untuk QRIS, lengkapi private key + merchant ID + terminal ID + kode pos. Untuk VA,
               isi BIN (partner service ID).
             </p>
+            {!dokuQ.data?.qr_enabled ? (
+              <p className="rounded-lg border border-[var(--warn)]/40 bg-[var(--warn)]/10 px-3 py-2 text-[11px] leading-relaxed text-[var(--warn)]">
+                Channel <strong>QRIS</strong> tidak muncul di portal pelanggan sampai private key + merchant ID +
+                terminal ID + kode pos lengkap.
+              </p>
+            ) : null}
+            {!String(dokuForm.partner_service_id || "").trim() ? (
+              <p className="rounded-lg border border-[var(--warn)]/40 bg-[var(--warn)]/10 px-3 py-2 text-[11px] leading-relaxed text-[var(--warn)]">
+                Channel <strong>Virtual Account</strong> tidak muncul di portal sampai BIN (partner service ID) diisi.
+              </p>
+            ) : null}
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -736,23 +747,39 @@ export function PaymentGWPage() {
               </label>
               <div className="grid gap-2">
                 <p className="text-sm font-medium">Channel Direct</p>
+                <p className="text-[11px] text-[var(--muted)]">
+                  Channel yang dicentang tampil di portal hanya jika prasyaratnya lengkap (lihat peringatan di atas).
+                </p>
                 {dokuForm.channels.length === 0 ? (
                   <p className="text-xs text-[var(--muted)]">Memuat katalog channel…</p>
                 ) : (
-                  dokuForm.channels.map((ch) => (
+                  <div className="grid gap-2 lg:grid-cols-2">
+                  {dokuForm.channels.map((ch) => {
+                    const blockedQR = ch.kind === "qr" && !dokuQ.data?.qr_enabled;
+                    const blockedVA = ch.kind === "va" && !String(dokuForm.partner_service_id || "").trim();
+                    const blocked = blockedQR || blockedVA;
+                    return (
                     <div
                       key={ch.id}
-                      className="grid gap-2 rounded-lg border border-[var(--border)] p-2 sm:grid-cols-[minmax(0,1.2fr)_auto_auto_auto] sm:items-end"
+                      className={`grid gap-2 rounded-lg border p-2 sm:grid-cols-[minmax(0,1fr)_5.5rem_5rem] sm:items-end ${
+                        blocked ? "border-[var(--warn)]/35 opacity-80" : "border-[var(--border)]"
+                      }`}
                     >
-                      <label className="flex items-center gap-2 text-sm">
+                      <label className="flex items-start gap-2 text-sm">
                         <input
                           type="checkbox"
+                          className="mt-0.5"
                           checked={ch.enabled}
                           onChange={(e) => patchDokuChannel(ch.id, { enabled: e.target.checked })}
                         />
                         <span>
                           <span className="font-medium">{ch.label}</span>
                           <span className="ml-1 text-[11px] text-[var(--muted)]">({ch.kind})</span>
+                          {blocked ? (
+                            <span className="mt-0.5 block text-[10px] text-[var(--warn)]">
+                              {blockedQR ? "belum siap · lengkapi kredensial SNAP" : "belum siap · isi BIN VA"}
+                            </span>
+                          ) : null}
                         </span>
                       </label>
                       {dokuForm.fee_mode === "customer" ? (
@@ -786,21 +813,16 @@ export function PaymentGWPage() {
                               }
                             />
                           </label>
-                          <span className="text-[10px] text-[var(--muted)] sm:pb-2">
-                            contoh{" "}
-                            {formatRp(
-                              Math.max(0, Math.floor(ch.fee_flat)) +
-                                Math.round((150000 * Math.max(0, ch.fee_percent)) / 100),
-                            )}
-                          </span>
                         </>
                       ) : (
-                        <span className="text-[11px] text-[var(--muted)] sm:col-span-3">
-                          Merchant menanggung MDR channel ini
+                        <span className="text-[11px] text-[var(--muted)] sm:col-span-2">
+                          Merchant menanggung MDR
                         </span>
                       )}
                     </div>
-                  ))
+                    );
+                  })}
+                  </div>
                 )}
               </div>
             </div>
