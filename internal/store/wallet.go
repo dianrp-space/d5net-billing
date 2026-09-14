@@ -64,16 +64,30 @@ func (s *Store) ListWalletTxns(ctx context.Context, tenantID, customerID xid.ID,
 // OutstandingInvoiceIDs mengembalikan tagihan belum lunas milik pelanggan,
 // terurut dari yang paling lama (due_date, lalu terbit).
 func (s *Store) OutstandingInvoiceIDs(ctx context.Context, tenantID, customerID xid.ID) ([]xid.ID, error) {
+	return s.outstandingInvoiceIDs(ctx, tenantID, customerID, false)
+}
+
+// OutstandingSubscriptionInvoiceIDs sama seperti OutstandingInvoiceIDs tetapi
+// hanya tagihan langganan (punya subscription_id). Dipakai auto-pay saldo agar
+// tagihan manual tidak ikut terpotong otomatis.
+func (s *Store) OutstandingSubscriptionInvoiceIDs(ctx context.Context, tenantID, customerID xid.ID) ([]xid.ID, error) {
+	return s.outstandingInvoiceIDs(ctx, tenantID, customerID, true)
+}
+
+func (s *Store) outstandingInvoiceIDs(ctx context.Context, tenantID, customerID xid.ID, subscriptionOnly bool) ([]xid.ID, error) {
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, err
 	}
-	rows, err := s.Pool.Query(ctx, `
+	q := `
 		SELECT id FROM invoices
 		WHERE tenant_id=$1 AND customer_id=$2 AND deleted_at IS NULL
 		  AND status IN ('issued','partial','overdue')
-		  AND total_amount > paid_amount
-		ORDER BY due_date ASC, issued_at ASC NULLS FIRST
-	`, tenantID, customerID)
+		  AND total_amount > paid_amount`
+	if subscriptionOnly {
+		q += ` AND subscription_id IS NOT NULL`
+	}
+	q += ` ORDER BY due_date ASC, issued_at ASC NULLS FIRST`
+	rows, err := s.Pool.Query(ctx, q, tenantID, customerID)
 	if err != nil {
 		return nil, err
 	}

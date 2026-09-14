@@ -354,4 +354,64 @@ func registerWallet(api huma.API, d *Deps) {
 		out.Body.Balance = balance
 		return out, nil
 	})
+
+	// Pelanggan membayar tagihan (mis. tagihan manual) memakai saldo.
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-invoice-pay-wallet", Method: http.MethodPost, Path: "/api/portal/invoices/{id}/pay-with-wallet",
+		Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		ID            xid.ID `path:"id"`
+		Authorization string `header:"Authorization"`
+	}) (*struct {
+		Body struct {
+			Paid    bool  `json:"paid"`
+			Balance int64 `json:"balance"`
+		}
+	}, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		if err := walletEnabledOrForbidden(ctx, d, ten.ID); err != nil {
+			return nil, err
+		}
+		inv, items, err := d.Store.GetInvoice(ctx, ten.ID, input.ID)
+		if err != nil {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		allowed := false
+		for _, c := range custs {
+			if c.ID == inv.CustomerID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, httpx.NotFound("invoice not found")
+		}
+		payment, paid, err := d.Store.PayInvoiceFromWallet(ctx, ten.ID, inv.CustomerID, inv.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out := &struct {
+			Body struct {
+				Paid    bool  `json:"paid"`
+				Balance int64 `json:"balance"`
+			}
+		}{}
+		if bal, berr := d.Store.GetWallet(ctx, ten.ID, inv.CustomerID); berr == nil {
+			out.Body.Balance = bal
+		}
+		if !paid || payment == nil {
+			return out, nil
+		}
+		out.Body.Paid = true
+		if cust, cerr := d.Store.GetCustomer(ctx, ten.ID, inv.CustomerID); cerr == nil && d.Notify != nil {
+			planName := d.Store.PlanNameForSubscription(ctx, ten.ID, inv.SubscriptionID)
+			itemName := store.NotificationItemName(planName, items)
+			_ = d.Notify.SendPaymentConfirmation(ctx, ten.ID, cust.Phone, cust.FullName, planName, itemName, inv.InvoiceNumber, payment.Amount)
+		}
+		resumeAfterInvoicePaid(ctx, d, ten.ID, inv)
+		return out, nil
+	})
 }

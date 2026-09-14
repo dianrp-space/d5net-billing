@@ -463,6 +463,7 @@ export function ClientHome({
     refetchInterval: 15000,
   });
   const [topupOpen, setTopupOpen] = useState(false);
+  const [payingWallet, setPayingWallet] = useState("");
 
   useEffect(() => {
     if (paymentReturnHandled.current) return;
@@ -583,6 +584,41 @@ export function ClientHome({
     }
     if (!isInvoiceUnpaid(inv)) return;
     setPayInv(inv);
+  }
+
+  // Bayar tagihan langsung dari saldo (mis. tagihan manual). Saldo harus cukup.
+  function canPayWithWallet(inv: PayableInvoice) {
+    if (!walletQ.data?.enabled) return false;
+    if (!isInvoiceUnpaid(inv)) return false;
+    const remaining = invoiceRemaining(inv);
+    return remaining > 0 && walletQ.data.balance >= remaining;
+  }
+
+  async function payWithWallet(inv: PayableInvoice) {
+    if (!inv.id || !data.portal_token) {
+      void toastError("Sesi portal lama. Keluar lalu login ulang.");
+      return;
+    }
+    setPayingWallet(inv.id);
+    try {
+      const res = await api<{ paid: boolean; balance: number }>(`/api/portal/invoices/${inv.id}/pay-with-wallet`, {
+        method: "POST",
+        headers: portalHeaders,
+      });
+      if (res.paid) {
+        void toastSuccess("Tagihan dibayar dari saldo");
+        void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
+        void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
+        void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
+        void qc.invalidateQueries({ queryKey: ["portal-wallet", data.tenant_slug] });
+      } else {
+        void toastError("Saldo tidak cukup. Silakan topup dulu.");
+      }
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Gagal membayar dari saldo");
+    } finally {
+      setPayingWallet("");
+    }
   }
 
   // Cancel any pending checkout and forget the saved method so the picker shows
@@ -716,6 +752,16 @@ export function ClientHome({
       <span className="flex flex-wrap items-center justify-end gap-1.5">
         {unpaid ? (
           <>
+            {canPayWithWallet(i) ? (
+              <button
+                type="button"
+                className="btn-ghost whitespace-nowrap"
+                disabled={payingWallet === i.id}
+                onClick={() => void payWithWallet(i)}
+              >
+                {payingWallet === i.id ? "Memproses…" : "Bayar dengan saldo"}
+              </button>
+            ) : null}
             <button type="button" className="btn whitespace-nowrap" onClick={() => startPay(i)}>
               Bayar sekarang
             </button>
@@ -1016,8 +1062,22 @@ export function ClientHome({
                         </p>
                       ) : null}
                       <div className="mt-3 flex flex-wrap gap-2">
+                        {firstUnpaid && canPayWithWallet(firstUnpaid) ? (
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={payingWallet === firstUnpaid.id}
+                            onClick={() => void payWithWallet(firstUnpaid)}
+                          >
+                            {payingWallet === firstUnpaid.id ? "Memproses…" : "Bayar dengan saldo"}
+                          </button>
+                        ) : null}
                         {firstUnpaid ? (
-                          <button type="button" className="btn" onClick={() => startPay(firstUnpaid)}>
+                          <button
+                            type="button"
+                            className={canPayWithWallet(firstUnpaid) ? "btn-ghost" : "btn"}
+                            onClick={() => startPay(firstUnpaid)}
+                          >
                             Bayar sekarang
                           </button>
                         ) : null}
@@ -1164,6 +1224,16 @@ export function ClientHome({
                         <div className="flex flex-wrap items-center gap-1.5">
                           {unpaid ? (
                             <>
+                              {canPayWithWallet(i) ? (
+                                <button
+                                  type="button"
+                                  className="btn-ghost"
+                                  disabled={payingWallet === i.id}
+                                  onClick={() => void payWithWallet(i)}
+                                >
+                                  {payingWallet === i.id ? "Memproses…" : "Bayar dengan saldo"}
+                                </button>
+                              ) : null}
                               <button type="button" className="btn" onClick={() => startPay(i)}>
                                 Bayar sekarang
                               </button>

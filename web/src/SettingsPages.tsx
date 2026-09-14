@@ -360,33 +360,34 @@ export function GeneralSettingsPage() {
               </span>
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="flex items-center gap-2 font-medium">
-                <input
-                  type="checkbox"
-                  checked={walletEnabled}
-                  onChange={(e) => setWalletEnabled(e.target.checked)}
-                />
-                Aktifkan saldo &amp; auto-pay
-              </span>
+            <div className="grid gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] p-3 text-sm">
+              <label className="flex flex-wrap items-center justify-between gap-3">
+                <span className="flex items-center gap-2 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={walletEnabled}
+                    onChange={(e) => setWalletEnabled(e.target.checked)}
+                  />
+                  Aktifkan saldo &amp; auto-pay
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="text-[var(--muted)]">Minimal topup (Rp)</span>
+                  <input
+                    className="input w-32"
+                    type="number"
+                    min={1000}
+                    step={1000}
+                    value={walletMinTopup}
+                    onChange={(e) => setWalletMinTopup(Math.max(0, Number(e.target.value) || 0))}
+                  />
+                </span>
+              </label>
               <span className="text-xs text-[var(--muted)]">
-                Pelanggan bisa topup saldo dari portal. Saat tagihan terbit, tagihan otomatis dibayar dari saldo bila
-                cukup; bila saldo kurang dikirim notifikasi WhatsApp.
+                Pelanggan bisa topup saldo dari portal. Tagihan langganan otomatis dibayar dari saldo saat terbit bila
+                cukup; bila saldo kurang dikirim notifikasi WhatsApp. Tagihan manual dibayar oleh pelanggan (pilih saldo
+                atau payment gateway).
               </span>
-            </label>
-
-            <label className="grid gap-1 text-sm">
-              <span className="font-medium">Minimum topup (Rp)</span>
-              <input
-                className="input"
-                type="number"
-                min={1000}
-                step={1000}
-                value={walletMinTopup}
-                onChange={(e) => setWalletMinTopup(Math.max(0, Number(e.target.value) || 0))}
-              />
-              <span className="text-xs text-[var(--muted)]">Nominal topup minimal di portal pelanggan.</span>
-            </label>
+            </div>
 
             <div className="grid gap-2">
               <span className="text-sm font-medium">Warna primary</span>

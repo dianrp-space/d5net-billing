@@ -35,6 +35,14 @@ func (e *Engine) TryAutoPayInvoice(ctx context.Context, tenantID, invoiceID xid.
 	if cust, cerr := e.store.GetCustomer(ctx, tenantID, inv.CustomerID); cerr == nil {
 		res.Customer = cust
 	}
+	// Auto-pay hanya untuk tagihan langganan (paket internet). Tagihan manual
+	// dibayar oleh pelanggan (pilih saldo atau payment gateway).
+	if inv.SubscriptionID == nil || xid.IsNil(*inv.SubscriptionID) {
+		if bal, berr := e.store.GetWallet(ctx, tenantID, inv.CustomerID); berr == nil {
+			res.Balance = bal
+		}
+		return res, nil
+	}
 	payment, paid, err := e.store.PayInvoiceFromWallet(ctx, tenantID, inv.CustomerID, invoiceID)
 	if err != nil {
 		return res, err
@@ -55,7 +63,7 @@ func (e *Engine) AutoSettleCustomer(ctx context.Context, tenantID, customerID xi
 	if !e.store.WalletEnabled(ctx, tenantID) {
 		return results, nil
 	}
-	ids, err := e.store.OutstandingInvoiceIDs(ctx, tenantID, customerID)
+	ids, err := e.store.OutstandingSubscriptionInvoiceIDs(ctx, tenantID, customerID)
 	if err != nil {
 		return results, err
 	}
