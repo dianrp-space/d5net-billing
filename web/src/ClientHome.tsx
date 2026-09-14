@@ -18,8 +18,17 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { formatRp, IconButton, invoiceStatusLabel, paymentStatusLabel, Section, SecretInput, subscriptionStatusLabel, Table, ticketStatusHint, ticketStatusLabel, ticketStatusTone } from "./ui";
-import { IconBan, IconBanknote, IconChart, IconDownload, IconGauge, IconLock, IconLogout, IconShield, IconTicket } from "./icons";
+import { IconBan, IconBanknote, IconChart, IconDownload, IconGauge, IconLogout, IconShield, IconTicket, IconUser } from "./icons";
 import { PortalPayHost } from "./PayMethodDialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { UserAvatar } from "./UserMenu";
 import { clearSavedPayMethod, consumePaymentReturn, confirmPaymentAfterReturn, hasSavedPayMethod, invoiceRemaining, isInvoiceUnpaid, isIsolirStatus, paymentMethodLabel, type PayableInvoice } from "./payMethod";
 import { canChangePortalPlan, PortalChangePlanDialog, PortalPlanCatalog, type PortalPlan, type PortalSub } from "./PortalChangePlan";
 import { getSidebarOpen, setSidebarOpen, usePersistedTab } from "./navPersist";
@@ -32,7 +41,7 @@ const CLIENT_PAGES: { id: ClientPage; label: string; icon: ReactNode }[] = [
   { id: "invoices", label: "Tagihan", icon: <IconChart /> },
   { id: "payments", label: "Pembayaran", icon: <IconBanknote /> },
   { id: "tickets", label: "Keluhan", icon: <IconTicket /> },
-  { id: "account", label: "Akun", icon: <IconLock /> },
+  { id: "account", label: "Profil", icon: <IconUser /> },
 ];
 
 const pageTitles: Record<ClientPage, string> = {
@@ -41,7 +50,7 @@ const pageTitles: Record<ClientPage, string> = {
   invoices: "Tagihan",
   payments: "Riwayat pembayaran",
   tickets: "Keluhan",
-  account: "Akun",
+  account: "Profil",
 };
 
 const TICKET_CATEGORIES: { id: string; label: string }[] = [
@@ -881,26 +890,6 @@ export function ClientHome({
             </div>
           </div>
         </nav>
-        <div className="app-sidebar-foot">
-          <div className="app-user-chip">
-            {(() => {
-              const first = fullAccounts[0];
-              const url = first ? photoOf(first) : null;
-              return url ? (
-                <img src={url} alt="" className="app-user-avatar app-user-avatar--img object-cover" />
-              ) : (
-                <div className="app-user-avatar">{(greeting.trim()[0] || "P").toUpperCase()}</div>
-              );
-            })()}
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{greeting}</p>
-              <p className="truncate text-xs text-[var(--muted)]">{data.customer?.phone || data.customer?.customer_code || ""}</p>
-            </div>
-            <IconButton label="Keluar" onClick={logout}>
-              <IconLogout />
-            </IconButton>
-          </div>
-        </div>
       </aside>
 
       <div className="app-main">
@@ -935,6 +924,18 @@ export function ClientHome({
             </Breadcrumb>
           </div>
           <div className="flex items-center gap-2">
+            {walletQ.data?.enabled ? (
+              <button
+                type="button"
+                className="portal-header-saldo"
+                title="Topup saldo"
+                aria-label={`Saldo ${formatRp(walletQ.data.balance)}`}
+                onClick={() => setTopupOpen(true)}
+              >
+                <IconBanknote />
+                <span>{formatRp(walletQ.data.balance)}</span>
+              </button>
+            ) : null}
             <ClientBell
               invoices={invoices}
               payments={payments}
@@ -943,11 +944,47 @@ export function ClientHome({
               onNavigatePage={setPage}
             />
             <ThemeToggle />
-            <span className="portal-header-logout">
-              <IconButton label="Keluar" onClick={logout}>
-                <IconLogout />
-              </IconButton>
-            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="app-header-user-trigger"
+                  title="Menu profil"
+                  aria-label="Menu profil"
+                >
+                  <UserAvatar
+                    name={greeting}
+                    avatarUrl={fullAccounts[0] ? photoOf(fullAccounts[0]) : null}
+                    className="app-user-avatar--header"
+                  />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col gap-0.5 font-normal">
+                    <span className="truncate text-sm font-semibold text-[var(--text)]">{greeting}</span>
+                    <span className="truncate text-[11px] text-[var(--muted)]">
+                      {data.customer?.phone || data.customer?.customer_code || ""}
+                    </span>
+                    {walletQ.data?.enabled ? (
+                      <span className="truncate text-[11px] text-[var(--muted)]">
+                        Saldo: {formatRp(walletQ.data.balance)}
+                      </span>
+                    ) : null}
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setPage("account")}>
+                  <IconUser className="size-4 opacity-80" />
+                  Profil
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem danger onSelect={() => logout()}>
+                  <IconLogout className="size-4 opacity-80" />
+                  Keluar
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 

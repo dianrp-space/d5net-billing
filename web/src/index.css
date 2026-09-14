@@ -1244,8 +1244,34 @@ input, select, textarea, button { font: inherit; }
 .portal-bottom-nav {
   display: none;
 }
-.portal-header-logout {
-  display: none;
+.portal-header-saldo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2.25rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--panel-muted);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.portal-header-saldo:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+@media (max-width: 480px) {
+  .portal-header-saldo {
+    padding: 0 0.5rem;
+    font-size: 0.72rem;
+  }
+  .portal-header-saldo svg {
+    width: 14px;
+    height: 14px;
+  }
 }
 .portal-cards-mobile {
   display: none;
@@ -1466,9 +1492,6 @@ input, select, textarea, button { font: inherit; }
   }
   .app-shell--portal .app-content {
     padding: 1rem 1rem calc(5.25rem + env(safe-area-inset-bottom));
-  }
-  .app-shell--portal .portal-header-logout {
-    display: inline-flex;
   }
   .app-shell--portal .portal-bottom-nav {
     display: flex;
