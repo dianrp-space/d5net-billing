@@ -40,7 +40,7 @@ const emptyNetwork: IsolirNetwork = {
 
 function buildDocsHint(redirectURL: string, loginURL: string, poolLabel: string) {
   const url = redirectURL || "{portal_base_url}/api/public/isolir";
-  const login = loginURL || "{portal_base_url}/isolir";
+  const login = loginURL || "{portal_base_url}/login";
   return `Halaman isolir (template admin, Web Proxy redirect-to):
 ${url}
 
@@ -153,7 +153,7 @@ export function IsolirTemplatePage() {
   const logoURL = brandingQ.data?.logo_url || DEFAULT_BRAND_LOGO;
   const primaryHex = parseHexColor(brandingQ.data?.primary_color) || DEFAULT_PRIMARY;
   const base = network.portal_base_url.replace(/\/$/, "");
-  const loginURL = base ? `${base}/isolir` : "/isolir";
+  const loginURL = base ? `${base}/login` : "/login";
   const redirectURL = base ? `${base}/api/public/isolir` : "/api/public/isolir";
 
   const poolLabel = selectedPool

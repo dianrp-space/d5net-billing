@@ -72,13 +72,14 @@ func IsolirLandingURL(base string) string {
 	return base + path
 }
 
-// IsolirClientPath is the isolir login/pay page linked from the template's
-// {{login_url}} placeholder.
+// IsolirClientPath is the customer portal login linked from the template's
+// {{login_url}} placeholder. It is the regular client login (/login), NOT the
+// isolir landing page itself.
 func IsolirClientPath(_ string) string {
-	return "/isolir"
+	return "/login"
 }
 
-// IsolirPortalURL builds {base}/isolir, the login/pay target for the template.
+// IsolirPortalURL builds {base}/login, the login/pay target for the template.
 func IsolirPortalURL(base, slug string) string {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	path := IsolirClientPath(slug)

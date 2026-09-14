@@ -29,10 +29,10 @@ halaman yang menampilkan **template isolir** yang diedit di menu itu:
 
 Contoh: `https://billing.example.com/api/public/isolir`
 
-Template berisi tombol login (`{{login_url}}`) yang mengarah ke halaman login/bayar isolir:
+Template berisi tombol login (`{{login_url}}`) yang mengarah ke halaman login portal pelanggan:
 
 ```
-{portal_base_url}/isolir
+{portal_base_url}/login
 ```
 
 ### Alur
@@ -42,7 +42,7 @@ Template berisi tombol login (`{{login_url}}`) yang mengarah ke halaman login/ba
 3. Session di-disconnect → user reconnect mendapat IP dari **pool isolir**.
 4. HTTP dari pool isolir masuk **Web Proxy** → redirect ke halaman template isolir
    (RouterOS 7: `action=redirect` + `action-data`; v6: `deny` + `redirect-to`).
-5. User lihat template → klik login → masuk ke portal isolir → lihat tagihan → bayar.
+5. User lihat template → klik login → masuk portal pelanggan → lihat tagihan → bayar.
 6. Setelah tidak ada tunggakan past due → resume profil normal, prefix `ISOLIR ` dihapus.
 
 ### Sync otomatis (Web Proxy)

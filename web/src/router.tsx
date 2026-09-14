@@ -20,7 +20,6 @@ import { AdminApp, isAdminPage, normalizeAdminPage, type AdminPage } from "./Adm
 import { ClientHome } from "./ClientHome";
 import { Landing } from "./Landing";
 import { TenantLogin, type ClientPortalData } from "./TenantLogin";
-import { IsolirPortalPage } from "./IsolirPortalPage";
 import { getLastAdminPage, setLastAdminPage } from "./navPersist";
 import { TenantAccent } from "./theme";
 import { notePaymentReturnFromLocation } from "./payMethod";
@@ -156,12 +155,6 @@ const adminLoginRoute = createRoute({
     if (hasClientSession()) throw redirect({ to: "/client/dashboard" });
   },
   component: AdminLoginView,
-});
-
-const isolirRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/isolir",
-  component: IsolirPortalPage,
 });
 
 // ---------------------------------------------------------------------------
@@ -342,7 +335,6 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   clientLoginRoute,
   adminLoginRoute,
-  isolirRoute,
   adminIndexRoute,
   adminSectionRoute,
   customerSecretsRoute,
