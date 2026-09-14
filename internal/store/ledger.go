@@ -324,7 +324,7 @@ func (s *Store) GeneralJournal(ctx context.Context, tenantID xid.ID, from, to ti
 	}
 	args = append(args, limit, offset)
 	rows, err := s.Pool.Query(ctx, `
-		SELECT e.id, e.entry_date, COALESCE(e.reference,''), e.description, COALESCE(e.source_type,'')
+		SELECT e.id, e.entry_date::text, COALESCE(e.reference,''), e.description, COALESCE(e.source_type,'')
 		FROM journal_entries e `+where+
 		fmt.Sprintf(` ORDER BY e.entry_date DESC, e.created_at DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
 	if err != nil {
@@ -424,7 +424,7 @@ func (s *Store) AccountLedger(ctx context.Context, tenantID xid.ID, accountID xi
 	acc.Lines = []LedgerLine{}
 
 	rows, err := s.Pool.Query(ctx, `
-		SELECT e.id, e.entry_date, COALESCE(e.reference,''), e.description, l.debit, l.credit
+		SELECT e.id, e.entry_date::text, COALESCE(e.reference,''), e.description, l.debit, l.credit
 		FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id
 		WHERE l.tenant_id=$1 AND l.account_id=$2 AND e.entry_date >= $3 AND e.entry_date <= $4
 		ORDER BY e.entry_date, e.created_at
