@@ -35,12 +35,7 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 		}
 		_ = d.Store.ResolveIsolirPool(ctx, tid, &net)
 		htmlBody, _ := d.Store.GetIsolirHTML(ctx, tid)
-		ten, _ := d.Store.GetTenant(ctx, tid)
-		slug := ""
-		if ten != nil {
-			slug = ten.Slug
-		}
-		isolirURL := store.IsolirPortalURL(net.PortalBaseURL, slug)
+		isolirURL := store.IsolirLandingURL(net.PortalBaseURL)
 		out := &struct {
 			Body struct {
 				Network   store.IsolirNetworkSettings `json:"network"`
@@ -101,12 +96,7 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 		net, _ = d.Store.GetIsolirNetworkSettings(ctx, tid)
 		_ = d.Store.ResolveIsolirPool(ctx, tid, &net)
 		htmlBody, _ := d.Store.GetIsolirHTML(ctx, tid)
-		ten, _ := d.Store.GetTenant(ctx, tid)
-		slug := ""
-		if ten != nil {
-			slug = ten.Slug
-		}
-		isolirURL := store.IsolirPortalURL(net.PortalBaseURL, slug)
+		isolirURL := store.IsolirLandingURL(net.PortalBaseURL)
 		out := &struct {
 			Body struct {
 				Network   store.IsolirNetworkSettings `json:"network"`
@@ -186,8 +176,9 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 
 func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 	if isolirURL == "" {
-		isolirURL = "{portal_base_url}/isolir"
+		isolirURL = store.IsolirLandingURL("")
 	}
+	loginURL := store.IsolirPortalURL(net.PortalBaseURL, "")
 	pool := net.PoolRanges
 	if pool == "" {
 		pool = "(pilih IP pool isolir)"
@@ -196,7 +187,8 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 	if name == "" {
 		name = "isolir"
 	}
-	return "URL isolir (Web Proxy redirect-to):\n" + isolirURL +
+	return "URL isolir / halaman template (Web Proxy redirect-to):\n" + isolirURL +
+		"\nTombol login di template ({{login_url}}) mengarah ke:\n" + loginURL +
 		"\n\nPool isolir dipakai saat worker mengisolir langganan di router masing-masing." +
 		"\nPool: " + name + " · " + pool +
 		"\n\nSetting di RouterOS (IP → Web Proxy):\n" +

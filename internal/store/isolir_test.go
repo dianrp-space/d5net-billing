@@ -33,6 +33,18 @@ func TestIsolirPortalURL(t *testing.T) {
 	}
 }
 
+func TestIsolirLandingURL(t *testing.T) {
+	if got := IsolirLandingPath(); got != "/api/public/isolir" {
+		t.Fatalf("path = %q", got)
+	}
+	if got := IsolirLandingURL("https://billing.example.com/"); got != "https://billing.example.com/api/public/isolir" {
+		t.Fatalf("url = %q", got)
+	}
+	if got := IsolirLandingURL(""); got != "/api/public/isolir" {
+		t.Fatalf("relative = %q", got)
+	}
+}
+
 func TestIsolirPoolName(t *testing.T) {
 	if got := IsolirPoolName(IsolirNetworkSettings{PoolName: "pool-isolir"}); got != "pool-isolir" {
 		t.Fatalf("named = %q", got)

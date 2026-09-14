@@ -20,24 +20,29 @@ In d5net-billing, add router with host or DDNS name and port 8728.
 
 ### URL page isolir
 
-Set **Portal base URL** di admin → Settings → **Template Isolir**, lalu gunakan:
+Set **Portal base URL** di admin → Settings → **Template Isolir**. Web Proxy mengarahkan ke
+halaman yang menampilkan **template isolir** yang diedit di menu itu:
+
+```
+{portal_base_url}/api/public/isolir
+```
+
+Contoh: `https://billing.example.com/api/public/isolir`
+
+Template berisi tombol login (`{{login_url}}`) yang mengarah ke halaman login/bayar isolir:
 
 ```
 {portal_base_url}/isolir
 ```
-
-Contoh: `https://billing.example.com/isolir`
-
-HTML fallback: `GET /api/public/isolir`
 
 ### Alur
 
 1. Tagihan unpaid lewat `due_date + isolir_grace_days` (Pengaturan → Umum / Cronjob; default 0 = pada jatuh tempo) → subscription `suspended`.
 2. PPP/hotspot secret dipindah ke **profil isolir** (enabled), comment diawali `ISOLIR `.
 3. Session di-disconnect → user reconnect mendapat IP dari **pool isolir**.
-4. HTTP dari pool isolir masuk **Web Proxy** → redirect ke URL isolir di atas
+4. HTTP dari pool isolir masuk **Web Proxy** → redirect ke halaman template isolir
    (RouterOS 7: `action=redirect` + `action-data`; v6: `deny` + `redirect-to`).
-5. User login singkat → lihat tagihan → bayar di portal.
+5. User lihat template → klik login → masuk ke portal isolir → lihat tagihan → bayar.
 6. Setelah tidak ada tunggakan past due → resume profil normal, prefix `ISOLIR ` dihapus.
 
 ### Sync otomatis (Web Proxy)
@@ -64,10 +69,10 @@ Comment rule: `d5n-isolir:*` (aturan lama `drp-isolir:*` otomatis di-rename saat
 /ip proxy access
 add src-address=10.250.0.0/24 dst-host=billing.example.com action=allow comment=d5n-isolir:proxy-allow-portal
 add src-address=10.250.0.0/24 action=redirect \
-  action-data="https://billing.example.com/isolir" comment=d5n-isolir:proxy-redirect
+  action-data="https://billing.example.com/api/public/isolir" comment=d5n-isolir:proxy-redirect
 # RouterOS 6:
 # add src-address=10.250.0.0/24 action=deny \
-#   redirect-to="https://billing.example.com/isolir" comment=d5n-isolir:proxy-redirect
+#   redirect-to="https://billing.example.com/api/public/isolir" comment=d5n-isolir:proxy-redirect
 
 /ip firewall nat
 add chain=dstnat src-address=10.250.0.0/24 protocol=tcp dst-port=80 \

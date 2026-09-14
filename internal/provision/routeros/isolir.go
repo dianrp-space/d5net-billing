@@ -105,7 +105,7 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 	if portalHost == "" {
 		return fmt.Errorf("portal_base_url wajib diisi untuk redirect isolir")
 	}
-	isolirURL := store.IsolirPortalURL(cfg.PortalBaseURL, tenantSlug)
+	isolirURL := store.IsolirLandingURL(cfg.PortalBaseURL)
 
 	return c.run(ctx, tenantID, routerID, nil, "/ip/proxy/set", func(cl *routeros.Client) (*routeros.Reply, error) {
 		// Accept rules first: if any of them fails we abort WITHOUT adding the

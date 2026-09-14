@@ -38,14 +38,17 @@ const emptyNetwork: IsolirNetwork = {
   portal_base_url: typeof window !== "undefined" ? window.location.origin : "",
 };
 
-function buildDocsHint(isolirURL: string, poolLabel: string) {
-  const url = isolirURL || "{portal_base_url}/isolir";
-  return `URL isolir (portal pelanggan):
+function buildDocsHint(redirectURL: string, loginURL: string, poolLabel: string) {
+  const url = redirectURL || "{portal_base_url}/api/public/isolir";
+  const login = loginURL || "{portal_base_url}/isolir";
+  return `Halaman isolir (template admin, Web Proxy redirect-to):
 ${url}
+
+Tombol login di template ({{login_url}}) mengarah ke:
+${login}
 
 Pool: ${poolLabel || "(pilih IP pool isolir)"}
 
-Redirect Web Proxy ke /isolir.
 IP → Web Proxy: enable proxy 8080, allow host billing, redirect HTTP ke URL isolir
 (RouterOS 7: action=redirect + action-data; v6: deny + redirect-to),
 NAT tcp/80 → 8080, allow DNS + HTTPS portal (address-list FQDN, bukan IP publik).`;
@@ -149,15 +152,15 @@ export function IsolirTemplatePage() {
   const appName = brandingQ.data?.name || brandingQ.data?.app_name || "ISP";
   const logoURL = brandingQ.data?.logo_url || DEFAULT_BRAND_LOGO;
   const primaryHex = parseHexColor(brandingQ.data?.primary_color) || DEFAULT_PRIMARY;
-  const loginURL = network.portal_base_url
-    ? `${network.portal_base_url.replace(/\/$/, "")}/isolir`
-    : "/isolir";
+  const base = network.portal_base_url.replace(/\/$/, "");
+  const loginURL = base ? `${base}/isolir` : "/isolir";
+  const redirectURL = base ? `${base}/api/public/isolir` : "/api/public/isolir";
 
   const poolLabel = selectedPool
     ? `${selectedPool.name} · ${selectedPool.network}${selectedPool.router_name ? ` · ${selectedPool.router_name}` : ""}`
     : network.pool_ranges || "";
 
-  const docsHint = q.data?.docs_hint?.trim() || buildDocsHint(loginURL, poolLabel);
+  const docsHint = q.data?.docs_hint?.trim() || buildDocsHint(redirectURL, loginURL, poolLabel);
 
   const deferredHtml = useDeferredValue(html);
   const previewSrcDoc = useMemo(() => {
@@ -225,8 +228,8 @@ export function IsolirTemplatePage() {
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
         <div className="grid min-w-0 gap-4">
           <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--panel-muted)]/40 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--stone)]">URL portal pelanggan (isolir)</p>
-            <code className="mt-1 block break-all text-sm text-[var(--accent)]">{loginURL}</code>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--stone)]">URL halaman isolir (template admin)</p>
+            <code className="mt-1 block break-all text-sm text-[var(--accent)]">{redirectURL}</code>
             <button
               type="button"
               className="mt-2 text-xs font-medium text-[var(--muted)] underline"
@@ -250,7 +253,7 @@ export function IsolirTemplatePage() {
                 onChange={(e) => setNetwork({ ...network, portal_base_url: e.target.value })}
               />
               <span className="text-xs text-[var(--muted)]">
-                Redirect isolir ke <code>{"{base}"}/isolir</code>
+                Redirect isolir ke <code>{"{base}"}/api/public/isolir</code>
               </span>
             </label>
 

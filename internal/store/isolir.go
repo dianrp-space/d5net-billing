@@ -55,13 +55,30 @@ func IsolirPoolName(cfg IsolirNetworkSettings) string {
 	return "isolir"
 }
 
-// IsolirClientPath is the public isolir portal path used for captive redirect.
-// It must be the dedicated isolir page (/isolir), not the regular client login.
+// IsolirLandingPath is the public URL that renders the admin-configured isolir
+// HTML template. This is the Web Proxy redirect target: the customer must land
+// on the template they edited in Settings → Template Isolir.
+func IsolirLandingPath() string {
+	return "/api/public/isolir"
+}
+
+// IsolirLandingURL builds {base}/api/public/isolir for the Web Proxy redirect.
+func IsolirLandingURL(base string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	path := IsolirLandingPath()
+	if base == "" {
+		return path
+	}
+	return base + path
+}
+
+// IsolirClientPath is the isolir login/pay page linked from the template's
+// {{login_url}} placeholder.
 func IsolirClientPath(_ string) string {
 	return "/isolir"
 }
 
-// IsolirPortalURL builds {base}/isolir for Web Proxy redirect.
+// IsolirPortalURL builds {base}/isolir, the login/pay target for the template.
 func IsolirPortalURL(base, slug string) string {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	path := IsolirClientPath(slug)
