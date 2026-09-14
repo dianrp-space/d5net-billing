@@ -283,7 +283,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 	}
 	if s.AdminFee > 0 {
 		y -= 4
-		note := "*Biaya admin hanya berlaku untuk pembayaran online (payment gateway) dan ditanggung pelanggan."
+		note := "*Biaya admin hanya berlaku untuk pembayaran online (payment gateway)."
 		for _, ln := range wrapToWidth(note, 8, contentW, false) {
 			c.text(tableL, y, 8, fontBody, ln, colMuted)
 			y -= 10
