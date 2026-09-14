@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -108,23 +109,29 @@ func main() {
 		}
 	}()
 
-	// Isolir captive listener (plain HTTP): RouterOS dst-nat redirects isolir
-	// pool tcp/80 here, and it serves the isolir page for any host/path.
+	// Isolir captive listener (plain HTTP). Behind nginx/aaPanel this should
+	// bind localhost only (e.g. 127.0.0.1:8090); public reachability is via
+	// nginx listen 80 default_server → proxy here. DST-NAT to-ports is then 80.
 	var isolirSrv *http.Server
 	if addr := strings.TrimSpace(cfg.IsolirHTTPAddr); addr != "" {
 		isolirSrv = &http.Server{
-			Addr:         addr,
 			Handler:      handlers.IsolirCaptiveHandler(deps),
 			ReadTimeout:  10 * time.Second,
 			WriteTimeout: 15 * time.Second,
 			IdleTimeout:  60 * time.Second,
 		}
-		go func() {
-			slog.Info("starting isolir captive server", "addr", addr)
-			if err := isolirSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				slog.Error("isolir captive server error", "err", err)
-			}
-		}()
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			slog.Error("isolir captive listen failed", "addr", addr, "err", err)
+			isolirSrv = nil
+		} else {
+			slog.Info("isolir captive server listening", "addr", ln.Addr().String())
+			go func() {
+				if err := isolirSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
+					slog.Error("isolir captive server error", "err", err)
+				}
+			}()
+		}
 	}
 
 	quit := make(chan os.Signal, 1)

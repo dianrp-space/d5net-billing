@@ -73,12 +73,10 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 		}
 		net := input.Body.Network
 		net.RedirectMode = store.IsolirRedirectDSTNAT
-		// Keep the dst-nat target port in sync with the app's captive listener
-		// (ISOLIR_HTTP_ADDR) unless the admin overrode it explicitly.
-		if strings.TrimSpace(net.IsolirHostPort) == "" && d.Config != nil {
-			if p := d.Config.IsolirHTTPPort(); p != "" {
-				net.IsolirHostPort = p
-			}
+		// Public dst-nat port (often 80 behind nginx). Do NOT copy from
+		// ISOLIR_HTTP_ADDR — that is the internal listen port (e.g. 8090).
+		if strings.TrimSpace(net.IsolirHostPort) == "" {
+			net.IsolirHostPort = store.DefaultIsolirHostPort
 		}
 		if err := d.Store.ResolveIsolirPool(ctx, tid, &net); err != nil {
 			return nil, httpx.BadRequest("IP pool isolir tidak valid: " + err.Error())
@@ -205,15 +203,15 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 		"\n\nPool isolir dipakai saat worker mengisolir langganan di router masing-masing." +
 		"\nPool: " + name + " · " + pool +
 		"\n\nMode redirect: DST-NAT (tanpa Web Proxy).\n" +
-		"Aplikasi menjalankan captive listener HTTP di port " + port + " (ISOLIR_HTTP_ADDR)\n" +
-		"yang menampilkan halaman isolir untuk host/URL apapun.\n" +
-		"Port ini harus terbuka di firewall/server (bukan lewat HTTPS/nginx biasa).\n" +
+		"Production (nginx/aaPanel): Go listen 127.0.0.1:8090; nginx listen 80 default_server\n" +
+		"proxy ke captive. DST-NAT to-ports = " + port + " (biasanya 80, BUKAN 8090).\n" +
+		"Uji dari luar: curl -sI -H 'Host: example.com' http://IP_PUBLIK/\n" +
 		ipHint + "\n" +
 		"\nSetting di RouterOS (IP → Firewall):\n" +
-		"1. NAT: chain=dstnat, tcp/80 dari pool → action=dst-nat to-addresses=<IP dari address-list> to-ports=" + port + "\n" +
-		"2. Filter: allow DNS; allow portal via address-list FQDN (port 80,443," + port + "); drop trafik lain\n" +
+		"1. NAT: chain=dstnat, tcp/80 dari pool → action=dst-nat to-addresses=<IP address-list> to-ports=" + port + "\n" +
+		"2. Filter: allow DNS; allow portal via address-list FQDN (port 80,443); drop trafik lain\n" +
 		"3. Urutan filter: block harus setelah SEMUA accept (dns, dns-tcp, portal)\n" +
-		"Comment: d5n-isolir:* (aturan lama drp-isolir:*/web-proxy otomatis dimigrasi saat sync) · Secret isolir: prefix \"ISOLIR \""
+		"Comment: d5n-isolir:* · Secret isolir: prefix \"ISOLIR \""
 }
 
 // renderIsolirPage builds the isolir landing HTML for the single provider,

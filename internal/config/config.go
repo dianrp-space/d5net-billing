@@ -13,10 +13,10 @@ import (
 type Config struct {
 	AppEnv   string `env:"APP_ENV" envDefault:"development"`
 	HTTPAddr string `env:"HTTP_ADDR" envDefault:"0.0.0.0:8088"`
-	// IsolirHTTPAddr is the plain-HTTP captive listener that serves the isolir
-	// page for ANY host/path. RouterOS dst-nat redirects isolir-pool tcp/80 here.
-	// Empty disables the listener.
-	IsolirHTTPAddr  string        `env:"ISOLIR_HTTP_ADDR" envDefault:"0.0.0.0:8090"`
+	// IsolirHTTPAddr is where the Go captive listener binds.
+	// Production (nginx/aaPanel): 127.0.0.1:8090 — public via nginx :80 default_server.
+	// Dev without nginx: 0.0.0.0:8090. Empty disables the listener.
+	IsolirHTTPAddr  string        `env:"ISOLIR_HTTP_ADDR" envDefault:"127.0.0.1:8090"`
 	DatabaseURL     string        `env:"DATABASE_URL,required"`
 	JWTSecret       string        `env:"JWT_SECRET,required"`
 	JWTAccessTTL    time.Duration `env:"JWT_ACCESS_TTL" envDefault:"15m"`
@@ -29,8 +29,8 @@ type Config struct {
 	WorkerEnabled   bool          `env:"WORKER_ENABLED" envDefault:"true"`
 }
 
-// IsolirHTTPPort returns just the port of IsolirHTTPAddr (e.g. "8090"), used as
-// the RouterOS dst-nat to-ports target. Empty when the listener is disabled.
+// IsolirHTTPPort returns the listen port of IsolirHTTPAddr (internal). This is
+// NOT necessarily the RouterOS dst-nat to-ports (often 80 behind nginx).
 func (c *Config) IsolirHTTPPort() string {
 	addr := strings.TrimSpace(c.IsolirHTTPAddr)
 	if addr == "" {
