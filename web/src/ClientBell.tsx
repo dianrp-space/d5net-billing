@@ -11,7 +11,7 @@ import {
 
 export type ClientPageId = "home" | "plans" | "invoices" | "payments" | "tickets" | "account";
 
-type BellInvoice = {
+export type BellInvoice = {
   id: string;
   invoice_number: string;
   total_amount: number;
@@ -22,7 +22,7 @@ type BellInvoice = {
   customer_code?: string;
 };
 
-type BellPayment = {
+export type BellPayment = {
   amount: number;
   method: string;
   status: string;
@@ -33,7 +33,7 @@ type BellPayment = {
   customer_code?: string;
 };
 
-type BellSub = {
+export type BellSub = {
   id?: string;
   username: string;
   plan_name: string;
@@ -42,7 +42,7 @@ type BellSub = {
   customer_code?: string;
 };
 
-type Item = {
+export type Item = {
   key: string;
   severity: "danger" | "warn" | "ok";
   title: string;
@@ -94,6 +94,68 @@ function severityColor(sev: Item["severity"]): string {
   }
 }
 
+function paymentTime(p: BellPayment): number {
+  const t = new Date(p.paid_at || p.created_at || "").getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Bangun daftar item bell dari data tagihan, pembayaran, dan langganan. */
+export function buildClientBellItems(
+  invoices: BellInvoice[],
+  payments: BellPayment[],
+  subscriptions: BellSub[],
+  multi: boolean,
+): Item[] {
+  const out: Item[] = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  for (const s of subscriptions) {
+    if (!isIsolirStatus(s.status)) continue;
+    const who = multi && (s.customer_code || s.customer_name) ? ` • ${s.customer_code || s.customer_name}` : "";
+    out.push({
+      key: `sub-${s.id || s.username}`,
+      severity: "danger",
+      title: "Layanan diisolir",
+      message: `${s.username}${s.plan_name ? ` · ${s.plan_name}` : ""}${who}. Bayar tagihan agar aktif kembali.`,
+      at: "",
+      page: "home",
+    });
+  }
+  for (const i of invoices) {
+    if (!isInvoiceUnpaid(i)) continue;
+    const overdue = i.due_date ? new Date(i.due_date) < today : false;
+    const who = multi && (i.customer_code || i.customer_name) ? ` • ${i.customer_code || i.customer_name}` : "";
+    out.push({
+      key: `inv-${i.id}`,
+      severity: overdue ? "danger" : "warn",
+      title: overdue ? "Tagihan lewat jatuh tempo" : "Tagihan belum dibayar",
+      message: `${i.invoice_number} • ${formatRp(invoiceRemaining(i))} • jatuh tempo ${fmtDate(i.due_date)}${who}`,
+      at: i.due_date || "",
+      page: "invoices",
+    });
+  }
+  // Pembayaran terbaru di atas. Data portal sudah terurut menurun, tapi kita
+  // urutkan ulang agar tidak bergantung pada asumsi urutan dari API.
+  const paid = payments
+    .filter((p) => p.status === "paid")
+    .slice()
+    .sort((a, b) => paymentTime(b) - paymentTime(a))
+    .slice(0, 5);
+  for (const p of paid) {
+    const when = p.paid_at || p.created_at || "";
+    const who = multi && (p.customer_code || p.customer_name) ? ` • ${p.customer_code || p.customer_name}` : "";
+    out.push({
+      key: `pay-${p.invoice_number || ""}-${when}`,
+      severity: "ok",
+      title: "Pembayaran diterima",
+      message: `${formatRp(p.amount)}${p.invoice_number ? ` • ${p.invoice_number}` : ""}${who}`,
+      at: when,
+      page: "payments",
+    });
+  }
+  return out;
+}
+
 /** Bell notifikasi portal pelanggan: tagihan, pembayaran, isolir. Read-state lokal. */
 export function ClientBell({
   invoices,
@@ -111,53 +173,10 @@ export function ClientBell({
   const [read, setRead] = useState<string[]>(loadRead);
   const [open, setOpen] = useState(false);
 
-  const items = useMemo<Item[]>(() => {
-    const out: Item[] = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    for (const s of subscriptions) {
-      if (!isIsolirStatus(s.status)) continue;
-      const who = multi && (s.customer_code || s.customer_name) ? ` • ${s.customer_code || s.customer_name}` : "";
-      out.push({
-        key: `sub-${s.id || s.username}`,
-        severity: "danger",
-        title: "Layanan diisolir",
-        message: `${s.username}${s.plan_name ? ` · ${s.plan_name}` : ""}${who}. Bayar tagihan agar aktif kembali.`,
-        at: "",
-        page: "home",
-      });
-    }
-    for (const i of invoices) {
-      if (!isInvoiceUnpaid(i)) continue;
-      const overdue = i.due_date ? new Date(i.due_date) < today : false;
-      const who = multi && (i.customer_code || i.customer_name) ? ` • ${i.customer_code || i.customer_name}` : "";
-      out.push({
-        key: `inv-${i.id}`,
-        severity: overdue ? "danger" : "warn",
-        title: overdue ? "Tagihan lewat jatuh tempo" : "Tagihan belum dibayar",
-        message: `${i.invoice_number} • ${formatRp(invoiceRemaining(i))} • jatuh tempo ${fmtDate(i.due_date)}${who}`,
-        at: i.due_date || "",
-        page: "invoices",
-      });
-    }
-    const paid = payments
-      .filter((p) => p.status === "paid")
-      .slice(-5)
-      .reverse();
-    for (const p of paid) {
-      const when = p.paid_at || p.created_at || "";
-      const who = multi && (p.customer_code || p.customer_name) ? ` • ${p.customer_code || p.customer_name}` : "";
-      out.push({
-        key: `pay-${p.invoice_number || ""}-${when}`,
-        severity: "ok",
-        title: "Pembayaran diterima",
-        message: `${formatRp(p.amount)}${p.invoice_number ? ` • ${p.invoice_number}` : ""}${who}`,
-        at: when,
-        page: "payments",
-      });
-    }
-    return out;
-  }, [invoices, payments, subscriptions, multi]);
+  const items = useMemo<Item[]>(
+    () => buildClientBellItems(invoices, payments, subscriptions, multi),
+    [invoices, payments, subscriptions, multi],
+  );
 
   const readSet = useMemo(() => new Set(read), [read]);
   const unread = items.filter((i) => !readSet.has(i.key)).length;
