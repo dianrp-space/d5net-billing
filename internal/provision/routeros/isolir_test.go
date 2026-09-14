@@ -17,34 +17,43 @@ func TestIsolirPortalHostPath(t *testing.T) {
 }
 
 func TestIsolirBlockPosition(t *testing.T) {
+	accepts := []string{isolirRuleCommentDNS, isolirRuleCommentDNS + "-tcp", isolirRuleCommentPortal}
+
+	// Block already after every accept rule: no move.
 	rules := []rosRule{
 		{ID: "*1", Comment: isolirRuleCommentDNS},
 		{ID: "*2", Comment: isolirRuleCommentDNS + "-tcp"},
 		{ID: "*3", Comment: isolirRuleCommentPortal},
-		{ID: "*4", Comment: "user-rule"},
-		{ID: "*5", Comment: isolirRuleCommentBlock},
+		{ID: "*4", Comment: isolirRuleCommentBlock},
 	}
-	id, dest, move := isolirBlockPosition(rules, isolirRuleCommentBlock, isolirRuleCommentPortal)
-	if !move || id != "*5" || dest != "*4" {
-		t.Fatalf("want move *5 before *4, got id=%q dest=%q move=%v", id, dest, move)
+	if _, _, move := isolirBlockPosition(rules, isolirRuleCommentBlock, accepts...); move {
+		t.Fatal("block after all accepts must not move")
 	}
 
+	// Regression: block sits right after portal but DNS rules come after it.
+	// It must be moved to the end, otherwise DNS is dropped and clients can no
+	// longer resolve the portal domain.
 	rules = []rosRule{
 		{ID: "*1", Comment: isolirRuleCommentPortal},
 		{ID: "*2", Comment: isolirRuleCommentBlock},
-		{ID: "*3", Comment: "user-rule"},
+		{ID: "*3", Comment: isolirRuleCommentDNS},
+		{ID: "*4", Comment: isolirRuleCommentDNS + "-tcp"},
 	}
-	if _, _, move = isolirBlockPosition(rules, isolirRuleCommentBlock, isolirRuleCommentPortal); move {
-		t.Fatal("already right after portal must not move")
+	id, dest, move := isolirBlockPosition(rules, isolirRuleCommentBlock, accepts...)
+	if !move || id != "*2" || dest != "" {
+		t.Fatalf("want move *2 to end, got id=%q dest=%q move=%v", id, dest, move)
 	}
 
+	// Block before the accepts with a rule after the last accept: move before
+	// that next rule.
 	rules = []rosRule{
 		{ID: "*1", Comment: isolirRuleCommentBlock},
 		{ID: "*2", Comment: isolirRuleCommentPortal},
+		{ID: "*3", Comment: "user-rule"},
 	}
-	id, dest, move = isolirBlockPosition(rules, isolirRuleCommentBlock, isolirRuleCommentPortal)
-	if !move || id != "*1" || dest != "" {
-		t.Fatalf("want move *1 to end, got id=%q dest=%q move=%v", id, dest, move)
+	id, dest, move = isolirBlockPosition(rules, isolirRuleCommentBlock, accepts...)
+	if !move || id != "*1" || dest != "*3" {
+		t.Fatalf("want move *1 before *3, got id=%q dest=%q move=%v", id, dest, move)
 	}
 }
 

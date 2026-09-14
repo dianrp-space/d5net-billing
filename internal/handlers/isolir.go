@@ -204,7 +204,7 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 		"2. /ip proxy access: allow host billing; ROS7 action=redirect action-data=URL (ROS6: deny + redirect-to)\n" +
 		"3. NAT: tcp/80 dari pool → redirect ke port 8080\n" +
 		"4. Filter: allow DNS; allow HTTPS portal via address-list FQDN (bukan IP publik); drop trafik lain\n" +
-		"5. Urutan filter: dns → dns-tcp → portal → block (block harus tepat setelah portal)\n" +
+		"5. Urutan filter: block harus setelah SEMUA accept (dns, dns-tcp, portal)\n" +
 		"Comment: d5n-isolir:* (aturan lama drp-isolir:* otomatis di-rename saat sync) · Secret isolir: prefix \"ISOLIR \""
 }
 

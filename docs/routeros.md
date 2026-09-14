@@ -84,9 +84,10 @@ add chain=forward src-address=10.250.0.0/24 dst-address-list=d5n-isolir-portal p
 add chain=forward src-address=10.250.0.0/24 action=drop comment=d5n-isolir:block
 ```
 
-**Urutan rule wajib**: `dns` → `dns-tcp` → `portal` → `block`. Rule `block` harus berada **tepat setelah** `portal`, karena firewall memakai first-match. Sync otomatis memindahkan rule `block` ke posisi tersebut.
+**Urutan rule wajib**: `block` harus berada **setelah semua rule accept** (`dns`, `dns-tcp`, `portal`) karena firewall memakai first-match. Kalau `block` nyempil di antara rule accept, DNS bisa ter-drop dan klien tidak bisa resolve domain portal (semua tampak terblokir). Sync otomatis memindahkan rule `block` ke posisi setelah accept terakhir.
 
 Catatan:
 - Web Proxy hanya mengintercept HTTP (port 80). HTTPS ke host billing harus di-allow di filter supaya halaman isolir/login bisa load.
 - Rule `block` men-drop semua trafik forward lain dari pool isolir (termasuk HTTPS/port lain), sehingga user hanya bisa DNS + halaman isolir. Tanpa rule ini trafik lain lolos (default policy `forward` = accept) dan user masih bisa internet.
+- Kalau web proxy gagal di-setup (mis. paket/command tidak tersedia), sync tetap menambahkan rule `block` supaya isolasi tetap jalan; error web proxy dilaporkan terpisah.
 - Jangan isi IP publik di `dst-address` — pakai FQDN di address-list (RouterOS resolve A/AAAA sendiri, aman untuk Cloudflare/CDN).

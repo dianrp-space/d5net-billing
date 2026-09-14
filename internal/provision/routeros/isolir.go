@@ -2,6 +2,7 @@ package routeros
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -107,38 +108,37 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 	isolirURL := store.IsolirPortalURL(cfg.PortalBaseURL, tenantSlug)
 
 	return c.run(ctx, tenantID, routerID, nil, "/ip/proxy/set", func(cl *routeros.Client) (*routeros.Reply, error) {
-		if err := upsertFirewallFilterByComment(cl, isolirRuleCommentDNS, []string{
-			"=chain=forward",
-			"=src-address=" + src,
-			"=protocol=udp",
-			"=dst-port=53",
-			"=action=accept",
-			"=comment=" + isolirRuleCommentDNS,
-		}); err != nil {
-			return nil, err
-		}
-		_ = upsertFirewallFilterByComment(cl, isolirRuleCommentDNS+"-tcp", []string{
-			"=chain=forward",
-			"=src-address=" + src,
-			"=protocol=tcp",
-			"=dst-port=53",
-			"=action=accept",
-			"=comment=" + isolirRuleCommentDNS + "-tcp",
-		})
-		if err := upsertIsolirPortalAllow(cl, src, portalHost); err != nil {
-			return nil, fmt.Errorf("allow portal: %w", err)
-		}
-		if err := ensureFirewallRuleAfter(cl, isolirRuleCommentBlock, isolirRuleCommentPortal, []string{
-			"=chain=forward",
-			"=src-address=" + src,
-			"=action=drop",
-			"=comment=" + isolirRuleCommentBlock,
-		}); err != nil {
-			return nil, fmt.Errorf("block isolir: %w", err)
+		// Accept rules first: if any of them fails we abort WITHOUT adding the
+		// drop, so a broken accept rule can never lock every client out.
+		acceptErr := errors.Join(
+			upsertFirewallFilterByComment(cl, isolirRuleCommentDNS, []string{
+				"=chain=forward",
+				"=src-address=" + src,
+				"=protocol=udp",
+				"=dst-port=53",
+				"=action=accept",
+				"=comment=" + isolirRuleCommentDNS,
+			}),
+			upsertFirewallFilterByComment(cl, isolirRuleCommentDNS+"-tcp", []string{
+				"=chain=forward",
+				"=src-address=" + src,
+				"=protocol=tcp",
+				"=dst-port=53",
+				"=action=accept",
+				"=comment=" + isolirRuleCommentDNS + "-tcp",
+			}),
+			upsertIsolirPortalAllow(cl, src, portalHost),
+		)
+		if acceptErr != nil {
+			return nil, acceptErr
 		}
 
+		// Web Proxy redirect is best-effort: RouterOS v7 only intercepts HTTP
+		// (port 80) and its proxy redirect has known quirks, so failures here
+		// must not abort the sync or skip the drop below.
+		var proxyErr error
 		if err := ensureProxyEnabled(cl, isolirDefaultProxyPort); err != nil {
-			return nil, fmt.Errorf("enable web proxy: %w", err)
+			proxyErr = errors.Join(proxyErr, fmt.Errorf("enable web proxy: %w", err))
 		}
 		if err := upsertProxyAccessByComment(cl, isolirProxyAllowComment, []string{
 			"=src-address=" + src,
@@ -146,10 +146,10 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 			"=action=allow",
 			"=comment=" + isolirProxyAllowComment,
 		}); err != nil {
-			return nil, fmt.Errorf("proxy allow portal: %w", err)
+			proxyErr = errors.Join(proxyErr, fmt.Errorf("proxy allow portal: %w", err))
 		}
 		if err := upsertProxyIsolirRedirect(cl, src, isolirURL); err != nil {
-			return nil, fmt.Errorf("proxy redirect: %w", err)
+			proxyErr = errors.Join(proxyErr, fmt.Errorf("proxy redirect: %w", err))
 		}
 		if err := upsertFirewallNATByComment(cl, isolirRuleCommentNATProxy, []string{
 			"=chain=dstnat",
@@ -160,9 +160,20 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 			"=to-ports=" + isolirDefaultProxyPort,
 			"=comment=" + isolirRuleCommentNATProxy,
 		}); err != nil {
-			return nil, fmt.Errorf("nat to proxy: %w", err)
+			proxyErr = errors.Join(proxyErr, fmt.Errorf("nat to proxy: %w", err))
 		}
-		return nil, nil
+
+		// Drop everything else. Added last and ordered after every accept rule,
+		// so DNS and portal access always win.
+		if err := ensureFirewallBlock(cl, []string{
+			"=chain=forward",
+			"=src-address=" + src,
+			"=action=drop",
+			"=comment=" + isolirRuleCommentBlock,
+		}, isolirRuleCommentDNS, isolirRuleCommentDNS+"-tcp", isolirRuleCommentPortal); err != nil {
+			return nil, fmt.Errorf("block isolir: %w", err)
+		}
+		return nil, proxyErr
 	})
 }
 
@@ -242,35 +253,47 @@ type rosRule struct {
 	Comment string
 }
 
-// isolirBlockPosition returns where the isolir drop rule must sit so the DNS and
-// portal accept rules always win. destination is the .id the drop must be moved
-// before ("" = move to the end); needMove is false when it is already right
-// after the portal rule.
-func isolirBlockPosition(rules []rosRule, blockComment, afterComment string) (blockID, destination string, needMove bool) {
-	blockIdx, afterIdx := -1, -1
+// isolirBlockPosition returns where the isolir drop rule must sit so every
+// isolir accept rule (DNS + portal) always wins. destination is the .id the drop
+// must be moved before ("" = move to the end). needMove is false when the drop
+// already sits after the last accept rule.
+//
+// The drop must come after the LAST accept rule, not merely after the portal
+// rule: the accept rules are not guaranteed to be contiguous, and a drop placed
+// between them would swallow DNS and lock every client out of the portal.
+func isolirBlockPosition(rules []rosRule, blockComment string, afterComments ...string) (blockID, destination string, needMove bool) {
+	isAccept := func(c string) bool {
+		for _, a := range afterComments {
+			if c == a || c == isolirLegacyComment(a) {
+				return true
+			}
+		}
+		return false
+	}
+	blockIdx, lastIdx := -1, -1
 	for i, r := range rules {
 		c := strings.TrimSpace(r.Comment)
 		if c == blockComment || c == isolirLegacyComment(blockComment) {
 			blockIdx = i
 			blockID = r.ID
 		}
-		if c == afterComment || c == isolirLegacyComment(afterComment) {
-			afterIdx = i
+		if isAccept(c) {
+			lastIdx = i
 		}
 	}
-	if blockIdx < 0 || afterIdx < 0 || blockIdx == afterIdx+1 {
+	if blockIdx < 0 || lastIdx < 0 || blockIdx > lastIdx {
 		return blockID, "", false
 	}
-	if afterIdx+1 < len(rules) {
-		return blockID, rules[afterIdx+1].ID, true
+	if lastIdx+1 < len(rules) {
+		return blockID, rules[lastIdx+1].ID, true
 	}
 	return blockID, "", true
 }
 
-// ensureFirewallRuleAfter upserts a filter rule by comment and reorders it to sit
-// immediately after afterComment, so the preceding accept rules keep precedence.
-func ensureFirewallRuleAfter(cl *routeros.Client, comment, afterComment string, props []string) error {
-	if err := upsertFirewallFilterByComment(cl, comment, props); err != nil {
+// ensureFirewallBlock upserts the isolir drop rule and, if needed, moves it so it
+// sits after every accept comment, so DNS and portal access keep precedence.
+func ensureFirewallBlock(cl *routeros.Client, props []string, afterComments ...string) error {
+	if err := upsertFirewallFilterByComment(cl, isolirRuleCommentBlock, props); err != nil {
 		return err
 	}
 	reply, err := cl.Run("/ip/firewall/filter/print")
@@ -281,7 +304,7 @@ func ensureFirewallRuleAfter(cl *routeros.Client, comment, afterComment string, 
 	for _, re := range reply.Re {
 		rules = append(rules, rosRule{ID: re.Map[".id"], Comment: re.Map["comment"]})
 	}
-	blockID, dest, needMove := isolirBlockPosition(rules, comment, afterComment)
+	blockID, dest, needMove := isolirBlockPosition(rules, isolirRuleCommentBlock, afterComments...)
 	if !needMove || blockID == "" {
 		return nil
 	}
