@@ -57,20 +57,12 @@ func TestIsolirBlockPosition(t *testing.T) {
 	}
 }
 
-func TestProxyRedirectPropSetsROS7First(t *testing.T) {
-	sets := proxyRedirectPropSets("10.250.0.0/24", "https://billing.example.com/isolir/acme")
-	if len(sets) != 2 {
-		t.Fatalf("len=%d", len(sets))
+func TestResolveHostIPv4Literal(t *testing.T) {
+	got, err := resolveHostIPv4("203.0.113.5")
+	if err != nil || got != "203.0.113.5" {
+		t.Fatalf("literal IPv4 = %q err=%v", got, err)
 	}
-	joined0 := strings.Join(sets[0], " ")
-	if !strings.Contains(joined0, "=action=redirect") || !strings.Contains(joined0, "=action-data=https://billing.example.com/isolir/acme") {
-		t.Fatalf("ros7 props = %v", sets[0])
-	}
-	if strings.Contains(joined0, "redirect-to") {
-		t.Fatal("ros7 set must not use redirect-to")
-	}
-	joined1 := strings.Join(sets[1], " ")
-	if !strings.Contains(joined1, "=action=deny") || !strings.Contains(joined1, "=redirect-to=") {
-		t.Fatalf("ros6 props = %v", sets[1])
+	if _, err := resolveHostIPv4(""); err == nil {
+		t.Fatal("empty host must error")
 	}
 }

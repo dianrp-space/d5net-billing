@@ -13,6 +13,7 @@ type IsolirNetwork = {
   pool_name?: string;
   pool_ranges?: string;
   portal_base_url: string;
+  isolir_host_port?: string;
 };
 
 type IsolirSettings = {
@@ -38,10 +39,11 @@ const emptyNetwork: IsolirNetwork = {
   portal_base_url: typeof window !== "undefined" ? window.location.origin : "",
 };
 
-function buildDocsHint(redirectURL: string, loginURL: string, poolLabel: string) {
+function buildDocsHint(redirectURL: string, loginURL: string, poolLabel: string, port: string) {
   const url = redirectURL || "{portal_base_url}/api/public/isolir";
   const login = loginURL || "{portal_base_url}/login";
-  return `Halaman isolir (template admin, Web Proxy redirect-to):
+  const p = port || "8090";
+  return `Halaman isolir (template admin):
 ${url}
 
 Tombol login di template ({{login_url}}) mengarah ke:
@@ -49,9 +51,14 @@ ${login}
 
 Pool: ${poolLabel || "(pilih IP pool isolir)"}
 
-IP → Web Proxy: enable proxy 8080, allow host billing, redirect HTTP ke URL isolir
-(RouterOS 7: action=redirect + action-data; v6: deny + redirect-to),
-NAT tcp/80 → 8080, allow DNS + HTTPS portal (address-list FQDN, bukan IP publik).`;
+Mode redirect: DST-NAT (tanpa Web Proxy).
+Aplikasi menjalankan captive listener HTTP di port ${p} (ISOLIR_HTTP_ADDR)
+yang menampilkan halaman isolir untuk host/URL apapun.
+
+IP → Firewall:
+- NAT: chain=dstnat, tcp/80 dari pool → action=dst-nat to-addresses=<IP portal> to-ports=${p}
+  (IP portal = hasil resolve domain portal_base_url; harus IP langsung server, bukan Cloudflare/CDN)
+- Filter: allow DNS; allow portal via address-list FQDN (port 80,443,${p}); drop trafik lain.`;
 }
 
 function defaultPreviewHTML(appName: string, logoURL: string, loginURL: string, primary = DEFAULT_PRIMARY) {
@@ -125,6 +132,7 @@ export function IsolirTemplatePage() {
       pool_name: q.data.network.pool_name,
       pool_ranges: q.data.network.pool_ranges,
       portal_base_url: q.data.network.portal_base_url || window.location.origin,
+      isolir_host_port: q.data.network.isolir_host_port || "8090",
     });
     setHtml(q.data.html || "");
     setHydrated(true);
@@ -160,7 +168,8 @@ export function IsolirTemplatePage() {
     ? `${selectedPool.name} · ${selectedPool.network}${selectedPool.router_name ? ` · ${selectedPool.router_name}` : ""}`
     : network.pool_ranges || "";
 
-  const docsHint = q.data?.docs_hint?.trim() || buildDocsHint(redirectURL, loginURL, poolLabel);
+  const captivePort = network.isolir_host_port || "8090";
+  const docsHint = q.data?.docs_hint?.trim() || buildDocsHint(redirectURL, loginURL, poolLabel, captivePort);
 
   const deferredHtml = useDeferredValue(html);
   const previewSrcDoc = useMemo(() => {
@@ -185,6 +194,7 @@ export function IsolirTemplatePage() {
             router_id: network.router_id || null,
             ip_pool_id: network.ip_pool_id || null,
             portal_base_url: network.portal_base_url,
+            isolir_host_port: network.isolir_host_port || "",
           },
           html,
         }),
@@ -198,6 +208,7 @@ export function IsolirTemplatePage() {
         pool_name: data.network.pool_name,
         pool_ranges: data.network.pool_ranges,
         portal_base_url: data.network.portal_base_url || window.location.origin,
+        isolir_host_port: data.network.isolir_host_port || "8090",
       });
       void toastSuccess("Pengaturan isolir disimpan");
     },
@@ -221,8 +232,8 @@ export function IsolirTemplatePage() {
     <Section title="Template Isolir">
       {q.isLoading && !hydrated ? <p className="mb-3 text-sm text-[var(--muted)]">Memuat pengaturan…</p> : null}
       <p className="mb-4 text-sm text-[var(--muted)]">
-        Halaman ini untuk profil RouterOS, pool, dan redirect portal. Masa tenggang sebelum auto-isolir (hari setelah
-        jatuh tempo) diatur di Pengaturan → Umum atau Cronjob.
+        Halaman ini untuk profil RouterOS, pool, dan redirect portal (DST-NAT). Masa tenggang sebelum auto-isolir (hari
+        setelah jatuh tempo) diatur di Pengaturan → Umum atau Cronjob.
       </p>
 
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
@@ -235,7 +246,7 @@ export function IsolirTemplatePage() {
               className="mt-2 text-xs font-medium text-[var(--muted)] underline"
               onClick={() => setShowDocs((v) => !v)}
             >
-              {showDocs ? "Sembunyikan panduan RouterOS" : "Lihat panduan Web Proxy / firewall"}
+              {showDocs ? "Sembunyikan panduan RouterOS" : "Lihat panduan DST-NAT / firewall"}
             </button>
             {showDocs ? (
               <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-[var(--panel)] p-2 text-[11px] leading-relaxed text-[var(--muted)]">
@@ -302,7 +313,7 @@ export function IsolirTemplatePage() {
               />
               {selectedPool ? (
                 <span className="text-xs text-[var(--muted)]">
-                  Sync Web Proxy + profil isolir ke router ini. Worker juga menerapkan profil isolir di router langganan yang statusnya isolir (bukan hanya router ini).
+                  Sync DST-NAT + profil isolir ke router ini. Worker juga menerapkan profil isolir di router langganan yang statusnya isolir (bukan hanya router ini).
                 </span>
               ) : (
                 <span className="text-xs text-[var(--muted)]">Buat pool khusus isolir di menu IP Pool, lalu pilih di sini.</span>
@@ -316,6 +327,19 @@ export function IsolirTemplatePage() {
                 onChange={(e) => setNetwork({ ...network, profile_name: e.target.value })}
                 placeholder="isolir"
               />
+            </label>
+
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-medium">Port captive isolir (DST-NAT)</span>
+              <Input
+                value={network.isolir_host_port || ""}
+                onChange={(e) => setNetwork({ ...network, isolir_host_port: e.target.value })}
+                placeholder="8090"
+                inputMode="numeric"
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Port listener HTTP aplikasi (env <code>ISOLIR_HTTP_ADDR</code>) yang jadi tujuan <code>dst-nat</code>. Kosongkan = 8090.
+              </span>
             </label>
           </div>
 

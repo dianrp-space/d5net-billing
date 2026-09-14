@@ -108,12 +108,34 @@ func main() {
 		}
 	}()
 
+	// Isolir captive listener (plain HTTP): RouterOS dst-nat redirects isolir
+	// pool tcp/80 here, and it serves the isolir page for any host/path.
+	var isolirSrv *http.Server
+	if addr := strings.TrimSpace(cfg.IsolirHTTPAddr); addr != "" {
+		isolirSrv = &http.Server{
+			Addr:         addr,
+			Handler:      handlers.IsolirCaptiveHandler(deps),
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 15 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		}
+		go func() {
+			slog.Info("starting isolir captive server", "addr", addr)
+			if err := isolirSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("isolir captive server error", "err", err)
+			}
+		}()
+	}
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
+	if isolirSrv != nil {
+		_ = isolirSrv.Shutdown(shutdownCtx)
+	}
 	_ = server.Shutdown(shutdownCtx)
 	slog.Info("api server stopped")
 }

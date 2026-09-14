@@ -94,14 +94,26 @@ func upsertByComment(cl *routeros.Client, basePath, comment string, props []stri
 // one. Legacy rows are updated in place (props carry the new comment), so a
 // rename migrates existing routers without duplicates.
 func upsertByCommentWithLegacy(cl *routeros.Client, basePath, comment, legacy string, props []string) error {
+	return upsertByCommentWithLegacies(cl, basePath, comment, []string{legacy}, props)
+}
+
+// upsertByCommentWithLegacies is upsertByCommentWithLegacy with multiple legacy
+// comment names (e.g. both the d5n- and the older drp- era comment).
+func upsertByCommentWithLegacies(cl *routeros.Client, basePath, comment string, legacies, props []string) error {
 	comment = strings.TrimSpace(comment)
-	legacy = strings.TrimSpace(legacy)
+	legacySet := make(map[string]struct{}, len(legacies))
+	for _, l := range legacies {
+		if l = strings.TrimSpace(l); l != "" {
+			legacySet[l] = struct{}{}
+		}
+	}
 	reply, err := cl.Run(basePath + "/print")
 	if err == nil && reply != nil {
 		for _, re := range reply.Re {
 			id := re.Map[".id"]
 			cmt := strings.TrimSpace(re.Map["comment"])
-			if id == "" || (cmt != comment && (legacy == "" || cmt != legacy)) {
+			_, isLegacy := legacySet[cmt]
+			if id == "" || (cmt != comment && !isLegacy) {
 				continue
 			}
 			if cmt == comment && rowMatchesProps(re.Map, props) {
@@ -114,21 +126,5 @@ func upsertByCommentWithLegacy(cl *routeros.Client, basePath, comment, legacy st
 	}
 	args := append([]string{basePath + "/add"}, props...)
 	_, err = cl.Run(args...)
-	return err
-}
-
-func ensureProxyEnabled(cl *routeros.Client, port string) error {
-	if port == "" {
-		port = isolirDefaultProxyPort
-	}
-	reply, err := cl.Run("/ip/proxy/print")
-	if err == nil && reply != nil && len(reply.Re) > 0 {
-		m := reply.Re[0].Map
-		havePort := strings.TrimSpace(m["port"])
-		if isROSTrue(m["enabled"]) && (havePort == port || havePort == "") {
-			return nil
-		}
-	}
-	_, err = cl.Run("/ip/proxy/set", "=enabled=yes", "=port="+port)
 	return err
 }

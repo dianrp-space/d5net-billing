@@ -72,7 +72,14 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 			return nil, err
 		}
 		net := input.Body.Network
-		net.RedirectMode = "web-proxy"
+		net.RedirectMode = store.IsolirRedirectDSTNAT
+		// Keep the dst-nat target port in sync with the app's captive listener
+		// (ISOLIR_HTTP_ADDR) unless the admin overrode it explicitly.
+		if strings.TrimSpace(net.IsolirHostPort) == "" && d.Config != nil {
+			if p := d.Config.IsolirHTTPPort(); p != "" {
+				net.IsolirHostPort = p
+			}
+		}
 		if err := d.Store.ResolveIsolirPool(ctx, tid, &net); err != nil {
 			return nil, httpx.BadRequest("IP pool isolir tidak valid: " + err.Error())
 		}
@@ -187,17 +194,54 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 	if name == "" {
 		name = "isolir"
 	}
-	return "URL isolir / halaman template (Web Proxy redirect-to):\n" + isolirURL +
+	port := store.IsolirHostPortOrDefault(net)
+	return "URL isolir / halaman template:\n" + isolirURL +
 		"\nTombol login di template ({{login_url}}) mengarah ke:\n" + loginURL +
 		"\n\nPool isolir dipakai saat worker mengisolir langganan di router masing-masing." +
 		"\nPool: " + name + " · " + pool +
-		"\n\nSetting di RouterOS (IP → Web Proxy):\n" +
-		"1. /ip proxy: enabled=yes, port=8080\n" +
-		"2. /ip proxy access: allow host billing; ROS7 action=redirect action-data=URL (ROS6: deny + redirect-to)\n" +
-		"3. NAT: tcp/80 dari pool → redirect ke port 8080\n" +
-		"4. Filter: allow DNS; allow HTTPS portal via address-list FQDN (bukan IP publik); drop trafik lain\n" +
-		"5. Urutan filter: block harus setelah SEMUA accept (dns, dns-tcp, portal)\n" +
-		"Comment: d5n-isolir:* (aturan lama drp-isolir:* otomatis di-rename saat sync) · Secret isolir: prefix \"ISOLIR \""
+		"\n\nMode redirect: DST-NAT (tanpa Web Proxy).\n" +
+		"Aplikasi menjalankan captive listener HTTP di port " + port + " (ISOLIR_HTTP_ADDR)\n" +
+		"yang menampilkan halaman isolir untuk host/URL apapun.\n" +
+		"\nSetting di RouterOS (IP → Firewall):\n" +
+		"1. NAT: chain=dstnat, tcp/80 dari pool → action=dst-nat to-addresses=<IP portal> to-ports=" + port + "\n" +
+		"   (IP portal = hasil resolve domain portal_base_url; harus IP langsung server, bukan Cloudflare/CDN)\n" +
+		"2. Filter: allow DNS; allow portal via address-list FQDN (port 80,443," + port + "); drop trafik lain\n" +
+		"3. Urutan filter: block harus setelah SEMUA accept (dns, dns-tcp, portal)\n" +
+		"Comment: d5n-isolir:* (aturan lama drp-isolir:*/web-proxy otomatis dimigrasi saat sync) · Secret isolir: prefix \"ISOLIR \""
+}
+
+// renderIsolirPage builds the isolir landing HTML for the single provider,
+// applying the admin template + branding. Shared by the /api/public/isolir
+// endpoint and the DST-NAT captive listener.
+func renderIsolirPage(ctx context.Context, d *Deps) ([]byte, error) {
+	ten, err := singleTenant(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	net, _ := d.Store.GetIsolirNetworkSettings(ctx, ten.ID)
+	custom, _ := d.Store.GetIsolirHTML(ctx, ten.ID)
+	brand, _ := d.Store.ResolveTenantBranding(ctx, ten.ID)
+	appName := ten.Name
+	logoURL := ""
+	if brand != nil {
+		if brand.Effective.AppName != "" {
+			appName = brand.Effective.AppName
+		}
+		if brand.Effective.LogoURL != nil {
+			logoURL = *brand.Effective.LogoURL
+		}
+	}
+	loginURL := store.IsolirPortalURL(net.PortalBaseURL, ten.Slug)
+	body := custom
+	if strings.TrimSpace(body) == "" {
+		body = store.DefaultIsolirHTML(appName, logoURL, loginURL)
+	} else {
+		body = strings.ReplaceAll(body, "{{app_name}}", html.EscapeString(appName))
+		body = strings.ReplaceAll(body, "{{logo_url}}", html.EscapeString(logoURL))
+		body = strings.ReplaceAll(body, "{{login_url}}", html.EscapeString(loginURL))
+		body = strings.ReplaceAll(body, "{{tenant_slug}}", html.EscapeString(ten.Slug))
+	}
+	return []byte(body), nil
 }
 
 func registerPublicIsolir(api huma.API, d *Deps) {
@@ -205,37 +249,32 @@ func registerPublicIsolir(api huma.API, d *Deps) {
 		OperationID: "public-isolir-page", Method: http.MethodGet, Path: "/api/public/isolir",
 		Tags: []string{"Public"},
 	}, func(ctx context.Context, _ *struct{}) (*huma.StreamResponse, error) {
-		ten, err := singleTenant(ctx, d)
+		body, err := renderIsolirPage(ctx, d)
 		if err != nil {
 			return nil, err
-		}
-		net, _ := d.Store.GetIsolirNetworkSettings(ctx, ten.ID)
-		custom, _ := d.Store.GetIsolirHTML(ctx, ten.ID)
-		brand, _ := d.Store.ResolveTenantBranding(ctx, ten.ID)
-		appName := ten.Name
-		logoURL := ""
-		if brand != nil {
-			if brand.Effective.AppName != "" {
-				appName = brand.Effective.AppName
-			}
-			if brand.Effective.LogoURL != nil {
-				logoURL = *brand.Effective.LogoURL
-			}
-		}
-		loginURL := store.IsolirPortalURL(net.PortalBaseURL, ten.Slug)
-		body := custom
-		if strings.TrimSpace(body) == "" {
-			body = store.DefaultIsolirHTML(appName, logoURL, loginURL)
-		} else {
-			body = strings.ReplaceAll(body, "{{app_name}}", html.EscapeString(appName))
-			body = strings.ReplaceAll(body, "{{logo_url}}", html.EscapeString(logoURL))
-			body = strings.ReplaceAll(body, "{{login_url}}", html.EscapeString(loginURL))
-			body = strings.ReplaceAll(body, "{{tenant_slug}}", html.EscapeString(ten.Slug))
 		}
 		return &huma.StreamResponse{Body: func(ctx huma.Context) {
 			ctx.SetHeader("Content-Type", "text/html; charset=utf-8")
 			ctx.SetStatus(http.StatusOK)
-			_, _ = ctx.BodyWriter().Write([]byte(body))
+			_, _ = ctx.BodyWriter().Write(body)
 		}}, nil
+	})
+}
+
+// IsolirCaptiveHandler serves the isolir landing page for ANY host/path/method.
+// RouterOS dst-nat redirects isolir-pool HTTP (tcp/80) to this listener, so a
+// customer opening any site is shown the isolir notice. Mount it on a dedicated
+// plain-HTTP listener (ISOLIR_HTTP_ADDR), never on the main API router.
+func IsolirCaptiveHandler(d *Deps) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := renderIsolirPage(r.Context(), d)
+		if err != nil {
+			http.Error(w, "isolir page unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
 	})
 }

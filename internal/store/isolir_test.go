@@ -53,3 +53,25 @@ func TestIsolirPoolName(t *testing.T) {
 		t.Fatalf("default = %q", got)
 	}
 }
+
+func TestDefaultIsolirNetworkSettings(t *testing.T) {
+	def := DefaultIsolirNetworkSettings()
+	if def.RedirectMode != IsolirRedirectDSTNAT {
+		t.Fatalf("redirect mode = %q, want %q", def.RedirectMode, IsolirRedirectDSTNAT)
+	}
+	if def.IsolirHostPort != DefaultIsolirHostPort {
+		t.Fatalf("host port = %q, want %q", def.IsolirHostPort, DefaultIsolirHostPort)
+	}
+}
+
+func TestIsolirHostPortOrDefault(t *testing.T) {
+	if got := IsolirHostPortOrDefault(IsolirNetworkSettings{IsolirHostPort: "9000"}); got != "9000" {
+		t.Fatalf("explicit = %q", got)
+	}
+	if got := IsolirHostPortOrDefault(IsolirNetworkSettings{IsolirHostPort: "  "}); got != DefaultIsolirHostPort {
+		t.Fatalf("blank falls back = %q", got)
+	}
+	if got := IsolirHostPortOrDefault(IsolirNetworkSettings{}); got != DefaultIsolirHostPort {
+		t.Fatalf("default = %q", got)
+	}
+}

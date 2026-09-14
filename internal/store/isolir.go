@@ -11,10 +11,18 @@ import (
 const (
 	IsolirNetworkSettingKey = "isolir.network"
 	IsolirHTMLSettingKey    = "isolir.captive_html"
+
+	// IsolirRedirectDSTNAT is the only supported redirect mode: RouterOS dst-nat
+	// redirects isolir-pool tcp/80 to the app's captive listener (no web-proxy).
+	IsolirRedirectDSTNAT = "dst-nat"
+	// DefaultIsolirHostPort is the captive listener port used as the dst-nat
+	// to-ports target when none is configured.
+	DefaultIsolirHostPort = "8090"
 )
 
-// IsolirNetworkSettings controls RouterOS isolir pool/profile/web-proxy redirect.
-// RouterID + IPPoolID bind the config to a specific router via IPAM.
+// IsolirNetworkSettings controls the RouterOS isolir pool/profile and the
+// DST-NAT redirect to the captive isolir page. RouterID + IPPoolID bind the
+// config to a specific router via IPAM.
 type IsolirNetworkSettings struct {
 	ProfileName string  `json:"profile_name"`
 	RouterID    *xid.ID `json:"router_id,omitempty"`
@@ -24,14 +32,26 @@ type IsolirNetworkSettings struct {
 	PoolRanges    string `json:"pool_ranges,omitempty"`
 	PoolGateway   string `json:"pool_gateway,omitempty"`
 	PortalBaseURL string `json:"portal_base_url"`
-	RedirectMode  string `json:"redirect_mode,omitempty"` // always web-proxy; kept for compat
+	// IsolirHostPort is the dst-nat to-ports target = the app captive listener
+	// port (ISOLIR_HTTP_ADDR). Defaults to DefaultIsolirHostPort.
+	IsolirHostPort string `json:"isolir_host_port,omitempty"`
+	RedirectMode   string `json:"redirect_mode,omitempty"` // always dst-nat; kept for compat
 }
 
 func DefaultIsolirNetworkSettings() IsolirNetworkSettings {
 	return IsolirNetworkSettings{
-		ProfileName:  "isolir",
-		RedirectMode: "web-proxy",
+		ProfileName:    "isolir",
+		RedirectMode:   IsolirRedirectDSTNAT,
+		IsolirHostPort: DefaultIsolirHostPort,
 	}
+}
+
+// IsolirHostPortOrDefault returns the configured dst-nat target port or the default.
+func IsolirHostPortOrDefault(cfg IsolirNetworkSettings) string {
+	if p := strings.TrimSpace(cfg.IsolirHostPort); p != "" {
+		return p
+	}
+	return DefaultIsolirHostPort
 }
 
 // IsolirProfileName is the PPP/hotspot profile used when suspending a subscription.
@@ -56,13 +76,13 @@ func IsolirPoolName(cfg IsolirNetworkSettings) string {
 }
 
 // IsolirLandingPath is the public URL that renders the admin-configured isolir
-// HTML template. This is the Web Proxy redirect target: the customer must land
-// on the template they edited in Settings → Template Isolir.
+// HTML template. The same template is served by the captive listener (for any
+// host/path) that RouterOS dst-nat redirects isolir clients to.
 func IsolirLandingPath() string {
 	return "/api/public/isolir"
 }
 
-// IsolirLandingURL builds {base}/api/public/isolir for the Web Proxy redirect.
+// IsolirLandingURL builds {base}/api/public/isolir, the canonical isolir page URL.
 func IsolirLandingURL(base string) string {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	path := IsolirLandingPath()
@@ -98,7 +118,10 @@ func (s *Store) GetIsolirNetworkSettings(ctx context.Context, tenantID xid.ID) (
 	if cfg.ProfileName == "" {
 		cfg.ProfileName = "isolir"
 	}
-	cfg.RedirectMode = "web-proxy"
+	cfg.RedirectMode = IsolirRedirectDSTNAT
+	if strings.TrimSpace(cfg.IsolirHostPort) == "" {
+		cfg.IsolirHostPort = DefaultIsolirHostPort
+	}
 	cfg.PortalBaseURL = strings.TrimRight(strings.TrimSpace(cfg.PortalBaseURL), "/")
 	return cfg, nil
 }
@@ -107,7 +130,10 @@ func (s *Store) UpsertIsolirNetworkSettings(ctx context.Context, tenantID xid.ID
 	if cfg.ProfileName == "" {
 		cfg.ProfileName = "isolir"
 	}
-	cfg.RedirectMode = "web-proxy"
+	cfg.RedirectMode = IsolirRedirectDSTNAT
+	if strings.TrimSpace(cfg.IsolirHostPort) == "" {
+		cfg.IsolirHostPort = DefaultIsolirHostPort
+	}
 	cfg.PortalBaseURL = strings.TrimRight(strings.TrimSpace(cfg.PortalBaseURL), "/")
 	return s.UpsertSettingJSON(ctx, tenantID, IsolirNetworkSettingKey, cfg)
 }

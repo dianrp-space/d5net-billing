@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 
@@ -13,14 +14,17 @@ import (
 )
 
 const (
-	isolirRuleCommentDNS       = "d5n-isolir:dns"
-	isolirRuleCommentPortal    = "d5n-isolir:portal"
-	isolirRuleCommentBlock     = "d5n-isolir:block"
+	isolirRuleCommentDNS    = "d5n-isolir:dns"
+	isolirRuleCommentPortal = "d5n-isolir:portal"
+	isolirRuleCommentBlock  = "d5n-isolir:block"
+	// isolirRuleCommentNATDstnat is the current dst-nat redirect rule comment.
+	// isolirRuleCommentNATProxy is the legacy web-proxy redirect NAT comment,
+	// matched during upsert so migrating routers convert the rule in place.
+	isolirRuleCommentNATDstnat = "d5n-isolir:nat-dstnat"
 	isolirRuleCommentNATProxy  = "d5n-isolir:nat-to-proxy"
 	isolirProxyAllowComment    = "d5n-isolir:proxy-allow-portal"
 	isolirProxyRedirectComment = "d5n-isolir:proxy-redirect"
 	isolirPortalAddressList    = "d5n-isolir-portal"
-	isolirDefaultProxyPort     = "8080"
 )
 
 // isolirLegacyComments maps current infra comments to their drp- era names.
@@ -42,7 +46,8 @@ func isolirLegacyComment(comment string) string {
 	return isolirLegacyComments[comment]
 }
 
-// EnsureIsolirInfra creates pool + PPP/hotspot isolir profile + Web Proxy redirect + NAT/filter.
+// EnsureIsolirInfra creates pool + PPP/hotspot isolir profile + DST-NAT redirect
+// (to the app captive listener) + firewall allow DNS/portal + drop the rest.
 func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.ID, cfg store.IsolirNetworkSettings, tenantSlug string) error {
 	poolName := store.IsolirPoolName(cfg)
 	if poolName == "" {
@@ -105,11 +110,24 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 	if portalHost == "" {
 		return fmt.Errorf("portal_base_url wajib diisi untuk redirect isolir")
 	}
-	isolirURL := store.IsolirLandingURL(cfg.PortalBaseURL)
+	// DST-NAT target: resolve the portal host to an IP (RouterOS dst-nat
+	// to-addresses needs a literal IP, not a hostname). This must be the direct
+	// IP of the billing server — a Cloudflare/CDN-fronted domain will not serve
+	// the captive page on the isolir port.
+	hostIP, err := resolveHostIPv4(portalHost)
+	if err != nil {
+		return fmt.Errorf("resolve portal host %q untuk dst-nat: %w", portalHost, err)
+	}
+	captivePort := strings.TrimSpace(cfg.IsolirHostPort)
+	if captivePort == "" {
+		captivePort = store.DefaultIsolirHostPort
+	}
 
-	return c.run(ctx, tenantID, routerID, nil, "/ip/proxy/set", func(cl *routeros.Client) (*routeros.Reply, error) {
+	return c.run(ctx, tenantID, routerID, nil, "/ip/firewall/nat/set", func(cl *routeros.Client) (*routeros.Reply, error) {
 		// Accept rules first: if any of them fails we abort WITHOUT adding the
-		// drop, so a broken accept rule can never lock every client out.
+		// drop, so a broken accept rule can never lock every client out. The
+		// portal allow also permits the captive port so the dst-nat'd traffic
+		// (portal IP : captivePort) is not swallowed by the drop rule below.
 		acceptErr := errors.Join(
 			upsertFirewallFilterByComment(cl, isolirRuleCommentDNS, []string{
 				"=chain=forward",
@@ -127,41 +145,38 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 				"=action=accept",
 				"=comment=" + isolirRuleCommentDNS + "-tcp",
 			}),
-			upsertIsolirPortalAllow(cl, src, portalHost),
+			upsertIsolirPortalAllow(cl, src, portalHost, captivePort),
 		)
 		if acceptErr != nil {
 			return nil, acceptErr
 		}
 
-		// Web Proxy redirect is best-effort: RouterOS v7 only intercepts HTTP
-		// (port 80) and its proxy redirect has known quirks, so failures here
-		// must not abort the sync or skip the drop below.
-		var proxyErr error
-		if err := ensureProxyEnabled(cl, isolirDefaultProxyPort); err != nil {
-			proxyErr = errors.Join(proxyErr, fmt.Errorf("enable web proxy: %w", err))
+		// DST-NAT: redirect isolir-pool HTTP straight to the app captive
+		// listener that serves the isolir page for any host/path. No web-proxy
+		// package required (works on every RouterOS 6/7). Reuses the legacy
+		// nat-to-proxy comments so routers migrating from web-proxy convert the
+		// existing rule in place instead of duplicating it.
+		var natErr error
+		if err := upsertFirewallNATByComments(cl, isolirRuleCommentNATDstnat,
+			[]string{isolirRuleCommentNATProxy, "drp-isolir:nat-to-proxy"},
+			[]string{
+				"=chain=dstnat",
+				"=src-address=" + src,
+				"=protocol=tcp",
+				"=dst-port=80",
+				"=action=dst-nat",
+				"=to-addresses=" + hostIP,
+				"=to-ports=" + captivePort,
+				"=comment=" + isolirRuleCommentNATDstnat,
+			}); err != nil {
+			natErr = fmt.Errorf("dst-nat isolir: %w", err)
 		}
-		if err := upsertProxyAccessByComment(cl, isolirProxyAllowComment, []string{
-			"=src-address=" + src,
-			"=dst-host=" + portalHost,
-			"=action=allow",
-			"=comment=" + isolirProxyAllowComment,
-		}); err != nil {
-			proxyErr = errors.Join(proxyErr, fmt.Errorf("proxy allow portal: %w", err))
-		}
-		if err := upsertProxyIsolirRedirect(cl, src, isolirURL); err != nil {
-			proxyErr = errors.Join(proxyErr, fmt.Errorf("proxy redirect: %w", err))
-		}
-		if err := upsertFirewallNATByComment(cl, isolirRuleCommentNATProxy, []string{
-			"=chain=dstnat",
-			"=src-address=" + src,
-			"=protocol=tcp",
-			"=dst-port=80",
-			"=action=redirect",
-			"=to-ports=" + isolirDefaultProxyPort,
-			"=comment=" + isolirRuleCommentNATProxy,
-		}); err != nil {
-			proxyErr = errors.Join(proxyErr, fmt.Errorf("nat to proxy: %w", err))
-		}
+
+		// Clean up leftover web-proxy rules from the old redirect mode so the
+		// router does not keep an orphan proxy redirect. Best-effort.
+		_ = deleteByComment(cl, "/ip/proxy/access",
+			isolirProxyAllowComment, isolirLegacyComment(isolirProxyAllowComment),
+			isolirProxyRedirectComment, isolirLegacyComment(isolirProxyRedirectComment))
 
 		// Drop everything else. Added last and ordered after every accept rule,
 		// so DNS and portal access always win.
@@ -173,8 +188,34 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 		}, isolirRuleCommentDNS, isolirRuleCommentDNS+"-tcp", isolirRuleCommentPortal); err != nil {
 			return nil, fmt.Errorf("block isolir: %w", err)
 		}
-		return nil, proxyErr
+		return nil, natErr
 	})
+}
+
+// resolveHostIPv4 resolves host to an IPv4 address for the dst-nat target,
+// falling back to the first resolved address (IPv6) when no IPv4 exists. If
+// host is already a literal IP it is returned unchanged.
+func resolveHostIPv4(host string) (string, error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", fmt.Errorf("host kosong")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return host, nil
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return "", err
+	}
+	for _, ip := range ips {
+		if v4 := ip.To4(); v4 != nil {
+			return v4.String(), nil
+		}
+	}
+	if len(ips) > 0 {
+		return ips[0].String(), nil
+	}
+	return "", fmt.Errorf("tidak ada IP untuk %q", host)
 }
 
 func isolirPortalHostPath(baseURL, tenantSlug string) (host, path string) {
@@ -204,20 +245,25 @@ func upsertFirewallFilterByComment(cl *routeros.Client, comment string, props []
 	return upsertByCommentWithLegacy(cl, "/ip/firewall/filter", comment, isolirLegacyComment(comment), props)
 }
 
-// upsertIsolirPortalAllow lets isolir clients reach the billing site over HTTP/HTTPS.
-// dst-address on a filter is an IP prefix; putting a hostname there makes RouterOS
-// resolve once and freeze a public IP (breaks Cloudflare/CDN). Address-list keeps the FQDN
-// and refreshes A/AAAA records via DNS.
-func upsertIsolirPortalAllow(cl *routeros.Client, src, portalHost string) error {
+// upsertIsolirPortalAllow lets isolir clients reach the billing site over HTTP/HTTPS
+// plus the captive port that dst-nat redirects HTTP to. dst-address on a filter is an
+// IP prefix; putting a hostname there makes RouterOS resolve once and freeze a public
+// IP (breaks Cloudflare/CDN). Address-list keeps the FQDN and refreshes A/AAAA records
+// via DNS.
+func upsertIsolirPortalAllow(cl *routeros.Client, src, portalHost, captivePort string) error {
 	if err := upsertAddressListFQDN(cl, isolirPortalAddressList, portalHost, isolirRuleCommentPortal); err != nil {
 		return err
+	}
+	dstPorts := "80,443"
+	if p := strings.TrimSpace(captivePort); p != "" && p != "80" && p != "443" {
+		dstPorts += "," + p
 	}
 	props := []string{
 		"=chain=forward",
 		"=src-address=" + src,
 		"=dst-address-list=" + isolirPortalAddressList,
 		"=protocol=tcp",
-		"=dst-port=80,443",
+		"=dst-port=" + dstPorts,
 		"=action=accept",
 		"=comment=" + isolirRuleCommentPortal,
 	}
@@ -352,44 +398,40 @@ func upsertAddressListFQDN(cl *routeros.Client, list, address, comment string) e
 	return err
 }
 
-func upsertFirewallNATByComment(cl *routeros.Client, comment string, props []string) error {
-	return upsertByCommentWithLegacy(cl, "/ip/firewall/nat", comment, isolirLegacyComment(comment), props)
+// upsertFirewallNATByComments upserts a NAT rule matched by its current comment
+// or any of the legacy comments (updating a legacy row in place migrates it).
+func upsertFirewallNATByComments(cl *routeros.Client, comment string, legacies, props []string) error {
+	return upsertByCommentWithLegacies(cl, "/ip/firewall/nat", comment, legacies, props)
 }
 
-func upsertProxyAccessByComment(cl *routeros.Client, comment string, props []string) error {
-	return upsertByCommentWithLegacy(cl, "/ip/proxy/access", comment, isolirLegacyComment(comment), props)
-}
-
-// proxyRedirectPropSets: RouterOS 7 uses action=redirect + action-data;
-// v6 uses action=deny + redirect-to (removed in v7).
-func proxyRedirectPropSets(src, isolirURL string) [][]string {
-	return [][]string{
-		{
-			"=src-address=" + src,
-			"=action=redirect",
-			"=action-data=" + isolirURL,
-			"=comment=" + isolirProxyRedirectComment,
-		},
-		{
-			"=src-address=" + src,
-			"=action=deny",
-			"=redirect-to=" + isolirURL,
-			"=comment=" + isolirProxyRedirectComment,
-		},
-	}
-}
-
-func upsertProxyIsolirRedirect(cl *routeros.Client, src, isolirURL string) error {
-	var last error
-	for _, props := range proxyRedirectPropSets(src, isolirURL) {
-		if err := upsertProxyAccessByComment(cl, isolirProxyRedirectComment, props); err != nil {
-			last = err
-			continue
+// deleteByComment removes every row under basePath whose comment matches any of
+// the given comments. Blank comments are ignored. Best-effort cleanup helper.
+func deleteByComment(cl *routeros.Client, basePath string, comments ...string) error {
+	want := make(map[string]struct{}, len(comments))
+	for _, c := range comments {
+		if c = strings.TrimSpace(c); c != "" {
+			want[c] = struct{}{}
 		}
+	}
+	if len(want) == 0 {
 		return nil
 	}
-	if last == nil {
-		return fmt.Errorf("tidak ada aturan proxy redirect")
+	reply, err := cl.Run(basePath + "/print")
+	if err != nil || reply == nil {
+		return err
+	}
+	var last error
+	for _, re := range reply.Re {
+		id := re.Map[".id"]
+		if id == "" {
+			continue
+		}
+		if _, ok := want[strings.TrimSpace(re.Map["comment"])]; !ok {
+			continue
+		}
+		if _, err := cl.Run(basePath+"/remove", "=numbers="+id); err != nil {
+			last = err
+		}
 	}
 	return last
 }
