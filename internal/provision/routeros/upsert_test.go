@@ -56,7 +56,7 @@ func TestRowMatchesPropsPPPSecret(t *testing.T) {
 func TestIsolirLegacyCommentMapping(t *testing.T) {
 	for _, c := range []string{
 		isolirRuleCommentDNS, isolirRuleCommentDNS + "-tcp", isolirRuleCommentPortal,
-		isolirRuleCommentNATProxy, isolirProxyAllowComment, isolirProxyRedirectComment,
+		isolirRuleCommentBlock, isolirRuleCommentNATProxy, isolirProxyAllowComment, isolirProxyRedirectComment,
 	} {
 		legacy := isolirLegacyComment(c)
 		if legacy == "" || legacy == c {

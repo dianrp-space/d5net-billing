@@ -49,7 +49,7 @@ Sync membuat di router itu saja:
 1. `/ip/pool` dari network IPAM  
 2. `/ppp/profile` (dan hotspot profile) isolir  
 3. **`/ip/proxy`** + access allow, lalu redirect URL isolir (ROS7 `action=redirect` / ROS6 `redirect-to`)  
-4. NAT transparent tcp/80 → proxy 8080 + filter DNS/portal  
+4. NAT transparent tcp/80 → proxy 8080 + filter DNS/portal, lalu drop semua trafik isolir lain (`d5n-isolir:block`)  
 
 Comment rule: `d5n-isolir:*` (aturan lama `drp-isolir:*` otomatis di-rename saat Sync)
 
@@ -78,8 +78,15 @@ add list=d5n-isolir-portal address=billing.example.com comment=d5n-isolir:portal
 
 /ip firewall filter
 add chain=forward src-address=10.250.0.0/24 protocol=udp dst-port=53 action=accept comment=d5n-isolir:dns
+add chain=forward src-address=10.250.0.0/24 protocol=tcp dst-port=53 action=accept comment=d5n-isolir:dns-tcp
 add chain=forward src-address=10.250.0.0/24 dst-address-list=d5n-isolir-portal protocol=tcp dst-port=80,443 \
   action=accept comment=d5n-isolir:portal
+add chain=forward src-address=10.250.0.0/24 action=drop comment=d5n-isolir:block
 ```
 
-Catatan: Web Proxy hanya mengintercept HTTP (port 80). HTTPS ke host billing harus di-allow di filter supaya halaman isolir/login bisa load. Jangan isi IP publik di `dst-address` — pakai FQDN di address-list (RouterOS resolve A/AAAA sendiri, aman untuk Cloudflare/CDN).
+**Urutan rule wajib**: `dns` → `dns-tcp` → `portal` → `block`. Rule `block` harus berada **tepat setelah** `portal`, karena firewall memakai first-match. Sync otomatis memindahkan rule `block` ke posisi tersebut.
+
+Catatan:
+- Web Proxy hanya mengintercept HTTP (port 80). HTTPS ke host billing harus di-allow di filter supaya halaman isolir/login bisa load.
+- Rule `block` men-drop semua trafik forward lain dari pool isolir (termasuk HTTPS/port lain), sehingga user hanya bisa DNS + halaman isolir. Tanpa rule ini trafik lain lolos (default policy `forward` = accept) dan user masih bisa internet.
+- Jangan isi IP publik di `dst-address` — pakai FQDN di address-list (RouterOS resolve A/AAAA sendiri, aman untuk Cloudflare/CDN).

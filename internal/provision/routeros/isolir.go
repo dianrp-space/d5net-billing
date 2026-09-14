@@ -14,6 +14,7 @@ import (
 const (
 	isolirRuleCommentDNS       = "d5n-isolir:dns"
 	isolirRuleCommentPortal    = "d5n-isolir:portal"
+	isolirRuleCommentBlock     = "d5n-isolir:block"
 	isolirRuleCommentNATProxy  = "d5n-isolir:nat-to-proxy"
 	isolirProxyAllowComment    = "d5n-isolir:proxy-allow-portal"
 	isolirProxyRedirectComment = "d5n-isolir:proxy-redirect"
@@ -28,6 +29,7 @@ var isolirLegacyComments = map[string]string{
 	isolirRuleCommentDNS:          "drp-isolir:dns",
 	isolirRuleCommentDNS + "-tcp": "drp-isolir:dns-tcp",
 	isolirRuleCommentPortal:       "drp-isolir:portal",
+	isolirRuleCommentBlock:        "drp-isolir:block",
 	isolirRuleCommentNATProxy:     "drp-isolir:nat-to-proxy",
 	isolirProxyAllowComment:       "drp-isolir:proxy-allow-portal",
 	isolirProxyRedirectComment:    "drp-isolir:proxy-redirect",
@@ -126,6 +128,14 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 		if err := upsertIsolirPortalAllow(cl, src, portalHost); err != nil {
 			return nil, fmt.Errorf("allow portal: %w", err)
 		}
+		if err := ensureFirewallRuleAfter(cl, isolirRuleCommentBlock, isolirRuleCommentPortal, []string{
+			"=chain=forward",
+			"=src-address=" + src,
+			"=action=drop",
+			"=comment=" + isolirRuleCommentBlock,
+		}); err != nil {
+			return nil, fmt.Errorf("block isolir: %w", err)
+		}
 
 		if err := ensureProxyEnabled(cl, isolirDefaultProxyPort); err != nil {
 			return nil, fmt.Errorf("enable web proxy: %w", err)
@@ -222,6 +232,63 @@ func upsertIsolirPortalAllow(cl *routeros.Client, src, portalHost string) error 
 		}
 	}
 	args := append([]string{"/ip/firewall/filter/add"}, props...)
+	_, err = cl.Run(args...)
+	return err
+}
+
+// rosRule is a minimal view of a firewall row used to reason about ordering.
+type rosRule struct {
+	ID      string
+	Comment string
+}
+
+// isolirBlockPosition returns where the isolir drop rule must sit so the DNS and
+// portal accept rules always win. destination is the .id the drop must be moved
+// before ("" = move to the end); needMove is false when it is already right
+// after the portal rule.
+func isolirBlockPosition(rules []rosRule, blockComment, afterComment string) (blockID, destination string, needMove bool) {
+	blockIdx, afterIdx := -1, -1
+	for i, r := range rules {
+		c := strings.TrimSpace(r.Comment)
+		if c == blockComment || c == isolirLegacyComment(blockComment) {
+			blockIdx = i
+			blockID = r.ID
+		}
+		if c == afterComment || c == isolirLegacyComment(afterComment) {
+			afterIdx = i
+		}
+	}
+	if blockIdx < 0 || afterIdx < 0 || blockIdx == afterIdx+1 {
+		return blockID, "", false
+	}
+	if afterIdx+1 < len(rules) {
+		return blockID, rules[afterIdx+1].ID, true
+	}
+	return blockID, "", true
+}
+
+// ensureFirewallRuleAfter upserts a filter rule by comment and reorders it to sit
+// immediately after afterComment, so the preceding accept rules keep precedence.
+func ensureFirewallRuleAfter(cl *routeros.Client, comment, afterComment string, props []string) error {
+	if err := upsertFirewallFilterByComment(cl, comment, props); err != nil {
+		return err
+	}
+	reply, err := cl.Run("/ip/firewall/filter/print")
+	if err != nil {
+		return err
+	}
+	rules := make([]rosRule, 0, len(reply.Re))
+	for _, re := range reply.Re {
+		rules = append(rules, rosRule{ID: re.Map[".id"], Comment: re.Map["comment"]})
+	}
+	blockID, dest, needMove := isolirBlockPosition(rules, comment, afterComment)
+	if !needMove || blockID == "" {
+		return nil
+	}
+	args := []string{"/ip/firewall/filter/move", "=numbers=" + blockID}
+	if dest != "" {
+		args = append(args, "=destination="+dest)
+	}
 	_, err = cl.Run(args...)
 	return err
 }
