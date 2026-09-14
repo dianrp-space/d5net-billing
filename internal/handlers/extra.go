@@ -95,6 +95,222 @@ func registerReports(api huma.API, d *Deps) {
 			Body:               buf.Bytes(),
 		}, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "customer-payments-report", Method: http.MethodGet, Path: "/api/reports/customer-payments",
+		Summary: "Detail pembayaran pelanggan per kategori pemasukan", Tags: []string{"Reports"},
+		Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		From       string `query:"from"`
+		To         string `query:"to"`
+		CustomerID string `query:"customer_id"`
+		Method     string `query:"method"`
+		Category   string `query:"category"`
+		Search     string `query:"search"`
+		Sandbox    string `query:"sandbox"`
+	}) (*struct {
+		Body store.CustomerPaymentReport
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		f, err := parseCustomerPaymentFilter(input.From, input.To, input.CustomerID, input.Method, input.Category, input.Search, input.Sandbox)
+		if err != nil {
+			return nil, err
+		}
+		rep, err := d.Store.CustomerPaymentReport(ctx, tid, f)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct {
+			Body store.CustomerPaymentReport
+		}{Body: *rep}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "export-customer-payments-csv", Method: http.MethodGet, Path: "/api/reports/customer-payments.csv",
+		Tags: []string{"Reports"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		From       string `query:"from"`
+		To         string `query:"to"`
+		CustomerID string `query:"customer_id"`
+		Method     string `query:"method"`
+		Category   string `query:"category"`
+		Search     string `query:"search"`
+		Sandbox    string `query:"sandbox"`
+	}) (*struct {
+		ContentType        string `header:"Content-Type"`
+		ContentDisposition string `header:"Content-Disposition"`
+		Body               []byte
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		f, err := parseCustomerPaymentFilter(input.From, input.To, input.CustomerID, input.Method, input.Category, input.Search, input.Sandbox)
+		if err != nil {
+			return nil, err
+		}
+		rep, err := d.Store.CustomerPaymentReport(ctx, tid, f)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		var buf bytes.Buffer
+		w := csv.NewWriter(&buf)
+		_ = w.Write([]string{"tanggal", "kode_pelanggan", "nama_pelanggan", "invoice", "kategori", "metode", "referensi", "sandbox", "nominal"})
+		for _, row := range rep.Data {
+			_ = w.Write([]string{
+				row.Date.Format("2006-01-02"), row.CustomerCode, row.CustomerName, row.InvoiceNumber,
+				row.Category, row.Method, row.Reference, strconv.FormatBool(row.Sandbox),
+				strconv.FormatInt(row.Amount, 10),
+			})
+		}
+		_ = w.Write([]string{"", "", "", "", "", "", "", "TOTAL", strconv.FormatInt(rep.TotalAmount, 10)})
+		w.Flush()
+		if err := w.Error(); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct {
+			ContentType        string `header:"Content-Type"`
+			ContentDisposition string `header:"Content-Disposition"`
+			Body               []byte
+		}{
+			ContentType:        "text/csv; charset=utf-8",
+			ContentDisposition: `attachment; filename="customer-payments.csv"`,
+			Body:               buf.Bytes(),
+		}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "export-customer-payments-xlsx", Method: http.MethodGet, Path: "/api/reports/customer-payments.xlsx",
+		Tags: []string{"Reports"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		From       string `query:"from"`
+		To         string `query:"to"`
+		CustomerID string `query:"customer_id"`
+		Method     string `query:"method"`
+		Category   string `query:"category"`
+		Search     string `query:"search"`
+		Sandbox    string `query:"sandbox"`
+	}) (*struct {
+		ContentType        string `header:"Content-Type"`
+		ContentDisposition string `header:"Content-Disposition"`
+		Body               []byte
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		f, err := parseCustomerPaymentFilter(input.From, input.To, input.CustomerID, input.Method, input.Category, input.Search, input.Sandbox)
+		if err != nil {
+			return nil, err
+		}
+		rep, err := d.Store.CustomerPaymentReport(ctx, tid, f)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		xl := excelize.NewFile()
+		detail := "Detail"
+		_ = xl.SetSheetName("Sheet1", detail)
+		_ = xl.SetSheetRow(detail, "A1", &[]any{"tanggal", "kode_pelanggan", "nama_pelanggan", "invoice", "kategori", "metode", "referensi", "sandbox", "nominal"})
+		for i, row := range rep.Data {
+			_ = xl.SetSheetRow(detail, fmt.Sprintf("A%d", i+2), &[]any{
+				row.Date.Format("2006-01-02"), row.CustomerCode, row.CustomerName, row.InvoiceNumber,
+				row.Category, row.Method, row.Reference, row.Sandbox, row.Amount,
+			})
+		}
+		rekap := "Rekap"
+		_, _ = xl.NewSheet(rekap)
+		_ = xl.SetSheetRow(rekap, "A1", &[]any{"Kategori", "Jumlah", "Nominal"})
+		for i, c := range rep.ByCategory {
+			_ = xl.SetSheetRow(rekap, fmt.Sprintf("A%d", i+2), &[]any{c.Category, c.Count, c.Amount})
+		}
+		start := len(rep.ByCategory) + 3
+		_ = xl.SetSheetRow(rekap, fmt.Sprintf("A%d", start), &[]any{"Pelanggan", "Jumlah", "Nominal"})
+		for i, c := range rep.ByCustomer {
+			_ = xl.SetSheetRow(rekap, fmt.Sprintf("A%d", start+1+i), &[]any{c.CustomerName, c.Count, c.Amount})
+		}
+		buf, err := xl.WriteToBuffer()
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct {
+			ContentType        string `header:"Content-Type"`
+			ContentDisposition string `header:"Content-Disposition"`
+			Body               []byte
+		}{
+			ContentType:        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			ContentDisposition: `attachment; filename="customer-payments.xlsx"`,
+			Body:               buf.Bytes(),
+		}, nil
+	})
+}
+
+// parseDateRange memvalidasi rentang tanggal laporan (inklusif). Bila kosong,
+// store akan memakai default (awal tahun s/d hari ini).
+func parseDateRange(from, to string) (time.Time, time.Time, error) {
+	var f, t time.Time
+	if s := strings.TrimSpace(from); s != "" {
+		v, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			return f, t, httpx.BadRequest("from harus format YYYY-MM-DD")
+		}
+		f = v
+	}
+	if s := strings.TrimSpace(to); s != "" {
+		v, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			return f, t, httpx.BadRequest("to harus format YYYY-MM-DD")
+		}
+		t = v
+	}
+	if !f.IsZero() && !t.IsZero() && t.Before(f) {
+		return f, t, httpx.BadRequest("to tidak boleh sebelum from")
+	}
+	return f, t, nil
+}
+
+// parseCustomerPaymentFilter memvalidasi query laporan pembayaran pelanggan.
+// Rentang tanggal inklusif; sandbox default dikecualikan (""/"exclude"),
+// "include"/"all" ikut sertakan, "only" hanya data sandbox.
+func parseCustomerPaymentFilter(from, to, customerID, method, category, search, sandbox string) (store.CustomerPaymentFilter, error) {
+	f := store.CustomerPaymentFilter{
+		Method:   strings.TrimSpace(method),
+		Category: strings.TrimSpace(category),
+		Search:   strings.TrimSpace(search),
+	}
+	if s := strings.TrimSpace(from); s != "" {
+		t, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			return f, httpx.BadRequest("from harus format YYYY-MM-DD")
+		}
+		f.From = t
+	}
+	if s := strings.TrimSpace(to); s != "" {
+		t, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			return f, httpx.BadRequest("to harus format YYYY-MM-DD")
+		}
+		f.To = t
+	}
+	if !f.From.IsZero() && !f.To.IsZero() && f.To.Before(f.From) {
+		return f, httpx.BadRequest("to tidak boleh sebelum from")
+	}
+	if s := strings.TrimSpace(customerID); s != "" && !strings.EqualFold(s, "all") {
+		id, err := xid.Parse(s)
+		if err != nil {
+			return f, httpx.BadRequest("customer_id tidak valid")
+		}
+		f.CustomerID = &id
+	}
+	switch strings.ToLower(strings.TrimSpace(sandbox)) {
+	case "include", "all", "true", "1":
+		f.IncludeSandbox = true
+	case "only", "sandbox":
+		f.SandboxOnly = true
+	}
+	return f, nil
 }
 
 func registerAccounting(api huma.API, d *Deps) {
@@ -174,16 +390,147 @@ func registerAccounting(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "pnl-report", Method: http.MethodGet, Path: "/api/accounting/pnl",
 		Tags: []string{"Accounting"}, Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body map[string]any }, error) {
+	}, func(ctx context.Context, input *struct {
+		From string `query:"from"`
+		To   string `query:"to"`
+	}) (*struct{ Body store.PnLReport }, error) {
 		tid, err := tenantIDFromCtx(ctx)
 		if err != nil {
 			return nil, err
 		}
-		pnl, err := d.Store.ProfitAndLoss(ctx, tid)
+		from, to, err := parseDateRange(input.From, input.To)
+		if err != nil {
+			return nil, err
+		}
+		pnl, err := d.Store.ProfitAndLoss(ctx, tid, from, to)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
-		return &struct{ Body map[string]any }{Body: pnl}, nil
+		return &struct{ Body store.PnLReport }{Body: *pnl}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "trial-balance-report", Method: http.MethodGet, Path: "/api/accounting/trial-balance",
+		Tags: []string{"Accounting"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		From string `query:"from"`
+		To   string `query:"to"`
+	}) (*struct{ Body store.TrialBalance }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		from, to, err := parseDateRange(input.From, input.To)
+		if err != nil {
+			return nil, err
+		}
+		tb, err := d.Store.TrialBalance(ctx, tid, from, to)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.TrialBalance }{Body: *tb}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "balance-sheet-report", Method: http.MethodGet, Path: "/api/accounting/balance-sheet",
+		Tags: []string{"Accounting"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		From string `query:"from"`
+		To   string `query:"to"`
+	}) (*struct{ Body store.BalanceSheetReport }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		from, to, err := parseDateRange(input.From, input.To)
+		if err != nil {
+			return nil, err
+		}
+		bs, err := d.Store.BalanceSheet(ctx, tid, from, to)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.BalanceSheetReport }{Body: *bs}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "general-journal", Method: http.MethodGet, Path: "/api/accounting/journal",
+		Tags: []string{"Accounting"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		From      string `query:"from"`
+		To        string `query:"to"`
+		AccountID string `query:"account_id"`
+		Search    string `query:"search"`
+		Limit     int    `query:"limit"`
+		Offset    int    `query:"offset"`
+	}) (*struct {
+		Body struct {
+			Data  []store.JournalEntryView `json:"data"`
+			Total int64                    `json:"total"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		from, to, err := parseDateRange(input.From, input.To)
+		if err != nil {
+			return nil, err
+		}
+		var accountID *xid.ID
+		if s := strings.TrimSpace(input.AccountID); s != "" && !strings.EqualFold(s, "all") {
+			id, err := xid.Parse(s)
+			if err != nil {
+				return nil, httpx.BadRequest("account_id tidak valid")
+			}
+			accountID = &id
+		}
+		list, total, err := d.Store.GeneralJournal(ctx, tid, from, to, accountID, input.Search, input.Limit, input.Offset)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		if list == nil {
+			list = []store.JournalEntryView{}
+		}
+		out := &struct {
+			Body struct {
+				Data  []store.JournalEntryView `json:"data"`
+				Total int64                    `json:"total"`
+			}
+		}{}
+		out.Body.Data = list
+		out.Body.Total = total
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "account-ledger", Method: http.MethodGet, Path: "/api/accounting/ledger",
+		Tags: []string{"Accounting"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		AccountID string `query:"account_id"`
+		From      string `query:"from"`
+		To        string `query:"to"`
+	}) (*struct{ Body store.AccountLedger }, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(input.AccountID) == "" {
+			return nil, httpx.BadRequest("account_id wajib")
+		}
+		accountID, err := xid.Parse(strings.TrimSpace(input.AccountID))
+		if err != nil {
+			return nil, httpx.BadRequest("account_id tidak valid")
+		}
+		from, to, err := parseDateRange(input.From, input.To)
+		if err != nil {
+			return nil, err
+		}
+		led, err := d.Store.AccountLedger(ctx, tid, accountID, from, to)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return &struct{ Body store.AccountLedger }{Body: *led}, nil
 	})
 
 	huma.Register(api, huma.Operation{

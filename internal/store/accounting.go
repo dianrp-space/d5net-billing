@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dianrp-space/d5net-billing/internal/xid"
+	"github.com/jackc/pgx/v5"
 )
 
 type Account struct {
@@ -83,29 +84,46 @@ func (s *Store) CreateExpense(ctx context.Context, tenantID xid.ID, amount int64
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
-	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO expenses (tenant_id, amount, category, description, expense_date)
-		VALUES ($1,$2,$3,$4,$5)
-	`, tenantID, amount, category, desc, date)
-	return err
-}
+	// Simpan beban sekaligus jurnalnya (debit beban, kredit kas) dalam satu
+	// transaksi agar buku besar dan neraca saldo tetap seimbang.
+	return s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var expenseAcc, cashAcc xid.ID
+		_ = tx.QueryRow(ctx, `
+			SELECT id FROM chart_of_accounts
+			WHERE tenant_id=$1 AND is_active=true AND LOWER(type)='expense'
+			ORDER BY code LIMIT 1`, tenantID).Scan(&expenseAcc)
+		_ = tx.QueryRow(ctx, `
+			SELECT id FROM chart_of_accounts
+			WHERE tenant_id=$1 AND is_active=true AND LOWER(type)='asset'
+			ORDER BY code LIMIT 1`, tenantID).Scan(&cashAcc)
 
-func (s *Store) ProfitAndLoss(ctx context.Context, tenantID xid.ID) (map[string]any, error) {
-	var revenue, expense int64
-	_ = s.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='paid' AND deleted_at IS NULL
-		AND paid_at >= date_trunc('month', NOW())
-	`, tenantID).Scan(&revenue)
-	_ = s.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(amount),0) FROM expenses WHERE tenant_id=$1
-		AND expense_date >= date_trunc('month', NOW())
-	`, tenantID).Scan(&expense)
-	return map[string]any{
-		"revenue": revenue,
-		"expense": expense,
-		"profit":  revenue - expense,
-		"period":  time.Now().Format("2006-01"),
-	}, nil
+		var accountArg any
+		if !xid.IsNil(expenseAcc) {
+			accountArg = expenseAcc
+		}
+		var expenseID xid.ID
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO expenses (tenant_id, account_id, amount, category, description, expense_date)
+			VALUES ($1,$2,$3,$4,$5,$6) RETURNING id
+		`, tenantID, accountArg, amount, category, desc, date).Scan(&expenseID); err != nil {
+			return err
+		}
+		if xid.IsNil(expenseAcc) || xid.IsNil(cashAcc) {
+			return nil
+		}
+		var entryID xid.ID
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO journal_entries (tenant_id, entry_date, description, source_type, source_id)
+			VALUES ($1,$2,$3,'expense',$4) RETURNING id
+		`, tenantID, date, "Beban "+category, expenseID).Scan(&entryID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO journal_lines (tenant_id, entry_id, account_id, debit, credit)
+			VALUES ($1,$2,$3,$4,0), ($1,$2,$5,0,$4)
+		`, tenantID, entryID, expenseAcc, amount, cashAcc)
+		return err
+	})
 }
 
 func (s *Store) AgingReceivable(ctx context.Context, tenantID xid.ID) (map[string]int64, error) {
@@ -147,6 +165,7 @@ func (s *Store) CashFlow(ctx context.Context, tenantID xid.ID, months int) ([]ma
 	inRows, err := s.Pool.Query(ctx, `
 		SELECT to_char(date_trunc('month', paid_at), 'YYYY-MM'), COALESCE(SUM(amount),0)
 		FROM payments WHERE tenant_id=$1 AND status='paid' AND paid_at IS NOT NULL AND deleted_at IS NULL
+		  AND sandbox = false
 		  AND paid_at >= NOW() - ($2 * INTERVAL '1 month')
 		GROUP BY 1
 	`, tenantID, months)

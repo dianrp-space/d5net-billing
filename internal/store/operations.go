@@ -1291,7 +1291,10 @@ type JournalEntry struct {
 	ID          xid.ID        `json:"id"`
 	TenantID    xid.ID        `json:"tenant_id"`
 	EntryDate   string        `json:"entry_date"`
+	Reference   string        `json:"reference,omitempty"`
 	Description string        `json:"description"`
+	SourceType  string        `json:"source_type,omitempty"`
+	SourceID    *xid.ID       `json:"source_id,omitempty"`
 	Lines       []JournalLine `json:"lines"`
 }
 
@@ -1307,9 +1310,21 @@ func (s *Store) PostJournalEntry(ctx context.Context, e *JournalEntry) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	var ref, sourceType any
+	if strings.TrimSpace(e.Reference) != "" {
+		ref = e.Reference
+	}
+	if strings.TrimSpace(e.SourceType) != "" {
+		sourceType = e.SourceType
+	}
+	var sourceID any
+	if e.SourceID != nil && !xid.IsNil(*e.SourceID) {
+		sourceID = *e.SourceID
+	}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO journal_entries (tenant_id, entry_date, description) VALUES ($1,$2,$3) RETURNING id
-	`, e.TenantID, e.EntryDate, e.Description).Scan(&e.ID)
+		INSERT INTO journal_entries (tenant_id, entry_date, reference, description, source_type, source_id)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id
+	`, e.TenantID, e.EntryDate, ref, e.Description, sourceType, sourceID).Scan(&e.ID)
 	if err != nil {
 		return err
 	}
@@ -1328,7 +1343,9 @@ func (s *Store) RecordPaymentJournal(ctx context.Context, tenantID xid.ID, amoun
 	return s.PostJournalEntry(ctx, &JournalEntry{
 		TenantID:    tenantID,
 		EntryDate:   time.Now().Format("2006-01-02"),
+		Reference:   ref,
 		Description: "Pembayaran " + ref,
+		SourceType:  "payment",
 		Lines: []JournalLine{
 			{AccountID: cashAccountID, Debit: amount},
 			{AccountID: revenueAccountID, Credit: amount},
@@ -1344,6 +1361,7 @@ func (s *Store) DashboardStats(ctx context.Context, tenantID xid.ID) (map[string
 	_ = s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM invoices WHERE tenant_id=$1 AND deleted_at IS NULL AND status IN ('issued','partial','overdue')`, tenantID).Scan(&unpaidInvoices)
 	_ = s.Pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(amount),0) FROM payments WHERE tenant_id=$1 AND status='paid' AND deleted_at IS NULL
+		AND sandbox = false
 		AND paid_at >= date_trunc('month', NOW())
 	`, tenantID).Scan(&monthlyRevenue)
 	stats["mode"] = "admin"
