@@ -195,6 +195,11 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 		name = "isolir"
 	}
 	port := store.IsolirHostPortOrDefault(net)
+	override := strings.TrimSpace(net.IsolirHostIP)
+	ipHint := "IP dst-nat diambil dari address-list RouterOS (FQDN portal), prefer IP publik"
+	if override != "" {
+		ipHint = "IP dst-nat override manual: " + override
+	}
 	return "URL isolir / halaman template:\n" + isolirURL +
 		"\nTombol login di template ({{login_url}}) mengarah ke:\n" + loginURL +
 		"\n\nPool isolir dipakai saat worker mengisolir langganan di router masing-masing." +
@@ -202,9 +207,10 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 		"\n\nMode redirect: DST-NAT (tanpa Web Proxy).\n" +
 		"Aplikasi menjalankan captive listener HTTP di port " + port + " (ISOLIR_HTTP_ADDR)\n" +
 		"yang menampilkan halaman isolir untuk host/URL apapun.\n" +
+		"Port ini harus terbuka di firewall/server (bukan lewat HTTPS/nginx biasa).\n" +
+		ipHint + "\n" +
 		"\nSetting di RouterOS (IP → Firewall):\n" +
-		"1. NAT: chain=dstnat, tcp/80 dari pool → action=dst-nat to-addresses=<IP portal> to-ports=" + port + "\n" +
-		"   (IP portal = hasil resolve domain portal_base_url; harus IP langsung server, bukan Cloudflare/CDN)\n" +
+		"1. NAT: chain=dstnat, tcp/80 dari pool → action=dst-nat to-addresses=<IP dari address-list> to-ports=" + port + "\n" +
 		"2. Filter: allow DNS; allow portal via address-list FQDN (port 80,443," + port + "); drop trafik lain\n" +
 		"3. Urutan filter: block harus setelah SEMUA accept (dns, dns-tcp, portal)\n" +
 		"Comment: d5n-isolir:* (aturan lama drp-isolir:*/web-proxy otomatis dimigrasi saat sync) · Secret isolir: prefix \"ISOLIR \""

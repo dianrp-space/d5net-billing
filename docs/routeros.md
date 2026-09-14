@@ -57,10 +57,14 @@ yang **selalu** membalas halaman isolir untuk request host/URL apapun. Inilah tu
 
 - Set port ini di Settings → **Template Isolir** → *Port captive isolir*. Nilai harus sama
   dengan port pada `ISOLIR_HTTP_ADDR`.
-- `IP portal` untuk `to-addresses` = hasil resolve domain `portal_base_url`. **Harus IP
-  langsung server billing** (A record ke IP server), bukan IP Cloudflare/CDN — kalau
-  domain di-proxy CDN, dst-nat ke IP CDN tidak akan melayani halaman captive.
-- Pastikan port captive bisa dijangkau dari router/klien (tidak diblok firewall upstream).
+- **Port 8090 harus dibuka di firewall server** (`ufw allow 8090/tcp`, security group, dll).
+  Ini **bukan** path nginx/HTTPS — akses uji: `http://IP_PUBLIK:8090/` (harus tampil halaman isolir).
+  Kalau `https://domain:8090` atau lewat reverse proxy HTTPS, biasanya gagal (listener plain HTTP).
+- **IP tujuan DST-NAT** diambil dari **address-list RouterOS** (FQDN `portal_base_url`),
+  prefer IPv4 publik — sama seperti yang terlihat di Winbox. Ini menghindari DNS di server
+  billing yang sering mengembalikan IP LAN (split-horizon). Opsional: isi *IP host isolir*
+  di Settings untuk override manual.
+- Cloudflare **DNS only** (abu-abu) OK; kalau proxied (oranye) address-list dapat IP CF, bukan server.
 
 ### Sync otomatis (DST-NAT)
 
@@ -105,5 +109,6 @@ Catatan:
 - DST-NAT hanya membelokkan HTTP (port 80). HTTPS tidak bisa di-intercept (sertifikat), tapi rule `block` men-drop-nya sehingga user tetap terisolir; saat user membuka situs HTTP apapun ia diarahkan ke halaman isolir.
 - Rule `portal` juga meng-allow port captive (mis. `8090`) supaya trafik hasil dst-nat (menuju IP portal:port captive) tidak ikut ter-drop.
 - Rule `block` men-drop semua trafik forward lain dari pool isolir, sehingga user hanya bisa DNS + halaman isolir. Tanpa rule ini trafik lain lolos (default policy `forward` = accept) dan user masih bisa internet.
-- `to-addresses` dst-nat butuh IP literal — aplikasi me-resolve `portal_base_url` saat sync. Pakai domain yang A-record-nya menunjuk langsung ke server billing (bukan Cloudflare/CDN).
-- Untuk `dst-address`/filter tetap pakai FQDN di address-list (RouterOS resolve A/AAAA sendiri).
+- `to-addresses` dst-nat diisi dari IPv4 hasil resolve **address-list RouterOS** (bukan
+  `LookupIP` di server billing). Override manual lewat Settings → IP host isolir.
+- Untuk filter tetap pakai FQDN di address-list (RouterOS refresh A/AAAA sendiri).

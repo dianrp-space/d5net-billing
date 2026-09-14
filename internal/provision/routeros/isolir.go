@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/dianrp-space/d5net-billing/internal/store"
 	"github.com/dianrp-space/d5net-billing/internal/xid"
@@ -110,18 +111,13 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 	if portalHost == "" {
 		return fmt.Errorf("portal_base_url wajib diisi untuk redirect isolir")
 	}
-	// DST-NAT target: resolve the portal host to an IP (RouterOS dst-nat
-	// to-addresses needs a literal IP, not a hostname). This must be the direct
-	// IP of the billing server — a Cloudflare/CDN-fronted domain will not serve
-	// the captive page on the isolir port.
-	hostIP, err := resolveHostIPv4(portalHost)
-	if err != nil {
-		return fmt.Errorf("resolve portal host %q untuk dst-nat: %w", portalHost, err)
-	}
 	captivePort := strings.TrimSpace(cfg.IsolirHostPort)
 	if captivePort == "" {
 		captivePort = store.DefaultIsolirHostPort
 	}
+	// Optional manual override (public IP). Prefer this over DNS on the billing
+	// host — that often returns a LAN address via split-horizon /hosts.
+	overrideIP := strings.TrimSpace(cfg.IsolirHostIP)
 
 	return c.run(ctx, tenantID, routerID, nil, "/ip/firewall/nat/set", func(cl *routeros.Client) (*routeros.Reply, error) {
 		// Accept rules first: if any of them fails we abort WITHOUT adding the
@@ -149,6 +145,19 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 		)
 		if acceptErr != nil {
 			return nil, acceptErr
+		}
+
+		// DST-NAT target IP: same view as Winbox address-list (RouterOS DNS),
+		// not the billing server's LookupIP (which often returns LAN).
+		hostIP := overrideIP
+		if hostIP == "" {
+			var err error
+			hostIP, err = resolveAddressListIPv4(cl, isolirPortalAddressList, portalHost)
+			if err != nil {
+				return nil, fmt.Errorf("resolve IP portal dari address-list %q: %w", isolirPortalAddressList, err)
+			}
+		} else if ip := net.ParseIP(hostIP); ip == nil || ip.To4() == nil {
+			return nil, fmt.Errorf("isolir_host_ip %q bukan IPv4 valid", hostIP)
 		}
 
 		// DST-NAT: redirect isolir-pool HTTP straight to the app captive
@@ -192,9 +201,77 @@ func (c *Client) EnsureIsolirInfra(ctx context.Context, tenantID, routerID xid.I
 	})
 }
 
-// resolveHostIPv4 resolves host to an IPv4 address for the dst-nat target,
-// falling back to the first resolved address (IPv6) when no IPv4 exists. If
-// host is already a literal IP it is returned unchanged.
+// resolveAddressListIPv4 reads IPv4 addresses that RouterOS resolved for the
+// portal FQDN address-list entry (same IPs shown in Winbox). Prefers public
+// IPv4 over RFC1918/link-local so dst-nat does not target a LAN address that
+// only the billing host itself would resolve via split-horizon DNS.
+//
+// RouterOS keeps the static FQDN row and adds dynamic rows with the resolved
+// IP; both are scanned. Retries briefly because DNS resolution after add is
+// not always instant.
+func resolveAddressListIPv4(cl *routeros.Client, list, portalHost string) (string, error) {
+	list = strings.TrimSpace(list)
+	portalHost = strings.TrimSpace(portalHost)
+	if list == "" {
+		return "", fmt.Errorf("address-list kosong")
+	}
+	var last error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			time.Sleep(400 * time.Millisecond)
+		}
+		reply, err := cl.Run("/ip/firewall/address-list/print", "?list="+list)
+		if err != nil {
+			last = err
+			continue
+		}
+		var ips []string
+		for _, re := range reply.Re {
+			addr := strings.TrimSpace(re.Map["address"])
+			if addr == "" {
+				continue
+			}
+			// Strip /32 (or any prefix) RouterOS sometimes prints.
+			if i := strings.IndexByte(addr, '/'); i >= 0 {
+				addr = addr[:i]
+			}
+			ip := net.ParseIP(addr)
+			if ip == nil || ip.To4() == nil {
+				continue // still an FQDN row, or IPv6 — skip
+			}
+			ips = append(ips, ip.To4().String())
+		}
+		if picked := pickPreferredIPv4(ips); picked != "" {
+			return picked, nil
+		}
+		last = fmt.Errorf("belum ada IPv4 di address-list %q untuk %q (tunggu DNS RouterOS)", list, portalHost)
+	}
+	if last == nil {
+		last = fmt.Errorf("tidak ada IPv4 di address-list %q", list)
+	}
+	return "", last
+}
+
+// pickPreferredIPv4 returns the first public IPv4, else the first private IPv4.
+func pickPreferredIPv4(ips []string) string {
+	var private string
+	for _, s := range ips {
+		ip := net.ParseIP(s)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		if !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
+			return ip.To4().String()
+		}
+		if private == "" {
+			private = ip.To4().String()
+		}
+	}
+	return private
+}
+
+// resolveHostIPv4 resolves host to an IPv4 address on the billing host.
+// Prefer resolveAddressListIPv4 for dst-nat; this remains for tests / fallbacks.
 func resolveHostIPv4(host string) (string, error) {
 	host = strings.TrimSpace(host)
 	if host == "" {
@@ -207,10 +284,14 @@ func resolveHostIPv4(host string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	var strs []string
 	for _, ip := range ips {
 		if v4 := ip.To4(); v4 != nil {
-			return v4.String(), nil
+			strs = append(strs, v4.String())
 		}
+	}
+	if picked := pickPreferredIPv4(strs); picked != "" {
+		return picked, nil
 	}
 	if len(ips) > 0 {
 		return ips[0].String(), nil

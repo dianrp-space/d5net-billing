@@ -66,3 +66,15 @@ func TestResolveHostIPv4Literal(t *testing.T) {
 		t.Fatal("empty host must error")
 	}
 }
+
+func TestPickPreferredIPv4(t *testing.T) {
+	if got := pickPreferredIPv4([]string{"10.0.0.5", "203.0.113.10"}); got != "203.0.113.10" {
+		t.Fatalf("prefer public = %q", got)
+	}
+	if got := pickPreferredIPv4([]string{"10.0.0.5", "192.168.1.1"}); got != "10.0.0.5" {
+		t.Fatalf("fallback private = %q", got)
+	}
+	if got := pickPreferredIPv4([]string{"billing.example.com", ""}); got != "" {
+		t.Fatalf("no ip = %q", got)
+	}
+}

@@ -35,7 +35,11 @@ type IsolirNetworkSettings struct {
 	// IsolirHostPort is the dst-nat to-ports target = the app captive listener
 	// port (ISOLIR_HTTP_ADDR). Defaults to DefaultIsolirHostPort.
 	IsolirHostPort string `json:"isolir_host_port,omitempty"`
-	RedirectMode   string `json:"redirect_mode,omitempty"` // always dst-nat; kept for compat
+	// IsolirHostIP optionally overrides the dst-nat to-addresses. When empty,
+	// sync reads the IPv4 resolved by RouterOS address-list for portal_base_url
+	// (avoids the billing server's LAN/split-horizon DNS).
+	IsolirHostIP string `json:"isolir_host_ip,omitempty"`
+	RedirectMode string `json:"redirect_mode,omitempty"` // always dst-nat; kept for compat
 }
 
 func DefaultIsolirNetworkSettings() IsolirNetworkSettings {

@@ -14,6 +14,7 @@ type IsolirNetwork = {
   pool_ranges?: string;
   portal_base_url: string;
   isolir_host_port?: string;
+  isolir_host_ip?: string;
 };
 
 type IsolirSettings = {
@@ -52,13 +53,15 @@ ${login}
 Pool: ${poolLabel || "(pilih IP pool isolir)"}
 
 Mode redirect: DST-NAT (tanpa Web Proxy).
-Aplikasi menjalankan captive listener HTTP di port ${p} (ISOLIR_HTTP_ADDR)
-yang menampilkan halaman isolir untuk host/URL apapun.
+Aplikasi menjalankan captive listener HTTP di port ${p} (ISOLIR_HTTP_ADDR).
+Port ini harus terbuka di firewall server (bukan lewat nginx/HTTPS).
+
+IP tujuan DST-NAT = IPv4 dari address-list RouterOS (FQDN portal), prefer publik.
+Bisa di-override manual di field "IP host isolir".
 
 IP → Firewall:
-- NAT: chain=dstnat, tcp/80 dari pool → action=dst-nat to-addresses=<IP portal> to-ports=${p}
-  (IP portal = hasil resolve domain portal_base_url; harus IP langsung server, bukan Cloudflare/CDN)
-- Filter: allow DNS; allow portal via address-list FQDN (port 80,443,${p}); drop trafik lain.`;
+- NAT: chain=dstnat, tcp/80 dari pool → dst-nat to-addresses=<IP address-list> to-ports=${p}
+- Filter: allow DNS; allow portal (80,443,${p}); drop sisanya.`;
 }
 
 function defaultPreviewHTML(appName: string, logoURL: string, loginURL: string, primary = DEFAULT_PRIMARY) {
@@ -133,6 +136,7 @@ export function IsolirTemplatePage() {
       pool_ranges: q.data.network.pool_ranges,
       portal_base_url: q.data.network.portal_base_url || window.location.origin,
       isolir_host_port: q.data.network.isolir_host_port || "8090",
+      isolir_host_ip: q.data.network.isolir_host_ip || "",
     });
     setHtml(q.data.html || "");
     setHydrated(true);
@@ -195,6 +199,7 @@ export function IsolirTemplatePage() {
             ip_pool_id: network.ip_pool_id || null,
             portal_base_url: network.portal_base_url,
             isolir_host_port: network.isolir_host_port || "",
+            isolir_host_ip: network.isolir_host_ip || "",
           },
           html,
         }),
@@ -209,6 +214,7 @@ export function IsolirTemplatePage() {
         pool_ranges: data.network.pool_ranges,
         portal_base_url: data.network.portal_base_url || window.location.origin,
         isolir_host_port: data.network.isolir_host_port || "8090",
+        isolir_host_ip: data.network.isolir_host_ip || "",
       });
       void toastSuccess("Pengaturan isolir disimpan");
     },
@@ -338,7 +344,21 @@ export function IsolirTemplatePage() {
                 inputMode="numeric"
               />
               <span className="text-xs text-[var(--muted)]">
-                Port listener HTTP aplikasi (env <code>ISOLIR_HTTP_ADDR</code>) yang jadi tujuan <code>dst-nat</code>. Kosongkan = 8090.
+                Port listener HTTP aplikasi (env <code>ISOLIR_HTTP_ADDR</code>) tujuan <code>dst-nat</code>.
+                Harus dibuka di firewall server (contoh: <code>ufw allow 8090/tcp</code>). Bukan lewat nginx/HTTPS.
+              </span>
+            </label>
+
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-medium">IP host isolir (opsional)</span>
+              <Input
+                value={network.isolir_host_ip || ""}
+                onChange={(e) => setNetwork({ ...network, isolir_host_ip: e.target.value })}
+                placeholder="Kosong = pakai IP dari address-list RouterOS"
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Override manual IP publik server. Kosongkan agar sync membaca IPv4 dari address-list
+                RouterOS (sama seperti di Winbox), bukan DNS di server billing (sering dapat IP LAN).
               </span>
             </label>
           </div>
