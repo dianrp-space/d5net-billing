@@ -109,6 +109,10 @@ export function CustomersPage({
     queryFn: () => api<CustomerWallet>(`/api/customers/${walletCustomer!.id}/wallet`),
     enabled: Boolean(walletCustomer?.id),
   });
+  const featuresQ = useQuery({
+    queryKey: ["features"],
+    queryFn: () => api<{ wallet_enabled: boolean; wallet_min_topup: number }>("/api/features"),
+  });
   const topupWallet = useMutation({
     mutationFn: () =>
       api(`/api/customers/${walletCustomer!.id}/wallet/topup`, {
@@ -615,9 +619,11 @@ export function CustomersPage({
           c.reseller_name ? `Reseller: ${c.reseller_name}` : c.sales_user_name ? `Sales: ${c.sales_user_name}` : "—",
           statusLabel(c),
           <span key="act" className="flex flex-wrap items-center gap-1.5">
-            <IconButton label="Saldo pelanggan" onClick={() => setWalletCustomer(c)}>
-              <IconBanknote />
-            </IconButton>
+            {featuresQ.data?.wallet_enabled ? (
+              <IconButton label="Saldo pelanggan" onClick={() => setWalletCustomer(c)}>
+                <IconBanknote />
+              </IconButton>
+            ) : null}
             <IconButton label="Dokumentasi / galeri" onClick={() => onOpenGallery(c.id)}>
               <IconImage />
             </IconButton>

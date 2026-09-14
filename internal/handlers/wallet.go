@@ -174,6 +174,31 @@ func portalWalletOwner(custs []*store.Customer) *store.Customer {
 }
 
 func registerWallet(api huma.API, d *Deps) {
+	// Flag fitur untuk UI admin/pelanggan (tanpa permission khusus settings).
+	huma.Register(api, huma.Operation{
+		OperationID: "features", Method: http.MethodGet, Path: "/api/features",
+		Tags: []string{"Settings"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Body struct {
+			WalletEnabled  bool  `json:"wallet_enabled"`
+			WalletMinTopup int64 `json:"wallet_min_topup"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := &struct {
+			Body struct {
+				WalletEnabled  bool  `json:"wallet_enabled"`
+				WalletMinTopup int64 `json:"wallet_min_topup"`
+			}
+		}{}
+		out.Body.WalletEnabled = d.Store.WalletEnabled(ctx, tid)
+		out.Body.WalletMinTopup = d.Store.WalletMinTopup(ctx, tid)
+		return out, nil
+	})
+
 	huma.Register(api, huma.Operation{
 		OperationID: "portal-wallet", Method: http.MethodGet, Path: "/api/portal/wallet",
 		Tags: []string{"Portal"},
