@@ -23,10 +23,10 @@ In d5net-billing, add router with host or DDNS name and port 8728.
 Set **Portal base URL** di admin → Settings → **Template Isolir**, lalu gunakan:
 
 ```
-{portal_base_url}/login
+{portal_base_url}/isolir
 ```
 
-Contoh: `https://billing.example.com/login`
+Contoh: `https://billing.example.com/isolir`
 
 HTML fallback: `GET /api/public/isolir`
 
@@ -64,10 +64,10 @@ Comment rule: `d5n-isolir:*` (aturan lama `drp-isolir:*` otomatis di-rename saat
 /ip proxy access
 add src-address=10.250.0.0/24 dst-host=billing.example.com action=allow comment=d5n-isolir:proxy-allow-portal
 add src-address=10.250.0.0/24 action=redirect \
-  action-data="https://billing.example.com/login" comment=d5n-isolir:proxy-redirect
+  action-data="https://billing.example.com/isolir" comment=d5n-isolir:proxy-redirect
 # RouterOS 6:
 # add src-address=10.250.0.0/24 action=deny \
-#   redirect-to="https://billing.example.com/login" comment=d5n-isolir:proxy-redirect
+#   redirect-to="https://billing.example.com/isolir" comment=d5n-isolir:proxy-redirect
 
 /ip firewall nat
 add chain=dstnat src-address=10.250.0.0/24 protocol=tcp dst-port=80 \

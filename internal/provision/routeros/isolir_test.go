@@ -6,7 +6,7 @@ import (
 )
 
 func TestIsolirPortalHostPath(t *testing.T) {
-	host, _ := isolirPortalHostPath("https://billing.dianrp.com/login", "d5nnet")
+	host, _ := isolirPortalHostPath("https://billing.dianrp.com/isolir", "d5nnet")
 	if host != "billing.dianrp.com" {
 		t.Fatalf("host=%q", host)
 	}

@@ -22,13 +22,13 @@ func TestIsolirProfileName(t *testing.T) {
 }
 
 func TestIsolirPortalURL(t *testing.T) {
-	if got := IsolirClientPath("acme"); got != "/login" {
+	if got := IsolirClientPath("acme"); got != "/isolir" {
 		t.Fatalf("path = %q", got)
 	}
-	if got := IsolirPortalURL("https://billing.example.com/", "acme"); got != "https://billing.example.com/login" {
+	if got := IsolirPortalURL("https://billing.example.com/", "acme"); got != "https://billing.example.com/isolir" {
 		t.Fatalf("url = %q", got)
 	}
-	if got := IsolirPortalURL("", "acme"); got != "/login" {
+	if got := IsolirPortalURL("", "acme"); got != "/isolir" {
 		t.Fatalf("relative = %q", got)
 	}
 }

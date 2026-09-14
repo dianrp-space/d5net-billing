@@ -186,7 +186,7 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 
 func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 	if isolirURL == "" {
-		isolirURL = "{portal_base_url}/{tenantSlug}/client"
+		isolirURL = "{portal_base_url}/isolir"
 	}
 	pool := net.PoolRanges
 	if pool == "" {

@@ -39,13 +39,13 @@ const emptyNetwork: IsolirNetwork = {
 };
 
 function buildDocsHint(isolirURL: string, poolLabel: string) {
-  const url = isolirURL || "{portal_base_url}/login";
+  const url = isolirURL || "{portal_base_url}/isolir";
   return `URL isolir (portal pelanggan):
 ${url}
 
 Pool: ${poolLabel || "(pilih IP pool isolir)"}
 
-Redirect Web Proxy ke /login.
+Redirect Web Proxy ke /isolir.
 IP → Web Proxy: enable proxy 8080, allow host billing, redirect HTTP ke URL isolir
 (RouterOS 7: action=redirect + action-data; v6: deny + redirect-to),
 NAT tcp/80 → 8080, allow DNS + HTTPS portal (address-list FQDN, bukan IP publik).`;
@@ -150,8 +150,8 @@ export function IsolirTemplatePage() {
   const logoURL = brandingQ.data?.logo_url || DEFAULT_BRAND_LOGO;
   const primaryHex = parseHexColor(brandingQ.data?.primary_color) || DEFAULT_PRIMARY;
   const loginURL = network.portal_base_url
-    ? `${network.portal_base_url.replace(/\/$/, "")}/login`
-    : "/login";
+    ? `${network.portal_base_url.replace(/\/$/, "")}/isolir`
+    : "/isolir";
 
   const poolLabel = selectedPool
     ? `${selectedPool.name} · ${selectedPool.network}${selectedPool.router_name ? ` · ${selectedPool.router_name}` : ""}`
@@ -250,7 +250,7 @@ export function IsolirTemplatePage() {
                 onChange={(e) => setNetwork({ ...network, portal_base_url: e.target.value })}
               />
               <span className="text-xs text-[var(--muted)]">
-                Redirect isolir ke <code>{"{base}"}/login</code>
+                Redirect isolir ke <code>{"{base}"}/isolir</code>
               </span>
             </label>
 

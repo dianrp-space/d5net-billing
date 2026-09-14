@@ -55,12 +55,13 @@ func IsolirPoolName(cfg IsolirNetworkSettings) string {
 	return "isolir"
 }
 
-// IsolirClientPath is the customer portal path used for captive redirect.
+// IsolirClientPath is the public isolir portal path used for captive redirect.
+// It must be the dedicated isolir page (/isolir), not the regular client login.
 func IsolirClientPath(_ string) string {
-	return "/login"
+	return "/isolir"
 }
 
-// IsolirPortalURL builds {base}/login for Web Proxy redirect.
+// IsolirPortalURL builds {base}/isolir for Web Proxy redirect.
 func IsolirPortalURL(base, slug string) string {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	path := IsolirClientPath(slug)
