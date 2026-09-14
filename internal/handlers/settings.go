@@ -63,6 +63,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			InvoiceDueDay        int     `json:"invoice_due_day"`
 			LateFeePercent       float64 `json:"late_fee_percent"`
 			PrimaryColor         string  `json:"primary_color"`
+			WalletEnabled        bool    `json:"wallet_enabled"`
+			WalletMinTopup       int64   `json:"wallet_min_topup"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -90,8 +92,10 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				IsolirGraceDays      int     `json:"isolir_grace_days"`
 				BillingCycleStartDay int     `json:"billing_cycle_start_day"`
 				InvoiceDueDay        int     `json:"invoice_due_day"`
-			LateFeePercent       float64 `json:"late_fee_percent"`
+				LateFeePercent       float64 `json:"late_fee_percent"`
 				PrimaryColor         string  `json:"primary_color"`
+				WalletEnabled        bool    `json:"wallet_enabled"`
+				WalletMinTopup       int64   `json:"wallet_min_topup"`
 			}
 		}{}
 		out.Body.TenantBrandingView = *view
@@ -103,6 +107,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out.Body.InvoiceDueDay = gen.InvoiceDueDay
 		out.Body.LateFeePercent = gen.LateFeePercent
 		out.Body.PrimaryColor = gen.PrimaryColor
+		out.Body.WalletEnabled = gen.WalletEnabled
+		out.Body.WalletMinTopup = gen.WalletMinTopup
 		return out, nil
 	})
 
@@ -120,6 +126,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			InvoiceDueDay        int     `json:"invoice_due_day"`
 			LateFeePercent       float64 `json:"late_fee_percent"`
 			PrimaryColor         string  `json:"primary_color"`
+			WalletEnabled        bool    `json:"wallet_enabled"`
+			WalletMinTopup       int64   `json:"wallet_min_topup"`
 			LogoURL              *string `json:"logo_url,omitempty"`
 			FaviconURL           *string `json:"favicon_url,omitempty"`
 			MapPopIconURL        *string `json:"map_pop_icon_url,omitempty"`
@@ -142,6 +150,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			InvoiceDueDay        int     `json:"invoice_due_day"`
 			LateFeePercent       float64 `json:"late_fee_percent"`
 			PrimaryColor         string  `json:"primary_color"`
+			WalletEnabled        bool    `json:"wallet_enabled"`
+			WalletMinTopup       int64   `json:"wallet_min_topup"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -177,6 +187,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			InvoiceDueDay:        input.Body.InvoiceDueDay,
 			LateFeePercent:       input.Body.LateFeePercent,
 			PrimaryColor:         input.Body.PrimaryColor,
+			WalletEnabled:        input.Body.WalletEnabled,
+			WalletMinTopup:       input.Body.WalletMinTopup,
 		})
 		if err := d.Store.UpsertGeneralSettings(ctx, tid, gen); err != nil {
 			return nil, httpx.Internal(err)
@@ -198,8 +210,10 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				IsolirGraceDays      int     `json:"isolir_grace_days"`
 				BillingCycleStartDay int     `json:"billing_cycle_start_day"`
 				InvoiceDueDay        int     `json:"invoice_due_day"`
-			LateFeePercent       float64 `json:"late_fee_percent"`
+				LateFeePercent       float64 `json:"late_fee_percent"`
 				PrimaryColor         string  `json:"primary_color"`
+				WalletEnabled        bool    `json:"wallet_enabled"`
+				WalletMinTopup       int64   `json:"wallet_min_topup"`
 			}
 		}{}
 		out.Body.TenantBrandingView = *view
@@ -211,6 +225,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out.Body.InvoiceDueDay = gen.InvoiceDueDay
 		out.Body.LateFeePercent = gen.LateFeePercent
 		out.Body.PrimaryColor = gen.PrimaryColor
+		out.Body.WalletEnabled = gen.WalletEnabled
+		out.Body.WalletMinTopup = gen.WalletMinTopup
 		return out, nil
 	})
 }

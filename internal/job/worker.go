@@ -141,8 +141,11 @@ func (w *Worker) RunTenantNow(ctx context.Context, tenantID xid.ID) (TenantCycle
 func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.JobScheduleSettings, now time.Time) TenantCycleResult {
 	var out TenantCycleResult
 	if cfg.BillingEnabled {
-		if n, err := w.billing.ProcessDueBilling(ctx, t.ID); err == nil {
-			out.Invoices = n
+		if invoices, err := w.billing.ProcessDueBilling(ctx, t.ID); err == nil {
+			out.Invoices = len(invoices)
+			for i := range invoices {
+				w.autoPayIssuedInvoice(ctx, t.ID, invoices[i])
+			}
 		}
 	}
 	if cfg.IsolirEnabled {
@@ -168,6 +171,31 @@ func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.Jo
 		w.monthlyReportEmail(ctx, t, now, cfg.MonthlyReportDay, cfg.MonthlyReportHour)
 	}
 	return out
+}
+
+// autoPayIssuedInvoice mencoba melunasi tagihan yang baru terbit dari saldo
+// pelanggan. Bila saldo cukup: kirim konfirmasi pembayaran. Bila kurang:
+// kirim notifikasi saldo kurang (fitur saldo aktif).
+func (w *Worker) autoPayIssuedInvoice(ctx context.Context, tenantID xid.ID, inv store.Invoice) {
+	if w == nil || w.billing == nil {
+		return
+	}
+	res, err := w.billing.TryAutoPayInvoice(ctx, tenantID, inv.ID)
+	if err != nil || res == nil || !res.WalletEnabled || res.Customer == nil {
+		return
+	}
+	cust := res.Customer
+	planName := w.store.PlanNameForSubscription(ctx, tenantID, inv.SubscriptionID)
+	itemName := store.NotificationItemName(planName, res.Items)
+	if res.Paid && res.Payment != nil {
+		_ = w.notify.SendPaymentConfirmation(ctx, tenantID, cust.Phone, cust.FullName, planName, itemName, inv.InvoiceNumber, res.Payment.Amount)
+		return
+	}
+	remaining := inv.TotalAmount - inv.PaidAmount
+	if remaining < 0 {
+		remaining = 0
+	}
+	_ = w.notify.SendWalletInsufficient(ctx, tenantID, cust.Phone, cust.FullName, inv.InvoiceNumber, remaining, res.Balance)
 }
 
 func (w *Worker) weeklyReconcile(ctx context.Context, tenantID xid.ID, now time.Time, weekday, hour int) {

@@ -238,18 +238,18 @@ func NextDueDate(from time.Time, day int) time.Time {
 	return time.Date(from.Year(), from.Month()+1, day, 12, 0, 0, 0, loc)
 }
 
-func (e *Engine) ProcessDueBilling(ctx context.Context, tenantID xid.ID) (int, error) {
+func (e *Engine) ProcessDueBilling(ctx context.Context, tenantID xid.ID) ([]store.Invoice, error) {
 	subs, err := e.store.ListDueSubscriptions(ctx, tenantID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	count := 0
+	created := []store.Invoice{}
 	for _, sub := range subs {
 		if inv, err := e.GenerateInvoiceForSubscription(ctx, tenantID, sub.ID); err == nil && inv != nil {
-			count++
+			created = append(created, *inv)
 		}
 	}
-	return count, nil
+	return created, nil
 }
 
 func (e *Engine) ProcessOverdueSuspensions(ctx context.Context, tenantID xid.ID) ([]xid.ID, error) {

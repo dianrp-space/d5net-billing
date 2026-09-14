@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
-import { IconDownload, IconImage, IconLock, IconPencil, IconTrash, IconUnplug, IconUpload } from "../icons";
+import { IconBanknote, IconDownload, IconImage, IconLock, IconPencil, IconTrash, IconUnplug, IconUpload } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
-import { Button, FormDialog, IconButton, Section, Table } from "../ui";
+import { Button, FormDialog, IconButton, Section, Table, formatRp } from "../ui";
 import { AttributionSelects, CommissionBasisSelect } from "../AdminExtra";
 
 const IDENTITY_TYPES: { id: string; label: string }[] = [
@@ -96,6 +96,32 @@ export function CustomersPage({
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(25);
+  type CustomerWallet = {
+    enabled: boolean;
+    balance: number;
+    min_topup: number;
+    transactions: { id: string; amount: number; type: string; reference?: string; description?: string; created_at: string }[];
+  };
+  const [walletCustomer, setWalletCustomer] = useState<CustomerRow | null>(null);
+  const [topupAmount, setTopupAmount] = useState("");
+  const walletQ = useQuery({
+    queryKey: ["customer-wallet", walletCustomer?.id],
+    queryFn: () => api<CustomerWallet>(`/api/customers/${walletCustomer!.id}/wallet`),
+    enabled: Boolean(walletCustomer?.id),
+  });
+  const topupWallet = useMutation({
+    mutationFn: () =>
+      api(`/api/customers/${walletCustomer!.id}/wallet/topup`, {
+        method: "POST",
+        body: JSON.stringify({ amount: Math.floor(Number(topupAmount) || 0) }),
+      }),
+    onSuccess: () => {
+      setTopupAmount("");
+      void qc.invalidateQueries({ queryKey: ["customer-wallet", walletCustomer?.id] });
+      void toastSuccess("Saldo ditambahkan");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
   function setPageSize(n: number) {
     setLimit(n);
     setPage(0);
@@ -589,6 +615,9 @@ export function CustomersPage({
           c.reseller_name ? `Reseller: ${c.reseller_name}` : c.sales_user_name ? `Sales: ${c.sales_user_name}` : "—",
           statusLabel(c),
           <span key="act" className="flex flex-wrap items-center gap-1.5">
+            <IconButton label="Saldo pelanggan" onClick={() => setWalletCustomer(c)}>
+              <IconBanknote />
+            </IconButton>
             <IconButton label="Dokumentasi / galeri" onClick={() => onOpenGallery(c.id)}>
               <IconImage />
             </IconButton>
@@ -802,6 +831,65 @@ export function CustomersPage({
           </div>
           {formErr && <p className="text-sm text-[var(--danger)] sm:col-span-2">{formErr}</p>}
         </form>
+      </FormDialog>
+
+      <FormDialog
+        open={Boolean(walletCustomer)}
+        title={`Saldo · ${walletCustomer?.full_name || walletCustomer?.customer_code || ""}`}
+        onClose={() => {
+          setWalletCustomer(null);
+          setTopupAmount("");
+        }}
+      >
+        <div className="grid gap-4">
+          <div>
+            <p className="text-xs text-[var(--muted)]">Saldo saat ini</p>
+            <p className="text-2xl font-bold">{formatRp(walletQ.data?.balance ?? 0)}</p>
+            {walletQ.data && !walletQ.data.enabled ? (
+              <p className="mt-1 text-xs text-[var(--warn,#b7791f)]">
+                Fitur saldo sedang nonaktif (aktifkan di Pengaturan).
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="grid flex-1 gap-1 text-sm">
+              <span className="font-medium">Tambah saldo (Rp)</span>
+              <input
+                className="input"
+                type="number"
+                min={1000}
+                step={1000}
+                value={topupAmount}
+                onChange={(e) => setTopupAmount(e.target.value)}
+              />
+            </label>
+            <Button
+              type="button"
+              disabled={topupWallet.isPending || !topupAmount}
+              onClick={() => topupWallet.mutate()}
+            >
+              {topupWallet.isPending ? "Menyimpan…" : "Tambah saldo"}
+            </Button>
+          </div>
+          <div>
+            <p className="mb-2 text-sm font-medium">Riwayat saldo</p>
+            <Table
+              columns={["Tanggal", "Jenis", "Keterangan", "Nominal"]}
+              hideRowNumber
+              rows={(walletQ.data?.transactions ?? []).map((t) => [
+                new Date(t.created_at).toLocaleString("id-ID"),
+                t.type,
+                t.description || t.reference || "—",
+                <span
+                  key={t.id}
+                  style={{ color: t.amount < 0 ? "var(--danger)" : "var(--ok, #2b9a66)" }}
+                >
+                  {formatRp(t.amount)}
+                </span>,
+              ])}
+            />
+          </div>
+        </div>
       </FormDialog>
     </Section>
   );

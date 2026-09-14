@@ -126,6 +126,8 @@ export function GeneralSettingsPage() {
           invoice_due_day?: number;
           late_fee_percent?: number;
           primary_color?: string;
+          wallet_enabled?: boolean;
+          wallet_min_topup?: number;
         }
       >("/api/settings/branding"),
   });
@@ -137,6 +139,8 @@ export function GeneralSettingsPage() {
   const [dueDay, setDueDay] = useState(10);
   const [lateFeePercent, setLateFeePercent] = useState(5);
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY);
+  const [walletEnabled, setWalletEnabled] = useState(false);
+  const [walletMinTopup, setWalletMinTopup] = useState(10000);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -149,6 +153,8 @@ export function GeneralSettingsPage() {
     setDueDay(clampDueDay(q.data.invoice_due_day));
     setLateFeePercent(clampLateFeePercent(q.data.late_fee_percent));
     setPrimaryColor(parseHexColor(q.data.primary_color) || DEFAULT_PRIMARY);
+    setWalletEnabled(Boolean(q.data.wallet_enabled));
+    setWalletMinTopup(Number(q.data.wallet_min_topup) || 10000);
   }, [q.data]);
 
   function brandingBody(extra?: Record<string, unknown>) {
@@ -161,6 +167,8 @@ export function GeneralSettingsPage() {
       invoice_due_day: clampDueDay(dueDay),
       late_fee_percent: clampLateFeePercent(lateFeePercent),
       primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
+      wallet_enabled: walletEnabled,
+      wallet_min_topup: Math.max(1000, Math.floor(Number(walletMinTopup) || 10000)),
       ...extra,
     };
   }
@@ -350,6 +358,34 @@ export function GeneralSettingsPage() {
                 Persen dari total tunggakan, otomatis ditambahkan sebagai item saat tagihan baru terbit bila pelanggan
                 punya tunggakan. 0 = nonaktif. Berlaku untuk tagihan berikutnya, bukan yang sudah terbit.
               </span>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="flex items-center gap-2 font-medium">
+                <input
+                  type="checkbox"
+                  checked={walletEnabled}
+                  onChange={(e) => setWalletEnabled(e.target.checked)}
+                />
+                Aktifkan saldo &amp; auto-pay
+              </span>
+              <span className="text-xs text-[var(--muted)]">
+                Pelanggan bisa topup saldo dari portal. Saat tagihan terbit, tagihan otomatis dibayar dari saldo bila
+                cukup; bila saldo kurang dikirim notifikasi WhatsApp.
+              </span>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Minimum topup (Rp)</span>
+              <input
+                className="input"
+                type="number"
+                min={1000}
+                step={1000}
+                value={walletMinTopup}
+                onChange={(e) => setWalletMinTopup(Math.max(0, Number(e.target.value) || 0))}
+              />
+              <span className="text-xs text-[var(--muted)]">Nominal topup minimal di portal pelanggan.</span>
             </label>
 
             <div className="grid gap-2">

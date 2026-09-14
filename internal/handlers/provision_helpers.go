@@ -629,6 +629,21 @@ func completePaidWebhook(ctx context.Context, d *Deps, provider string, event *p
 		return nil // idempotent
 	}
 
+	// Topup saldo: tidak terkait invoice. Tambah saldo, notifikasi, lalu lunasi
+	// tagihan menunggak dari saldo.
+	if metaString(pi.Metadata, "purpose") == "wallet_topup" {
+		if err := completeWalletTopup(ctx, d, pi, event); err != nil {
+			return err
+		}
+		_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, "paid")
+		_ = d.Store.DispatchOutboundEvent(ctx, pi.TenantID, "wallet.topup", map[string]any{
+			"external_id": event.ExternalID,
+			"provider":    provider,
+			"customer_id": pi.CustomerID,
+		})
+		return nil
+	}
+
 	// Tagihan asli (tanpa biaya admin). Untuk DOKU dengan surcharge, pi.Amount
 	// = base + fee, sedangkan yang dilunasi ke invoice hanya base.
 	base := pi.Amount

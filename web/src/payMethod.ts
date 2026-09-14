@@ -173,6 +173,7 @@ export function paymentMethodLabel(method?: string | null, sandbox?: boolean | n
   else if (key === "duitku_pop" || key === "duitkupop" || key === "pop") label = "Duitku Payment Gateway";
   else if (key === PAY_METHOD_DOKU) label = "DOKU";
   else if (key === PAY_METHOD_TUNAI || key === "cash" || key === "kasir" || key === "manual") label = "Tunai";
+  else if (key === "saldo" || key === "wallet") label = "Saldo";
   else if (key === PAY_METHOD_TRANSFER || key === "bank" || key === "va") label = "Transfer";
   else label = String(method).trim();
   return sandbox ? `Sandbox · ${label}` : label;

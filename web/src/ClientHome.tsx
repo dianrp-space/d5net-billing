@@ -6,6 +6,7 @@ import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
 import type { ClientPortalData, PortalCustomer } from "./TenantLogin";
 import { ClientIdCard } from "./ClientIdCard";
 import { ClientBell } from "./ClientBell";
+import { PortalTopupDialog } from "./PortalTopup";
 import { ChatwootWidget } from "./ChatwootWidget";
 import { alertPaymentSuccess, toastError, toastSuccess } from "./swal";
 import { ThemeToggle } from "./ThemeToggle";
@@ -446,6 +447,22 @@ export function ClientHome({
     refetchInterval: 15000,
   });
   const payments = paymentsQ.isSuccess ? (paymentsQ.data?.data ?? []) : (data.payments ?? []);
+
+  type PortalWallet = {
+    enabled: boolean;
+    balance: number;
+    min_topup: number;
+    transactions: { id: string; amount: number; type: string; reference?: string; description?: string; created_at: string }[];
+  };
+  const walletQ = useQuery({
+    queryKey: ["portal-wallet", data.tenant_slug],
+    queryFn: () => api<PortalWallet>("/api/portal/wallet", { headers: portalHeaders }),
+    enabled: Boolean(data.portal_token),
+    retry: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: 15000,
+  });
+  const [topupOpen, setTopupOpen] = useState(false);
 
   useEffect(() => {
     if (paymentReturnHandled.current) return;
@@ -913,6 +930,40 @@ export function ClientHome({
                 providerName={appName}
                 logoUrl={logoUrl}
               />
+              {walletQ.data?.enabled ? (
+                <div className="panel-card grid gap-3 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-[var(--muted)]">Saldo</p>
+                      <p className="text-2xl font-bold">{formatRp(walletQ.data.balance)}</p>
+                      <p className="text-xs text-[var(--muted)]">
+                        Tagihan baru otomatis dibayar dari saldo bila cukup. Minimal topup{" "}
+                        {formatRp(walletQ.data.min_topup)}.
+                      </p>
+                    </div>
+                    <button type="button" className="btn" onClick={() => setTopupOpen(true)}>
+                      Topup saldo
+                    </button>
+                  </div>
+                  {walletQ.data.transactions.length > 0 ? (
+                    <details>
+                      <summary className="cursor-pointer text-xs text-[var(--accent)]">Riwayat saldo</summary>
+                      <ul className="mt-2 grid gap-1 text-xs">
+                        {walletQ.data.transactions.slice(0, 10).map((t) => (
+                          <li key={t.id} className="flex items-center justify-between gap-2">
+                            <span className="text-[var(--muted)]">
+                              {new Date(t.created_at).toLocaleDateString("id-ID")} · {t.description || t.type}
+                            </span>
+                            <span style={{ color: t.amount < 0 ? "var(--danger)" : "var(--ok, #2b9a66)" }}>
+                              {formatRp(t.amount)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
               {isolirSubs.length > 0 || unpaidInvoices.length > 0 ? (
                 <div
                   className="panel-card p-4"
@@ -1456,6 +1507,20 @@ export function ClientHome({
           void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
           void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
           void alertPaymentSuccess();
+        }}
+      />
+
+      <PortalTopupDialog
+        open={topupOpen}
+        onClose={() => setTopupOpen(false)}
+        headers={portalHeaders}
+        tenantSlug={data.tenant_slug}
+        minTopup={walletQ.data?.min_topup ?? 10000}
+        balance={walletQ.data?.balance ?? 0}
+        onDone={() => {
+          void qc.invalidateQueries({ queryKey: ["portal-wallet", data.tenant_slug] });
+          void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
+          void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
         }}
       />
     </div>

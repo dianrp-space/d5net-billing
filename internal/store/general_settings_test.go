@@ -74,3 +74,25 @@ func TestClampDueDay(t *testing.T) {
 		t.Fatalf("no def = %d", got)
 	}
 }
+
+func TestNormalizeGeneralSettingsWallet(t *testing.T) {
+	def := DefaultGeneralSettings()
+	if def.WalletEnabled {
+		t.Fatal("wallet harus nonaktif secara bawaan")
+	}
+	if def.WalletMinTopup != 10000 {
+		t.Fatalf("default min topup = %d", def.WalletMinTopup)
+	}
+	if got := NormalizeGeneralSettings(GeneralSettings{WalletMinTopup: 0}).WalletMinTopup; got != 10000 {
+		t.Fatalf("min topup 0 harus jatuh ke default, got %d", got)
+	}
+	if got := NormalizeGeneralSettings(GeneralSettings{WalletMinTopup: 5000}).WalletMinTopup; got != 5000 {
+		t.Fatalf("min topup 5000 = %d", got)
+	}
+	if got := NormalizeGeneralSettings(GeneralSettings{WalletMinTopup: 999_999_999}).WalletMinTopup; got != 100_000_000 {
+		t.Fatalf("min topup harus di-cap, got %d", got)
+	}
+	if !NormalizeGeneralSettings(GeneralSettings{WalletEnabled: true}).WalletEnabled {
+		t.Fatal("wallet_enabled harus dipertahankan")
+	}
+}

@@ -31,6 +31,7 @@ async function downloadBlob(blob: Blob, filename: string) {
 
 export type QrisIntent = {
   id: string;
+  external_id?: string;
   status: string;
   provider?: string;
   qr_string?: string;

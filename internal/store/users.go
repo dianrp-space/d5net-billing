@@ -315,6 +315,7 @@ func (s *Store) CreateTenantWithAdmin(ctx context.Context, slug, name, email, pa
 	_, err = tx.Exec(ctx, `
 		INSERT INTO chart_of_accounts (tenant_id, code, name, type) VALUES
 			($1, '1110', 'Kas', 'asset'),
+			($1, '2100', 'Saldo pelanggan', 'liability'),
 			($1, '4100', 'Pendapatan langganan', 'revenue'),
 			($1, '5100', 'Beban operasional', 'expense')
 	`, tenantID)

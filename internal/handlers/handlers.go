@@ -81,6 +81,7 @@ func RegisterAll(api huma.API, d *Deps) {
 	registerSearch(api, d)
 	registerAlerts(api, d)
 	registerPortal(api, d)
+	registerWallet(api, d)
 	registerWebhooks(api, d)
 	registerVouchers(api, d)
 	registerReports(api, d)
@@ -3261,9 +3262,27 @@ func registerInvoices(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		waQueued := false
-		if d.Notify != nil && strings.TrimSpace(cust.Phone) != "" {
-			planName := d.Store.PlanNameForSubscription(ctx, tid, inv.SubscriptionID)
-			itemName := store.NotificationItemName(planName, items)
+		planName := d.Store.PlanNameForSubscription(ctx, tid, inv.SubscriptionID)
+		itemName := store.NotificationItemName(planName, items)
+		walletHandled := false
+		if d.Billing != nil {
+			if auto, aerr := d.Billing.TryAutoPayInvoice(ctx, tid, inv.ID); aerr == nil && auto != nil && auto.WalletEnabled {
+				walletHandled = true
+				if auto.Paid && auto.Payment != nil {
+					resumeAfterInvoicePaid(ctx, d, tid, inv)
+					if d.Notify != nil && strings.TrimSpace(cust.Phone) != "" {
+						if err := d.Notify.SendPaymentConfirmation(ctx, tid, cust.Phone, cust.FullName, planName, itemName, invNum, auto.Payment.Amount); err == nil {
+							waQueued = true
+						}
+					}
+				} else if d.Notify != nil && strings.TrimSpace(cust.Phone) != "" {
+					if err := d.Notify.SendWalletInsufficient(ctx, tid, cust.Phone, cust.FullName, invNum, total, auto.Balance); err == nil {
+						waQueued = true
+					}
+				}
+			}
+		}
+		if !walletHandled && d.Notify != nil && strings.TrimSpace(cust.Phone) != "" {
 			if err := d.Notify.SendInvoiceIssued(ctx, tid, cust.Phone, cust.FullName, planName, itemName, invNum, total, dueDate.Format("02/01/2006")); err != nil {
 				slog.Warn("manual invoice whatsapp", "invoice", invNum, "err", err)
 			} else {

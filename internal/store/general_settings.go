@@ -28,6 +28,11 @@ type GeneralSettings struct {
 	// LateFeePercent is denda keterlambatan (%) atas total tunggakan saat
 	// tagihan baru terbit. 0 = nonaktif.
 	LateFeePercent float64 `json:"late_fee_percent"`
+	// WalletEnabled mengaktifkan saldo pelanggan: topup mandiri + auto-pay
+	// tagihan dari saldo saat tagihan terbit.
+	WalletEnabled bool `json:"wallet_enabled"`
+	// WalletMinTopup adalah minimum nominal topup saldo (Rp).
+	WalletMinTopup int64 `json:"wallet_min_topup"`
 }
 
 func DefaultGeneralSettings() GeneralSettings {
@@ -38,6 +43,8 @@ func DefaultGeneralSettings() GeneralSettings {
 		BillingCycleStartDay: 1,
 		InvoiceDueDay:        10,
 		LateFeePercent:       5,
+		WalletEnabled:        false,
+		WalletMinTopup:       10000,
 	}
 }
 
@@ -105,6 +112,12 @@ func NormalizeGeneralSettings(g GeneralSettings) GeneralSettings {
 	}
 	if g.LateFeePercent > 100 {
 		g.LateFeePercent = 100
+	}
+	if g.WalletMinTopup < 1000 {
+		g.WalletMinTopup = def.WalletMinTopup
+	}
+	if g.WalletMinTopup > 100_000_000 {
+		g.WalletMinTopup = 100_000_000
 	}
 	return g
 }
@@ -189,4 +202,22 @@ func (s *Store) LateFeePercent(ctx context.Context, tenantID xid.ID) float64 {
 		return DefaultGeneralSettings().LateFeePercent
 	}
 	return g.LateFeePercent
+}
+
+// WalletEnabled menunjukkan apakah fitur saldo pelanggan aktif untuk tenant.
+func (s *Store) WalletEnabled(ctx context.Context, tenantID xid.ID) bool {
+	g, err := s.GetGeneralSettings(ctx, tenantID)
+	if err != nil {
+		return false
+	}
+	return g.WalletEnabled
+}
+
+// WalletMinTopup adalah nominal minimum topup saldo (Rp).
+func (s *Store) WalletMinTopup(ctx context.Context, tenantID xid.ID) int64 {
+	g, err := s.GetGeneralSettings(ctx, tenantID)
+	if err != nil {
+		return DefaultGeneralSettings().WalletMinTopup
+	}
+	return g.WalletMinTopup
 }

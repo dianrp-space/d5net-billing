@@ -256,7 +256,15 @@ func latestInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 		}
 		return nil, httpx.Internal(err)
 	}
-	if payment.WebhookIsPaid(pi.Status) {
+	return syncIntentStatus(ctx, d, tid, pi)
+}
+
+// syncIntentStatus memeriksa status terkini intent ke payment gateway dan
+// menyelesaikan pembayaran bila sudah lunas. completePaidWebhook dipanggil
+// SEBELUM status intent diubah agar idempotensinya tetap bekerja (menghindari
+// pelunasan yang terlewat tanpa pencatatan payment).
+func syncIntentStatus(ctx context.Context, d *Deps, tid xid.ID, pi *store.PaymentIntent) (*store.PaymentIntent, error) {
+	if pi == nil || payment.WebhookIsPaid(pi.Status) {
 		return pi, nil
 	}
 	// Direct QRIS: poll via QueryQR, bukan Checkout status API.
@@ -275,10 +283,6 @@ func latestInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 			}
 			st, amt, qerr := doku.QueryQR(ctx, ref, pi.ExternalID)
 			if qerr == nil {
-				if st != "" && st != pi.Status {
-					_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, st)
-					pi.Status = st
-				}
 				if payment.WebhookIsPaid(st) {
 					ev := &payment.WebhookEvent{
 						ExternalID: pi.ExternalID,
@@ -290,6 +294,9 @@ func latestInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 						return nil, httpx.Internal(err)
 					}
 					pi.Status = "paid"
+				} else if st != "" && st != pi.Status {
+					_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, st)
+					pi.Status = st
 				}
 			}
 		}
@@ -307,10 +314,6 @@ func latestInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 			}
 			if serr == nil && remote != nil {
 				status := strings.ToLower(strings.TrimSpace(remote.Status))
-				if status != "" && status != pi.Status {
-					_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, status)
-					pi.Status = status
-				}
 				if payment.WebhookIsPaid(status) {
 					ev := &payment.WebhookEvent{
 						ExternalID: pi.ExternalID,
@@ -322,6 +325,9 @@ func latestInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 						return nil, httpx.Internal(err)
 					}
 					pi.Status = "paid"
+				} else if status != "" && status != pi.Status {
+					_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, status)
+					pi.Status = status
 				}
 			}
 		}

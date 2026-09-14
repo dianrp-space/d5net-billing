@@ -569,6 +569,31 @@ func TemplateCatalog() []TemplateEvent {
 			DefaultBody: "Terima kasih {{customer_name}}! Pembayaran {{item_name}} ({{invoice_number}}) sebesar Rp {{amount}} berhasil diterima.",
 		},
 		{
+			Event:       "wallet_topup",
+			Label:       "Topup saldo berhasil",
+			Description: "Dikirim setelah saldo pelanggan berhasil ditambah.",
+			Channels:    []string{"whatsapp"},
+			Variables: []TemplateVariable{
+				{Name: "customer_name", Desc: "Nama pelanggan"},
+				{Name: "amount", Desc: "Nominal topup (angka)"},
+				{Name: "balance", Desc: "Saldo terbaru (angka)"},
+			},
+			DefaultBody: "Terima kasih {{customer_name}}! Topup saldo Rp {{amount}} berhasil. Saldo Anda sekarang Rp {{balance}}.",
+		},
+		{
+			Event:       "wallet_insufficient",
+			Label:       "Saldo kurang saat tagihan terbit",
+			Description: "Dikirim saat tagihan terbit tapi saldo tidak cukup untuk dibayar otomatis.",
+			Channels:    []string{"whatsapp"},
+			Variables: []TemplateVariable{
+				{Name: "customer_name", Desc: "Nama pelanggan"},
+				{Name: "invoice_number", Desc: "Nomor tagihan"},
+				{Name: "amount", Desc: "Nominal tagihan (angka)"},
+				{Name: "balance", Desc: "Saldo saat ini (angka)"},
+			},
+			DefaultBody: "Halo {{customer_name}}, tagihan {{invoice_number}} sebesar Rp {{amount}} belum bisa dibayar otomatis karena saldo Anda Rp {{balance}} kurang. Topup saldo atau bayar via portal pelanggan.",
+		},
+		{
 			Event:       "broadcast",
 			Label:       "Broadcast manual",
 			Description: "Dipakai untuk pesan massal dari tab Broadcast.",
@@ -663,4 +688,37 @@ func (s *Service) SendPaymentConfirmation(ctx context.Context, tenantID xid.ID, 
 		return err
 	}
 	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "payment_confirmation"})
+}
+
+func (s *Service) SendWalletTopup(ctx context.Context, tenantID xid.ID, phone, customerName string, amount, balance int64) error {
+	if strings.TrimSpace(phone) == "" {
+		return nil
+	}
+	vars := map[string]string{
+		"customer_name": customerName,
+		"amount":        fmt.Sprintf("%d", amount),
+		"balance":       fmt.Sprintf("%d", balance),
+	}
+	_, body, err := s.RenderTemplate(ctx, tenantID, "whatsapp", "wallet_topup", vars)
+	if err != nil {
+		return err
+	}
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "wallet_topup"})
+}
+
+func (s *Service) SendWalletInsufficient(ctx context.Context, tenantID xid.ID, phone, customerName, invoiceNum string, amount, balance int64) error {
+	if strings.TrimSpace(phone) == "" {
+		return nil
+	}
+	vars := map[string]string{
+		"customer_name":  customerName,
+		"invoice_number": invoiceNum,
+		"amount":         fmt.Sprintf("%d", amount),
+		"balance":        fmt.Sprintf("%d", balance),
+	}
+	_, body, err := s.RenderTemplate(ctx, tenantID, "whatsapp", "wallet_insufficient", vars)
+	if err != nil {
+		return err
+	}
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "wallet_insufficient"})
 }
