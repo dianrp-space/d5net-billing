@@ -52,21 +52,13 @@ Template berisi tombol login (`{{login_url}}`) yang mengarah ke halaman login po
 
 ### Captive listener aplikasi
 
-Di production (nginx/aaPanel) arsitekturnya:
+Aplikasi menjalankan listener HTTP terpisah (env `ISOLIR_HTTP_ADDR`, default `0.0.0.0:8090`)
+yang **selalu** membalas halaman isolir untuk request host/URL apapun. Inilah tujuan DST-NAT.
 
-1. Go listen **`127.0.0.1:8090`** (`ISOLIR_HTTP_ADDR`) — **tidak** perlu dibuka ke internet.
-2. Nginx **`listen 80 default_server`** mem-proxy Host sembarang ke captive (lihat
-   [`deploy/nginx/d5net-billing.conf`](../deploy/nginx/d5net-billing.conf)).
-3. RouterOS DST-NAT: `to-ports=80` (Settings → **Port DST-NAT publik** = `80`).
-
-Uji dari luar (bukan `:8090`):
-
-```bash
-curl -sI -H 'Host: example.com' http://IP_PUBLIK/
-# Expect: HTTP/1.1 200  dan body halaman isolir
-curl -s http://127.0.0.1:8090/ | head   # di server saja
-```
-
+- Settings → **Port captive isolir** = `8090` (sama dengan port di `ISOLIR_HTTP_ADDR`).
+- Pastikan port itu reachable dari router/klien (firewall server, dan kalau server di balik
+  CHR/WG: forward/dst-nat tcp/8090 ke host billing).
+- Uji: `http://IP_PUBLIK:8090/` harus tampil halaman isolir (plain HTTP, bukan HTTPS).
 - **IP tujuan DST-NAT** dari address-list RouterOS (prefer publik), atau override *IP host isolir*.
 - Cloudflare **DNS only** (abu-abu) OK; proxied (oranye) = IP CF, salah.
 
@@ -86,7 +78,7 @@ dikonversi jadi dst-nat saat Sync. Comment rule: `d5n-isolir:*` (aturan lama `dr
 
 ### Contoh manual (Winbox: IP → Firewall)
 
-Misal pool isolir `10.250.0.0/24`, IP server billing `203.0.113.10`, nginx di port 80:
+Misal pool isolir `10.250.0.0/24`, IP server billing `203.0.113.10`, port captive `8090`:
 
 ```
 /ip pool add name=isolir ranges=10.250.0.2-10.250.0.254
@@ -94,7 +86,7 @@ Misal pool isolir `10.250.0.0/24`, IP server billing `203.0.113.10`, nginx di po
 
 /ip firewall nat
 add chain=dstnat src-address=10.250.0.0/24 protocol=tcp dst-port=80 \
-  action=dst-nat to-addresses=203.0.113.10 to-ports=80 comment=d5n-isolir:nat-dstnat
+  action=dst-nat to-addresses=203.0.113.10 to-ports=8090 comment=d5n-isolir:nat-dstnat
 
 /ip firewall address-list
 add list=d5n-isolir-portal address=billing.example.com comment=d5n-isolir:portal
@@ -102,7 +94,7 @@ add list=d5n-isolir-portal address=billing.example.com comment=d5n-isolir:portal
 /ip firewall filter
 add chain=forward src-address=10.250.0.0/24 protocol=udp dst-port=53 action=accept comment=d5n-isolir:dns
 add chain=forward src-address=10.250.0.0/24 protocol=tcp dst-port=53 action=accept comment=d5n-isolir:dns-tcp
-add chain=forward src-address=10.250.0.0/24 dst-address-list=d5n-isolir-portal protocol=tcp dst-port=80,443 \
+add chain=forward src-address=10.250.0.0/24 dst-address-list=d5n-isolir-portal protocol=tcp dst-port=80,443,8090 \
   action=accept comment=d5n-isolir:portal
 add chain=forward src-address=10.250.0.0/24 action=drop comment=d5n-isolir:block
 ```
@@ -110,8 +102,8 @@ add chain=forward src-address=10.250.0.0/24 action=drop comment=d5n-isolir:block
 **Urutan rule wajib**: `block` harus berada **setelah semua rule accept** (`dns`, `dns-tcp`, `portal`) karena firewall memakai first-match. Kalau `block` nyempil di antara rule accept, DNS bisa ter-drop dan klien tidak bisa resolve domain portal (semua tampak terblokir). Sync otomatis memindahkan rule `block` ke posisi setelah accept terakhir.
 
 Catatan:
-- DST-NAT membelokkan HTTP (port 80) ke IP publik:80 → nginx default_server → captive.
-  HTTPS tidak di-intercept; rule `block` men-drop-nya.
-- Rule `portal` allow 80+443 ke FQDN billing supaya login/bayar tetap jalan.
+- DST-NAT membelokkan HTTP (port 80) klien ke IP portal:8090 (captive). HTTPS tidak
+  di-intercept; rule `block` men-drop-nya.
+- Rule `portal` allow 80+443+8090 ke FQDN billing supaya login/bayar + captive tetap jalan.
 - `to-addresses` dari address-list RouterOS (bukan LookupIP di server billing).
 - Untuk filter tetap pakai FQDN di address-list.

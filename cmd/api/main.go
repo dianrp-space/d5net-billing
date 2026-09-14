@@ -109,9 +109,8 @@ func main() {
 		}
 	}()
 
-	// Isolir captive listener (plain HTTP). Behind nginx/aaPanel this should
-	// bind localhost only (e.g. 127.0.0.1:8090); public reachability is via
-	// nginx listen 80 default_server → proxy here. DST-NAT to-ports is then 80.
+	// Isolir captive listener (plain HTTP): RouterOS dst-nat redirects isolir
+	// pool tcp/80 to IP_PUBLIK:8090 (or IsolirHostPort). Serves isolir HTML for any host/path.
 	var isolirSrv *http.Server
 	if addr := strings.TrimSpace(cfg.IsolirHTTPAddr); addr != "" {
 		isolirSrv = &http.Server{

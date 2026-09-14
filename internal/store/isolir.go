@@ -15,9 +15,8 @@ const (
 	// IsolirRedirectDSTNAT is the only supported redirect mode: RouterOS dst-nat
 	// redirects isolir-pool tcp/80 to the app's captive listener (no web-proxy).
 	IsolirRedirectDSTNAT = "dst-nat"
-	// DefaultIsolirHostPort is the public dst-nat to-ports when unset.
-	// Behind nginx/aaPanel use 80 (default_server → 127.0.0.1:8090).
-	DefaultIsolirHostPort = "80"
+	// DefaultIsolirHostPort is the dst-nat to-ports / captive listen port when unset.
+	DefaultIsolirHostPort = "8090"
 )
 
 // IsolirNetworkSettings controls the RouterOS isolir pool/profile and the
@@ -32,8 +31,8 @@ type IsolirNetworkSettings struct {
 	PoolRanges    string `json:"pool_ranges,omitempty"`
 	PoolGateway   string `json:"pool_gateway,omitempty"`
 	PortalBaseURL string `json:"portal_base_url"`
-	// IsolirHostPort is the public dst-nat to-ports (often 80 behind nginx).
-	// This can differ from ISOLIR_HTTP_ADDR's listen port (e.g. 127.0.0.1:8090).
+	// IsolirHostPort is the dst-nat to-ports target (= captive listener port,
+	// usually matching ISOLIR_HTTP_ADDR, default 8090).
 	IsolirHostPort string `json:"isolir_host_port,omitempty"`
 	// IsolirHostIP optionally overrides the dst-nat to-addresses. When empty,
 	// sync reads the IPv4 resolved by RouterOS address-list for portal_base_url

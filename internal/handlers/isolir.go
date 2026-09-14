@@ -73,10 +73,15 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 		}
 		net := input.Body.Network
 		net.RedirectMode = store.IsolirRedirectDSTNAT
-		// Public dst-nat port (often 80 behind nginx). Do NOT copy from
-		// ISOLIR_HTTP_ADDR — that is the internal listen port (e.g. 8090).
 		if strings.TrimSpace(net.IsolirHostPort) == "" {
-			net.IsolirHostPort = store.DefaultIsolirHostPort
+			if d.Config != nil {
+				if p := d.Config.IsolirHTTPPort(); p != "" {
+					net.IsolirHostPort = p
+				}
+			}
+			if strings.TrimSpace(net.IsolirHostPort) == "" {
+				net.IsolirHostPort = store.DefaultIsolirHostPort
+			}
 		}
 		if err := d.Store.ResolveIsolirPool(ctx, tid, &net); err != nil {
 			return nil, httpx.BadRequest("IP pool isolir tidak valid: " + err.Error())
@@ -203,13 +208,13 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 		"\n\nPool isolir dipakai saat worker mengisolir langganan di router masing-masing." +
 		"\nPool: " + name + " · " + pool +
 		"\n\nMode redirect: DST-NAT (tanpa Web Proxy).\n" +
-		"Production (nginx/aaPanel): Go listen 127.0.0.1:8090; nginx listen 80 default_server\n" +
-		"proxy ke captive. DST-NAT to-ports = " + port + " (biasanya 80, BUKAN 8090).\n" +
-		"Uji dari luar: curl -sI -H 'Host: example.com' http://IP_PUBLIK/\n" +
+		"Captive listener: ISOLIR_HTTP_ADDR (default 0.0.0.0:" + port + ").\n" +
+		"RouterOS DST-NAT: tcp/80 pool isolir → IP portal :" + port + ".\n" +
+		"Uji: http://IP_PUBLIK:" + port + "/ (pastikan forward/firewall/CHR/WG).\n" +
 		ipHint + "\n" +
 		"\nSetting di RouterOS (IP → Firewall):\n" +
 		"1. NAT: chain=dstnat, tcp/80 dari pool → action=dst-nat to-addresses=<IP address-list> to-ports=" + port + "\n" +
-		"2. Filter: allow DNS; allow portal via address-list FQDN (port 80,443); drop trafik lain\n" +
+		"2. Filter: allow DNS; allow portal via address-list FQDN (port 80,443," + port + "); drop trafik lain\n" +
 		"3. Urutan filter: block harus setelah SEMUA accept (dns, dns-tcp, portal)\n" +
 		"Comment: d5n-isolir:* · Secret isolir: prefix \"ISOLIR \""
 }

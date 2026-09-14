@@ -43,7 +43,7 @@ const emptyNetwork: IsolirNetwork = {
 function buildDocsHint(redirectURL: string, loginURL: string, poolLabel: string, port: string) {
   const url = redirectURL || "{portal_base_url}/api/public/isolir";
   const login = loginURL || "{portal_base_url}/login";
-  const p = port || "80";
+  const p = port || "8090";
   return `Halaman isolir (template admin):
 ${url}
 
@@ -52,11 +52,10 @@ ${login}
 
 Pool: ${poolLabel || "(pilih IP pool isolir)"}
 
-Mode redirect: DST-NAT.
-Production (nginx/aaPanel): Go listen 127.0.0.1:8090; nginx :80 default_server
-proxy ke captive. DST-NAT to-ports = ${p} (biasanya 80, bukan 8090).
-
-Uji: curl -sI -H 'Host: example.com' http://IP_PUBLIK/
+Mode redirect: DST-NAT (tanpa Web Proxy / tanpa nginx khusus).
+Captive: ISOLIR_HTTP_ADDR (default 0.0.0.0:${p}).
+DST-NAT: tcp/80 pool isolir → IP portal :${p}.
+Uji: http://IP_PUBLIK:${p}/
 
 IP tujuan = address-list RouterOS (atau override manual).`;
 }
@@ -132,7 +131,7 @@ export function IsolirTemplatePage() {
       pool_name: q.data.network.pool_name,
       pool_ranges: q.data.network.pool_ranges,
       portal_base_url: q.data.network.portal_base_url || window.location.origin,
-      isolir_host_port: q.data.network.isolir_host_port || "80",
+      isolir_host_port: q.data.network.isolir_host_port || "8090",
       isolir_host_ip: q.data.network.isolir_host_ip || "",
     });
     setHtml(q.data.html || "");
@@ -169,7 +168,7 @@ export function IsolirTemplatePage() {
     ? `${selectedPool.name} · ${selectedPool.network}${selectedPool.router_name ? ` · ${selectedPool.router_name}` : ""}`
     : network.pool_ranges || "";
 
-  const captivePort = network.isolir_host_port || "80";
+  const captivePort = network.isolir_host_port || "8090";
   const docsHint = q.data?.docs_hint?.trim() || buildDocsHint(redirectURL, loginURL, poolLabel, captivePort);
 
   const deferredHtml = useDeferredValue(html);
@@ -210,7 +209,7 @@ export function IsolirTemplatePage() {
         pool_name: data.network.pool_name,
         pool_ranges: data.network.pool_ranges,
         portal_base_url: data.network.portal_base_url || window.location.origin,
-        isolir_host_port: data.network.isolir_host_port || "80",
+        isolir_host_port: data.network.isolir_host_port || "8090",
         isolir_host_ip: data.network.isolir_host_ip || "",
       });
       void toastSuccess("Pengaturan isolir disimpan");
@@ -333,17 +332,16 @@ export function IsolirTemplatePage() {
             </label>
 
             <label className="grid gap-1.5 text-sm">
-              <span className="font-medium">Port DST-NAT publik</span>
+              <span className="font-medium">Port captive isolir (DST-NAT)</span>
               <Input
                 value={network.isolir_host_port || ""}
                 onChange={(e) => setNetwork({ ...network, isolir_host_port: e.target.value })}
-                placeholder="80"
+                placeholder="8090"
                 inputMode="numeric"
               />
               <span className="text-xs text-[var(--muted)]">
-                Port yang ditulis di rule RouterOS <code>to-ports</code>. Di production (nginx/aaPanel) isi{" "}
-                <code>80</code> — nginx <code>default_server</code> mem-proxy ke captive lokal{" "}
-                <code>127.0.0.1:8090</code>. Jangan pakai 8090 dari internet.
+                Port listener HTTP aplikasi (env <code>ISOLIR_HTTP_ADDR</code>) tujuan <code>dst-nat</code>.
+                Default <code>8090</code>. Pastikan di-forward sampai ke server (firewall / CHR / WG).
               </span>
             </label>
 

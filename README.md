@@ -127,7 +127,7 @@ Isi minimal (sesuaikan). Path data relatif ke folder repo:
 ```bash
 APP_ENV=production
 HTTP_ADDR=127.0.0.1:8088
-ISOLIR_HTTP_ADDR=127.0.0.1:8090
+ISOLIR_HTTP_ADDR=0.0.0.0:8090
 DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5432/d5net_billing?sslmode=disable&pool_max_conns=20
 JWT_SECRET='<acak panjang, openssl rand -hex 32>'
 ENCRYPTION_KEY='<tepat 32 karakter, openssl rand -base64 24 | cut -c1-32>'
@@ -140,7 +140,7 @@ WORKER_ENABLED=true
 
 `ENCRYPTION_KEY` wajib **32 byte** (32 karakter). Ganti `JWT_SECRET` dari contoh. Setelah ubah env: `sudo systemctl restart d5net-billing-api d5net-billing-worker`.
 
-`ISOLIR_HTTP_ADDR` bind localhost; nginx `listen 80 default_server` mem-proxy ke situ (lihat template nginx). Di Settings → Template Isolir, **Port DST-NAT publik** = `80`.
+`ISOLIR_HTTP_ADDR` = captive isolir (DST-NAT ke IP:8090). Forward port 8090 sampai ke proses API (firewall / CHR / WG). Nginx situs biasa (80/443) tidak perlu diubah untuk isolir.
 
 ### 4. systemd
 
