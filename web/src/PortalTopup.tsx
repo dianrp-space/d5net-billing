@@ -36,6 +36,8 @@ export function PortalTopupDialog({
     enabled: open,
   });
   const methods = payOptionsToMethods(options.data);
+  // Bila hanya 1 PG aktif: jangan tampilkan nama/pilihan PG, langsung ke checkout.
+  const singleMethod = methods.length === 1 ? methods[0] : null;
 
   useEffect(() => {
     if (open) return;
@@ -45,8 +47,12 @@ export function PortalTopupDialog({
   }, [open]);
 
   useEffect(() => {
+    if (singleMethod) {
+      setMethod(singleMethod.id);
+      return;
+    }
     if (!method && methods.length > 0) setMethod(methods[0].id);
-  }, [methods, method]);
+  }, [methods, method, singleMethod]);
 
   async function submit() {
     const amt = Math.floor(Number(amount) || 0);
@@ -54,7 +60,8 @@ export function PortalTopupDialog({
       setError(`Minimal topup ${formatRp(minTopup)}.`);
       return;
     }
-    if (!method) {
+    const chosen = singleMethod?.id || method;
+    if (!chosen) {
       setError("Pilih metode pembayaran.");
       return;
     }
@@ -64,8 +71,17 @@ export function PortalTopupDialog({
       const pi = await api<QrisIntent>("/api/portal/wallet/topup", {
         method: "POST",
         headers,
-        body: JSON.stringify({ amount: amt, provider: payMethodToProvider(method) }),
+        body: JSON.stringify({ amount: amt, provider: payMethodToProvider(chosen) }),
       });
+      const checkoutURL = String(pi.checkout_url || "").trim();
+      const meta = (pi.metadata || {}) as Record<string, unknown>;
+      const codePay = Boolean(meta.va_number || meta.payment_code);
+      // Satu PG dengan halaman redirect: langsung ke halaman checkout tanpa
+      // dialog perantara (sama seperti alur bayar tagihan).
+      if (singleMethod && checkoutURL && !pi.qr_image_base64 && !codePay) {
+        window.location.assign(checkoutURL);
+        return;
+      }
       setIntent(pi);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Gagal membuat pembayaran");
@@ -95,13 +111,20 @@ export function PortalTopupDialog({
             />
             <p className="mt-1 text-xs text-[var(--muted)]">Minimal {formatRp(minTopup)}.</p>
           </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">Metode pembayaran</label>
-            {options.isLoading ? (
+          {options.isLoading ? (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">Metode pembayaran</label>
               <p className="text-sm text-[var(--muted)]">Memuat metode…</p>
-            ) : methods.length === 0 ? (
-              <p className="text-sm text-[var(--danger)]">Belum ada metode pembayaran online yang aktif.</p>
-            ) : (
+            </div>
+          ) : methods.length === 0 ? (
+            <p className="text-sm text-[var(--danger)]">Belum ada metode pembayaran online yang aktif.</p>
+          ) : singleMethod ? (
+            <p className="text-xs text-[var(--muted)]">
+              Anda akan diarahkan ke <strong>gateway pembayaran online</strong> untuk menyelesaikan topup.
+            </p>
+          ) : (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">Metode pembayaran</label>
               <select className="input" value={method} onChange={(e) => setMethod(e.target.value as PayMethodId)}>
                 {methods.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -109,8 +132,8 @@ export function PortalTopupDialog({
                   </option>
                 ))}
               </select>
-            )}
-          </div>
+            </div>
+          )}
           {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
           <div className="flex flex-wrap gap-2">
             <button
