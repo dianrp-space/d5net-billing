@@ -358,7 +358,11 @@ input, select, textarea, button { font: inherit; }
   align-items: center;
   gap: 0.75rem;
   padding: 1rem;
+  text-decoration: none;
+  color: inherit;
 }
+.app-sidebar-brand:hover .app-sidebar-logo { transform: scale(1.04); }
+.app-sidebar-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 0.75rem; }
 .app-sidebar-logo {
   display: block;
   width: 2.25rem;
@@ -368,6 +372,7 @@ input, select, textarea, button { font: inherit; }
   outline: none;
   box-shadow: none;
   background: transparent;
+  transition: transform 0.15s ease;
 }
 .app-nav-group {
   margin-bottom: 1.25rem;
@@ -802,6 +807,68 @@ input, select, textarea, button { font: inherit; }
   font-weight: 400;
   letter-spacing: -0.02em;
 }
+.landing-nav { display: none; align-items: center; gap: 0.25rem; }
+.landing-nav a {
+  padding: 0.45rem 0.8rem;
+  border-radius: 0.65rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.landing-nav a:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.landing-nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.4rem;
+  width: 2.4rem;
+  border-radius: 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.landing-nav-toggle:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.landing-nav-mobile {
+  display: grid;
+  gap: 0.15rem;
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+.landing-nav-mobile a {
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.6rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+.landing-nav-mobile a:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.landing-nav-mobile-login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 0.7rem;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+@media (min-width: 768px) {
+  .landing-nav { display: flex; }
+  .landing-nav-toggle { display: none; }
+  .landing-nav-mobile { display: none; }
+}
+@media (max-width: 767px) {
+  .landing-header-login { display: none; }
+}
+#tentang, #produk, #cara-bayar, #kontak { scroll-margin-top: 6.5rem; }
 .landing-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
@@ -1091,17 +1158,66 @@ input, select, textarea, button { font: inherit; }
 }
 .landing-contact h2 { font-size: 1.3rem; font-weight: 800; color: var(--text); }
 .landing-contact p { margin-top: 0.4rem; font-size: 0.92rem; color: var(--muted); }
+
+/* ---- landing: about, public catalog, support ---- */
+.landing-about { margin-top: 5rem; }
+.landing-about p { margin-top: 1.1rem; max-width: 62ch; font-size: 0.98rem; line-height: 1.75; color: var(--muted); white-space: pre-line; }
+.landing-plans { margin-top: 5rem; }
+.landing-plans-sub { margin-top: 1rem; max-width: 62ch; font-size: 0.95rem; line-height: 1.75; color: var(--muted); white-space: pre-line; }
+.landing-plans-grid { margin-top: 1.5rem; display: grid; gap: 1rem; }
+.landing-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  padding: 1.3rem 1.25rem;
+}
+.landing-plan-name { font-size: 1.05rem; font-weight: 800; color: var(--text); }
+.landing-plan-meta { font-size: 0.82rem; color: var(--muted); }
+.landing-plan-price { margin-top: auto; padding-top: 0.9rem; font-size: 1.4rem; font-weight: 800; color: var(--text); }
+.landing-plan-price small { font-size: 0.78rem; font-weight: 600; color: var(--muted); }
+.landing-support { margin-top: 4.5rem; }
+.landing-support-grid { margin-top: 1.5rem; display: grid; gap: 1rem; }
+.landing-support-item { display: flex; align-items: flex-start; gap: 0.85rem; border-radius: 1rem; border: 1px solid var(--border); background: var(--panel); padding: 1.15rem 1.2rem; }
+.landing-support-icon {
+  display: grid;
+  place-items: center;
+  height: 2.4rem;
+  width: 2.4rem;
+  flex-shrink: 0;
+  line-height: 0;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent);
+}
+.landing-support-icon svg { display: block; }
+.landing-support-item b { display: block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); }
+.landing-support-item div a, .landing-support-item div span { display: block; margin-top: 0.3rem; font-size: 0.95rem; font-weight: 600; color: var(--text); word-break: break-word; }
+.landing-support-item a:hover { color: var(--accent); }
 .landing-footer {
   margin-top: 3.5rem;
   padding-top: 1.4rem;
   border-top: 1px solid var(--border);
   font-size: 0.8rem;
   color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
+.landing-footer-links { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+.landing-footer-links a { color: var(--muted); font-weight: 600; }
+.landing-footer-links a:hover { color: var(--accent); }
 @media (min-width: 900px) {
   .landing-hero { grid-template-columns: 1.05fr 0.95fr; padding-top: 5rem; }
   .landing-title { font-size: 4.6rem; }
   .landing-steps-grid { grid-template-columns: repeat(3, 1fr); }
+  .landing-plans-grid { grid-template-columns: repeat(3, 1fr); }
+  .landing-support-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 .status-badge {
@@ -1589,6 +1705,14 @@ input, select, textarea, button { font: inherit; }
   background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 30%, transparent));
 }
 .auth-card-body { padding: 1.75rem 1.75rem 1.5rem; }
+.auth-logo-link {
+  display: block;
+  width: fit-content;
+  margin-inline: auto;
+  border-radius: 1rem;
+}
+.auth-logo-link:hover .auth-logo { transform: scale(1.04); }
+.auth-logo-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .auth-logo {
   display: block;
   margin-inline: auto;
@@ -1599,6 +1723,7 @@ input, select, textarea, button { font: inherit; }
   background: #fff;
   padding: 0.4rem;
   box-shadow: 0 0 0 1px var(--border), 0 10px 24px -12px rgb(0 0 0 / 0.4);
+  transition: transform 0.15s ease;
 }
 .auth-brand {
   margin-top: 0.9rem;
@@ -1625,6 +1750,21 @@ input, select, textarea, button { font: inherit; }
 .auth-subtitle { margin-top: 0.6rem; font-size: 0.875rem; color: var(--muted); }
 .auth-form { margin-top: 1.4rem; display: flex; flex-direction: column; gap: 0.9rem; }
 .auth-label { display: grid; gap: 0.35rem; font-size: 0.82rem; font-weight: 600; text-align: left; }
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.83rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.auth-remember input {
+  width: 0.95rem;
+  height: 0.95rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .auth-field { position: relative; display: block; }
 .auth-field-icon {
   position: absolute;
@@ -1715,7 +1855,10 @@ input, select, textarea, button { font: inherit; }
   padding: 0.9rem 1.4rem;
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
+  text-decoration: none;
 }
+.auth-visual-brand:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.auth-visual-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .auth-visual-brand img { display: block; height: 3.4rem; width: auto; }
 .auth-visual-title { margin-top: 1.6rem; font-size: 2rem; line-height: 1.15; font-weight: 800; letter-spacing: -0.02em; color: var(--text); }
 .auth-visual-title em { font-style: normal; color: var(--secondary); }

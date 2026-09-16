@@ -19,6 +19,7 @@ import {
 import { AdminApp, isAdminPage, normalizeAdminPage, type AdminPage } from "./AdminApp";
 import { ClientHome } from "./ClientHome";
 import { Landing } from "./Landing";
+import { LegalPage } from "./Legal";
 import { TenantLogin, type ClientPortalData } from "./TenantLogin";
 import { getLastAdminPage, setLastAdminPage } from "./navPersist";
 import { TenantAccent } from "./theme";
@@ -155,6 +156,26 @@ const adminLoginRoute = createRoute({
     if (hasClientSession()) throw redirect({ to: "/client/dashboard" });
   },
   component: AdminLoginView,
+});
+
+function TermsView() {
+  return <LegalPage doc="terms" />;
+}
+
+function PrivacyView() {
+  return <LegalPage doc="privacy" />;
+}
+
+const termsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/terms",
+  component: TermsView,
+});
+
+const privacyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/privacy",
+  component: PrivacyView,
 });
 
 // ---------------------------------------------------------------------------
@@ -335,6 +356,8 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   clientLoginRoute,
   adminLoginRoute,
+  termsRoute,
+  privacyRoute,
   adminIndexRoute,
   adminSectionRoute,
   customerSecretsRoute,

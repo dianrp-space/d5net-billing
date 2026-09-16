@@ -243,7 +243,9 @@ export function LoginShell({
       <div className="auth-card-bar" aria-hidden />
       <div className="auth-card-body">
         <div className="text-center">
-          <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="auth-logo" />
+          <a href="/" className="auth-logo-link" title="Ke halaman utama" aria-label="Ke halaman utama">
+            <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="auth-logo" />
+          </a>
           <div className="auth-brand">{brand}</div>
           <h1 className="auth-title">{title}</h1>
           {badge ? <span className="auth-badge">{badge}</span> : null}

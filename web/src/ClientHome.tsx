@@ -866,13 +866,13 @@ export function ClientHome({
         }
       />
       <aside className="app-sidebar" aria-label="Navigasi portal pelanggan">
-        <div className="app-sidebar-brand">
+        <a className="app-sidebar-brand" href="/" title="Ke halaman utama" aria-label="Ke halaman utama">
           <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="app-sidebar-logo object-contain" />
           <div className="app-sidebar-brand-text">
             <p className="text-[10px] font-medium text-[var(--stone)]">Portal pelanggan</p>
             <h1 className="text-sm font-bold">{appName}</h1>
           </div>
-        </div>
+        </a>
         <nav className="flex-1 px-3 py-2">
           <div className="app-nav-group">
             <p className="app-nav-label">Menu</p>

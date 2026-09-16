@@ -5,23 +5,47 @@ import {
   CircleCheck,
   CreditCard,
   Landmark,
+  Mail,
+  MapPin,
+  Menu,
+  Phone,
   QrCode,
   ReceiptText,
   Store,
   UserRound,
   Wallet,
+  X,
   Zap,
 } from "lucide-react";
 import { api } from "./api";
 import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
 import { ChatwootWidget } from "./ChatwootWidget";
 import { ThemeToggle } from "./ThemeToggle";
+import { formatRp } from "./ui";
+import { billingCycleLabel, planSpeedLabel } from "./PortalChangePlan";
 
-type PublicBranding = {
+type PublicPlan = {
+  id: string;
+  name: string;
+  price: number;
+  billing_cycle?: string;
+  service_type?: string;
+  download_mbps: number;
+  upload_mbps: number;
+  quota_gb?: number | null;
+};
+
+type PublicSite = {
   name?: string;
   app_name?: string;
   logo_url?: string | null;
   favicon_url?: string | null;
+  about?: string;
+  product_description?: string;
+  support_email?: string;
+  support_phone?: string;
+  support_address?: string;
+  plans?: PublicPlan[];
 };
 
 const PAY_METHODS = [
@@ -51,47 +75,106 @@ const STEPS = [
 ];
 
 export function Landing({ onGoLogin }: { onGoLogin: () => void }) {
-  const [branding, setBranding] = useState<PublicBranding | null>(null);
+  const [site, setSite] = useState<PublicSite | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      let loaded: PublicSite | null = null;
       try {
-        const b = await api<PublicBranding>("/api/public/branding");
-        if (!cancelled) return;
-        setBranding(b);
-        applyBrandingMeta({
-          appName: b.name || b.app_name,
-          faviconUrl: b.favicon_url,
-        });
-        document.title = "Delima Net - Portal Pembayaran Internet";
+        loaded = await api<PublicSite>("/api/public/site");
       } catch {
-        /* keep defaults */
+        // Fallback: keep branding working even if the site endpoint is unavailable.
+        try {
+          const b = await api<PublicSite>("/api/public/branding");
+          loaded = { name: b.name, app_name: b.app_name, logo_url: b.logo_url, favicon_url: b.favicon_url };
+        } catch {
+          /* keep defaults */
+        }
       }
+      if (cancelled || !loaded) return;
+      setSite(loaded);
+      applyBrandingMeta({
+        appName: loaded.name || loaded.app_name,
+        faviconUrl: loaded.favicon_url,
+      });
+      document.title = `${loaded.name || loaded.app_name || "Portal"} - Portal Pembayaran Internet`;
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const name = (branding?.name || branding?.app_name || "Delima Net").trim();
-  const logo = branding?.logo_url || DEFAULT_BRAND_LOGO;
+  const name = (site?.name || site?.app_name || "Delima Net").trim();
+  const logo = site?.logo_url || DEFAULT_BRAND_LOGO;
+  const plans = site?.plans ?? [];
+  const about = (site?.about || "").trim();
+  const productDescription = (site?.product_description || "").trim();
+  const supportEmail = (site?.support_email || "").trim();
+  const supportPhone = (site?.support_phone || "").trim();
+  const supportAddress = (site?.support_address || "").trim();
+  const hasSupport = Boolean(supportEmail || supportPhone || supportAddress);
+
+  const navLinks = [
+    about ? { href: "#tentang", label: "Tentang" } : null,
+    plans.length > 0 ? { href: "#produk", label: "Produk & Harga" } : null,
+    { href: "#cara-bayar", label: "Cara Bayar" },
+    hasSupport ? { href: "#kontak", label: "Kontak" } : null,
+  ].filter((l): l is { href: string; label: string } => l !== null);
 
   return (
     <div className="landing min-h-full">
       <ChatwootWidget />
       <div className="landing-bg" aria-hidden />
-      <header className="sticky top-3 z-50 mx-auto mt-3 flex max-w-6xl items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel)]/85 px-4 py-3 shadow-[var(--shadow-sm)] backdrop-blur-md md:px-6">
-        <span className="flex items-center gap-3">
-          <img src={logo} alt={name} className="h-9 w-auto" />
-          <span className="landing-brand text-xl">{name}</span>
-        </span>
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-          <button type="button" className="btn px-5 py-2" onClick={onGoLogin}>
-            Login Pelanggan
-          </button>
+      <header className="sticky top-3 z-50 mx-auto mt-3 max-w-6xl rounded-2xl border border-[var(--border)] bg-[var(--panel)]/85 shadow-[var(--shadow-sm)] backdrop-blur-md">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 md:px-6">
+          <a href="/" className="flex items-center gap-3 no-underline" title="Ke halaman utama" aria-label="Ke halaman utama">
+            <img src={logo} alt={name} className="h-9 w-auto" />
+            <span className="landing-brand text-xl">{name}</span>
+          </a>
+          <nav className="landing-nav" aria-label="Navigasi halaman">
+            {navLinks.map((l) => (
+              <a key={l.href} href={l.href}>
+                {l.label}
+              </a>
+            ))}
+          </nav>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <button type="button" className="btn landing-header-login px-5 py-2" onClick={onGoLogin}>
+              Login Pelanggan
+            </button>
+            <button
+              type="button"
+              className="landing-nav-toggle"
+              aria-label={menuOpen ? "Tutup menu" : "Buka menu"}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              {menuOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
+          </div>
         </div>
+        {menuOpen ? (
+          <nav className="landing-nav-mobile" aria-label="Navigasi halaman">
+            {navLinks.map((l) => (
+              <a key={l.href} href={l.href} onClick={() => setMenuOpen(false)}>
+                {l.label}
+              </a>
+            ))}
+            <button
+              type="button"
+              className="landing-nav-mobile-login"
+              onClick={() => {
+                setMenuOpen(false);
+                onGoLogin();
+              }}
+            >
+              Login Pelanggan <ArrowRight size={16} />
+            </button>
+          </nav>
+        ) : null}
       </header>
 
       <main className="relative z-10 mx-auto max-w-6xl px-6 pb-20 md:px-10">
@@ -208,6 +291,79 @@ export function Landing({ onGoLogin }: { onGoLogin: () => void }) {
           </div>
         </section>
 
+        {about ? (
+          <section id="tentang" className="landing-about">
+            <h2 className="landing-section-title">Tentang {name}</h2>
+            <p>{about}</p>
+          </section>
+        ) : null}
+
+        <section id="produk" className="landing-plans">
+          <h2 className="landing-section-title">Produk &amp; harga</h2>
+          {productDescription ? <p className="landing-plans-sub">{productDescription}</p> : null}
+          {plans.length > 0 ? (
+            <div className="landing-plans-grid">
+              {plans.map((p) => (
+                <div key={p.id} className="landing-plan">
+                  <span className="landing-plan-name">{p.name}</span>
+                  <span className="landing-plan-meta">
+                    {planSpeedLabel(p)}
+                    {p.quota_gb ? ` · ${p.quota_gb} GB` : ""}
+                  </span>
+                  <div className="landing-plan-price">
+                    {formatRp(p.price)} <small>{billingCycleLabel(p.billing_cycle)}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="landing-plans-sub">
+              Daftar paket belum tersedia. Hubungi kami untuk informasi produk dan harga.
+            </p>
+          )}
+        </section>
+
+        {hasSupport ? (
+          <section id="kontak" className="landing-support">
+            <h2 className="landing-section-title">Kontak dukungan</h2>
+            <div className="landing-support-grid">
+              {supportEmail ? (
+                <div className="landing-support-item">
+                  <span className="landing-support-icon">
+                    <Mail size={17} />
+                  </span>
+                  <div>
+                    <b>Email</b>
+                    <a href={`mailto:${supportEmail}`}>{supportEmail}</a>
+                  </div>
+                </div>
+              ) : null}
+              {supportPhone ? (
+                <div className="landing-support-item">
+                  <span className="landing-support-icon">
+                    <Phone size={17} />
+                  </span>
+                  <div>
+                    <b>Telepon</b>
+                    <a href={`tel:${supportPhone.replace(/[^+\d]/g, "")}`}>{supportPhone}</a>
+                  </div>
+                </div>
+              ) : null}
+              {supportAddress ? (
+                <div className="landing-support-item">
+                  <span className="landing-support-icon">
+                    <MapPin size={17} />
+                  </span>
+                  <div>
+                    <b>Alamat usaha</b>
+                    <span>{supportAddress}</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
         <section className="landing-contact">
           <div>
             <h2>Belum punya akses portal?</h2>
@@ -225,6 +381,10 @@ export function Landing({ onGoLogin }: { onGoLogin: () => void }) {
           <span>
             © {new Date().getFullYear()} {name} — better connecting all.
           </span>
+          <nav className="landing-footer-links">
+            <a href="/terms">Syarat &amp; Ketentuan</a>
+            <a href="/privacy">Kebijakan Privasi</a>
+          </nav>
         </footer>
       </main>
     </div>

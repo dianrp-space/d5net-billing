@@ -112,9 +112,9 @@ function LoginVisual({ mode, brand }: { mode: LoginMode; brand: string }) {
       ];
   return (
     <>
-      <span className="auth-visual-brand">
+      <a className="auth-visual-brand" href="/" title="Ke halaman utama" aria-label="Ke halaman utama">
         <img src="/d5net.webp" alt={brand} />
-      </span>
+      </a>
       <h2 className="auth-visual-title">
         {isAdmin ? (
           <>Satu panel untuk <em>seluruh jaringan.</em></>
@@ -177,6 +177,48 @@ export function TenantLogin({
   const [tenant, setTenant] = useState<PublicBranding | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [remember, setRemember] = useState(false);
+  const rememberKey = isAdmin ? "drp_remember_admin" : "drp_remember_client";
+
+  // Muat kredensial tersimpan saat opsi "Ingat saya" pernah diaktifkan.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(rememberKey);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { user?: string; password?: string };
+      if (saved.user) {
+        if (isAdmin) setEmail(saved.user);
+        else setPhone(saved.user);
+      }
+      if (saved.password) setPassword(saved.password);
+      setRemember(true);
+    } catch {
+      /* abaikan data rusak */
+    }
+  }, [rememberKey, isAdmin]);
+
+  function onRememberChange(next: boolean) {
+    setRemember(next);
+    if (!next) {
+      try {
+        localStorage.removeItem(rememberKey);
+      } catch {
+        /* abaikan */
+      }
+    }
+  }
+
+  function persistRemember() {
+    try {
+      if (!remember) {
+        localStorage.removeItem(rememberKey);
+        return;
+      }
+      localStorage.setItem(rememberKey, JSON.stringify({ user: isAdmin ? email : phone, password }));
+    } catch {
+      /* penyimpanan tidak tersedia */
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -219,6 +261,7 @@ export function TenantLogin({
         }
         if (data.access_token) {
           setToken(data.access_token);
+          persistRemember();
           onAdminSuccess();
         } else {
           setErr("Login gagal");
@@ -229,6 +272,7 @@ export function TenantLogin({
           body: JSON.stringify({ phone, password }),
         });
         setClientSession(data);
+        persistRemember();
         onClientSuccess(data);
       }
     } catch (e: unknown) {
@@ -263,9 +307,15 @@ export function TenantLogin({
           isAdmin ? (
             <>Area khusus administrator. Akses tercatat.</>
           ) : (
-            <a href="/">
-              <ArrowLeft size={14} /> Kembali ke beranda
-            </a>
+            <>
+              <a href="/">
+                <ArrowLeft size={14} /> Kembali ke beranda
+              </a>
+              <div className="mt-2 flex flex-wrap justify-center gap-x-3 gap-y-1 text-xs">
+                <a href="/terms">Syarat &amp; Ketentuan</a>
+                <a href="/privacy">Kebijakan Privasi</a>
+              </div>
+            </>
           )
         }
       >
@@ -291,6 +341,14 @@ export function TenantLogin({
                 <LockKeyhole size={16} className="auth-field-icon" />
                 <SecretInput value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
               </span>
+            </label>
+            <label className="auth-remember">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => onRememberChange(e.target.checked)}
+              />
+              <span>Ingat saya</span>
             </label>
             <button className="btn auth-submit" disabled={busy || !tenant}>
               {busy ? (
@@ -324,6 +382,14 @@ export function TenantLogin({
                 <LockKeyhole size={16} className="auth-field-icon" />
                 <SecretInput value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
               </span>
+            </label>
+            <label className="auth-remember">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => onRememberChange(e.target.checked)}
+              />
+              <span>Ingat saya</span>
             </label>
             <button className="btn auth-submit" disabled={busy || !tenant}>
               {busy ? (
