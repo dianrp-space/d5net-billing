@@ -740,6 +740,9 @@ export function ClientHome({
   const greeting = data.customer?.full_name || "Pelanggan";
   const isolirSubs = subscriptions.filter((s) => isIsolirStatus(s.status));
   const unpaidInvoices = invoices.filter(isInvoiceUnpaid);
+  // Hanya tagihan ber-opsi isolir yang boleh memunculkan peringatan isolir.
+  const isolirUnpaid = unpaidInvoices.filter((i) => i.isolir);
+  const isolirRisk = isolirSubs.length > 0 || isolirUnpaid.length > 0;
   const unpaidTotal = unpaidInvoices.reduce((sum, i) => {
     const payable = Math.max(0, Math.floor(Number(i.payable_amount) || 0));
     if (payable > 0) return sum + payable;
@@ -1076,7 +1079,9 @@ export function ClientHome({
                           ? isolirSubs.length === 1
                             ? "Akun berikut sedang diisolir. Bayar tagihan agar koneksi dipulihkan."
                             : `${isolirSubs.length} akun sedang diisolir. Bayar tagihan agar koneksi dipulihkan.`
-                          : "Ada tagihan yang belum dibayar. Segera lakukan pembayaran agar layanan tidak diisolir."}
+                          : isolirRisk
+                            ? "Ada tagihan yang belum dibayar. Segera lakukan pembayaran agar layanan tidak diisolir."
+                            : "Ada tagihan yang belum dibayar. Silakan lakukan pembayaran."}
                       </p>
                       {isolirSubs.length > 0 ? (
                         <ul className="mt-2 grid gap-1 text-sm">

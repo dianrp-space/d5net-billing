@@ -318,14 +318,14 @@ func (s *Store) DeleteRole(ctx context.Context, tenantID, id xid.ID) error {
 }
 
 type TenantUser struct {
-	UserID    xid.ID  `json:"user_id"`
-	Email     string  `json:"email"`
-	FullName  string  `json:"full_name"`
-	Phone     *string `json:"phone,omitempty"`
-	IsActive  bool    `json:"is_active"`
-	RoleID    xid.ID  `json:"role_id"`
-	RoleSlug  string  `json:"role_slug"`
-	RoleName  string  `json:"role_name"`
+	UserID    xid.ID    `json:"user_id"`
+	Email     string    `json:"email"`
+	FullName  string    `json:"full_name"`
+	Phone     *string   `json:"phone,omitempty"`
+	IsActive  bool      `json:"is_active"`
+	RoleID    xid.ID    `json:"role_id"`
+	RoleSlug  string    `json:"role_slug"`
+	RoleName  string    `json:"role_name"`
 	CreatedAt time.Time `json:"created_at,omitempty"`
 }
 
@@ -399,7 +399,20 @@ func (s *Store) UpdateTenantUser(ctx context.Context, tenantID, userID, roleID x
 		_, err = tx.Exec(ctx, `
 			UPDATE users SET full_name=$2, phone=$3, is_active=$4, updated_at=NOW() WHERE id=$1
 		`, userID, fullName, phone, isActive)
-		return err
+		if err != nil {
+			return err
+		}
+		// Akun dinonaktifkan: cabut semua refresh token agar sesi lama tidak
+		// bisa diperpanjang (access token berjalan ditolak middleware).
+		if !isActive {
+			if _, err = tx.Exec(ctx, `
+				UPDATE refresh_tokens SET revoked_at = NOW()
+				WHERE user_id = $1 AND revoked_at IS NULL
+			`, userID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

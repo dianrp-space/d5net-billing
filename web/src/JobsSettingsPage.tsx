@@ -44,6 +44,7 @@ type JobRun = {
 type JobRunResult = {
   invoices: number;
   isolir: number;
+  late_fees: number;
   notify: number;
 };
 
@@ -170,7 +171,7 @@ export function JobsSettingsPage() {
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ["jobs-runs"] });
       void toastSuccess(
-        `Siklus selesai. Tagihan baru ${res.invoices} · Isolir ${res.isolir} · Notifikasi ${res.notify}`,
+        `Siklus selesai. Tagihan baru ${res.invoices} · Isolir ${res.isolir} · Denda ${res.late_fees} · Notifikasi ${res.notify}`,
       );
     },
     onError: (e: Error) => void toastError(e.message || "Gagal menjalankan worker"),

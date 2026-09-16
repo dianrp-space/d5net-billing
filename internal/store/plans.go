@@ -469,7 +469,8 @@ func (s *Store) ListSubscriptionsNeedingResume(ctx context.Context, tenantID xid
 		  AND NOT EXISTS (
 		    SELECT 1 FROM invoices i
 		    WHERE i.tenant_id = s.tenant_id
-		      AND i.subscription_id = s.id
+		      AND i.isolir = TRUE
+		      AND (i.subscription_id = s.id OR i.isolir_subscription_id = s.id)
 		      AND i.deleted_at IS NULL
 		      AND i.status IN ('issued','partial','overdue')
 		      AND i.total_amount > i.paid_amount
@@ -577,7 +578,8 @@ func (s *Store) ListOverdueSubscriptions(ctx context.Context, tenantID xid.ID, g
 		  AND EXISTS (
 		    SELECT 1 FROM invoices i
 		    WHERE i.tenant_id = s.tenant_id
-		      AND i.subscription_id = s.id
+		      AND i.isolir = TRUE
+		      AND (i.subscription_id = s.id OR i.isolir_subscription_id = s.id)
 		      AND i.deleted_at IS NULL
 		      AND i.status IN ('issued','partial','overdue')
 		      AND i.total_amount > i.paid_amount

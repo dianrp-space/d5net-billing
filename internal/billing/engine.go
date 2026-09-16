@@ -136,6 +136,7 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 		TenantID:       tenantID,
 		CustomerID:     sub.CustomerID,
 		SubscriptionID: &subscriptionID,
+		Isolir:         true,
 		InvoiceNumber:  invNum,
 		Subtotal:       subtotal + lateFee,
 		TaxAmount:      tax,
@@ -265,6 +266,34 @@ func (e *Engine) ProcessOverdueSuspensions(ctx context.Context, tenantID xid.ID)
 		ids = append(ids, sub.ID)
 	}
 	return ids, nil
+}
+
+// ProcessManualLateFees menerapkan denda keterlambatan ke tagihan manual
+// (tanpa langganan) yang lewat jatuh tempo, sekali per tagihan. Isolir tidak
+// diperlukan: denda tetap berlaku untuk tagihan seperti pembelian CCTV.
+func (e *Engine) ProcessManualLateFees(ctx context.Context, tenantID xid.ID) (int, error) {
+	pct := e.store.LateFeePercent(ctx, tenantID)
+	if pct <= 0 {
+		return 0, nil
+	}
+	invs, err := e.store.ListManualOverdueInvoicesForLateFee(ctx, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	desc := fmt.Sprintf("Denda keterlambatan %s", formatLateFeePercent(pct))
+	applied := 0
+	for _, inv := range invs {
+		outstanding := inv.TotalAmount - inv.PaidAmount
+		fee := ApplyLateFee(outstanding, pct)
+		if fee <= 0 {
+			continue
+		}
+		if err := e.store.ApplyInvoiceLateFee(ctx, tenantID, inv.ID, fee, desc); err != nil {
+			continue
+		}
+		applied++
+	}
+	return applied, nil
 }
 
 func ProrateAmount(fullPrice int64, daysUsed, daysInPeriod int) int64 {
@@ -460,6 +489,7 @@ func (e *Engine) ApplyPlanChange(ctx context.Context, tenantID, subscriptionID, 
 			TenantID:       tenantID,
 			CustomerID:     sub.CustomerID,
 			SubscriptionID: &sid,
+			Isolir:         true,
 			InvoiceNumber:  invNum,
 			Subtotal:       q.DeltaSubtotal,
 			TaxAmount:      q.TaxAmount,

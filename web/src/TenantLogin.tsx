@@ -64,6 +64,8 @@ export type ClientPortalData = {
     items?: { description: string; quantity?: number; unit_price?: number; amount?: number }[];
     admin_fee?: number;
     payable_amount?: number;
+    isolir?: boolean;
+    isolir_subscription_id?: string | null;
   }[];
   payments?: {
     id?: string;

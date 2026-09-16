@@ -156,6 +156,28 @@ func (s *Store) RevokeRefreshToken(ctx context.Context, tokenHash string) error 
 	return err
 }
 
+// UserCanAccessTenant melaporkan apakah user aktif dan masih terdaftar di
+// tenant yang diminta. Dipakai middleware agar access token milik user yang
+// dinonaktifkan atau dihapus dari tenant langsung ditolak (token JWT tetap
+// valid sampai kedaluwarsa, jadi keanggotaan dicek ulang di sini).
+func (s *Store) UserCanAccessTenant(ctx context.Context, userID, tenantID xid.ID) (bool, error) {
+	var ok bool
+	err := s.Pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM users u
+			JOIN user_tenants ut ON ut.user_id = u.id
+			JOIN tenants t ON t.id = ut.tenant_id
+			WHERE u.id = $1 AND u.is_active = TRUE
+			  AND ut.tenant_id = $2 AND t.is_active = TRUE
+		)
+	`, userID, tenantID).Scan(&ok)
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
 func (s *Store) IsRefreshTokenValid(ctx context.Context, tokenHash string) (bool, error) {
 	var valid bool
 	err := s.Pool.QueryRow(ctx, `

@@ -27,6 +27,7 @@ import (
 	"github.com/dianrp-space/d5net-billing/internal/provisioner"
 	"github.com/dianrp-space/d5net-billing/internal/store"
 	"github.com/dianrp-space/d5net-billing/internal/tenant"
+	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
 func main() {
@@ -68,7 +69,9 @@ func main() {
 	provReg := provisioner.NewRegistry(st, encryptor)
 	jobsWorker := job.NewWorker(st, billingEngine, notifySvc, monitor.NewPoller(st, encryptor, 0).WithNotify(notifySvc), provReg)
 
-	srv := httpx.NewServer(cfg.CORSOrigins, tenant.Middleware(tokens), requireAPIAuth)
+	srv := httpx.NewServer(cfg.CORSOrigins, tenant.Middleware(tokens, func(ctx context.Context, uid, tid xid.ID) (bool, error) {
+		return st.UserCanAccessTenant(ctx, uid, tid)
+	}), requireAPIAuth)
 
 	deps := &handlers.Deps{
 		Store: st, Tokens: tokens, Encryptor: encryptor,

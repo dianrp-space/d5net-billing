@@ -104,6 +104,7 @@ func (w *Worker) runCycle(ctx context.Context) {
 type TenantCycleResult struct {
 	Invoices int `json:"invoices"`
 	Isolir   int `json:"isolir"`
+	LateFees int `json:"late_fees"`
 	Notify   int `json:"notify"`
 }
 
@@ -146,6 +147,9 @@ func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.Jo
 			for i := range invoices {
 				w.autoPayIssuedInvoice(ctx, t.ID, invoices[i])
 			}
+		}
+		if n, err := w.billing.ProcessManualLateFees(ctx, t.ID); err == nil {
+			out.LateFees = n
 		}
 	}
 	if cfg.IsolirEnabled {

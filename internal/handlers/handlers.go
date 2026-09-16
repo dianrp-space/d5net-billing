@@ -139,6 +139,12 @@ func registerAuth(api huma.API, d *Deps) {
 			auditEvent(ctx, d, AuditAuthLoginFailed, "user", &user.ID, map[string]any{"email": body.Email})
 			return nil, httpx.Unauthorized("invalid credentials")
 		}
+		// Akun yang dinonaktifkan admin tidak boleh login (sama seperti alur
+		// refresh token, yang sudah menolak user nonaktif).
+		if !user.IsActive {
+			auditEvent(ctx, d, AuditAuthLoginFailed, "user", &user.ID, map[string]any{"email": body.Email, "reason": "inactive"})
+			return nil, httpx.Unauthorized("akun dinonaktifkan")
+		}
 		if user.TOTPEnabled {
 			if body.TOTPCode == "" {
 				out := &LoginOutput{}
@@ -3161,6 +3167,10 @@ type manualInvoiceInput struct {
 	DiscountAmount int64                    `json:"discount_amount,omitempty"`
 	TaxPercent     float64                  `json:"tax_percent,omitempty"`
 	Items          []manualInvoiceItemInput `json:"items"`
+	// Isolir menentukan apakah tagihan ini mengisolir layanan saat lewat jatuh
+	// tempo. Bila true, SubscriptionID wajib diisi sebagai sasaran isolir.
+	Isolir         bool   `json:"isolir,omitempty"`
+	SubscriptionID string `json:"subscription_id,omitempty"`
 }
 
 type manualInvoiceOutput struct {
@@ -3168,6 +3178,7 @@ type manualInvoiceOutput struct {
 	InvoiceNumber  string `json:"invoice_number"`
 	TotalAmount    int64  `json:"total_amount"`
 	DueDate        string `json:"due_date"`
+	Isolir         bool   `json:"isolir"`
 	WhatsAppQueued bool   `json:"whatsapp_queued"`
 }
 
@@ -3243,20 +3254,46 @@ func registerInvoices(api huma.API, d *Deps) {
 		} else {
 			dueDate = billing.NextDueDate(time.Now(), d.Store.InvoiceDueDay(ctx, tid))
 		}
+		// Opsi isolir: tagihan manual hanya mengisolir bila dicentang, dan
+		// hanya langganan sasaran yang dipilih yang diisolir.
+		isolir := input.Body.Isolir
+		var isolirSubID *xid.ID
+		if isolir {
+			sid, perr := xid.Parse(strings.TrimSpace(input.Body.SubscriptionID))
+			if perr != nil {
+				return nil, httpx.BadRequest("subscription_id wajib dipilih bila opsi isolir aktif")
+			}
+			sub, serr := d.Store.GetSubscription(ctx, tid, sid)
+			if errors.Is(serr, store.ErrNotFound) {
+				return nil, httpx.NotFound("langganan tidak ditemukan")
+			} else if serr != nil {
+				return nil, httpx.Internal(serr)
+			}
+			if sub.CustomerID != cid {
+				return nil, httpx.BadRequest("langganan bukan milik pelanggan ini")
+			}
+			switch strings.ToLower(strings.TrimSpace(sub.Status)) {
+			case "cancelled", "canceled", "dismantled":
+				return nil, httpx.BadRequest("langganan tidak aktif, tidak bisa diisolir")
+			}
+			isolirSubID = &sid
+		}
 		invNum, err := d.Store.NextInvoiceNumber(ctx, tid, cust.CustomerCode)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
 		inv := &store.Invoice{
-			TenantID:       tid,
-			CustomerID:     cid,
-			InvoiceNumber:  invNum,
-			Subtotal:       subtotal,
-			TaxAmount:      tax,
-			DiscountAmount: discount,
-			TotalAmount:    total,
-			Status:         "issued",
-			DueDate:        dueDate,
+			TenantID:             tid,
+			CustomerID:           cid,
+			InvoiceNumber:        invNum,
+			Subtotal:             subtotal,
+			TaxAmount:            tax,
+			DiscountAmount:       discount,
+			TotalAmount:          total,
+			Status:               "issued",
+			DueDate:              dueDate,
+			Isolir:               isolir,
+			IsolirSubscriptionID: isolirSubID,
 		}
 		if err := d.Store.CreateInvoice(ctx, inv, items); err != nil {
 			return nil, httpx.Internal(err)
@@ -3283,6 +3320,7 @@ func registerInvoices(api huma.API, d *Deps) {
 		out.Body.InvoiceNumber = invNum
 		out.Body.TotalAmount = total
 		out.Body.DueDate = dueDate.Format("2006-01-02")
+		out.Body.Isolir = isolir
 		out.Body.WhatsAppQueued = waQueued
 		return out, nil
 	})

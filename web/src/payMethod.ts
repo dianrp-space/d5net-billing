@@ -70,6 +70,8 @@ export type PayableInvoice = {
   customer_name?: string;
   due_date?: string;
   paid_at?: string | null;
+  /** True bila tagihan mengisolir layanan saat lewat jatuh tempo. */
+  isolir?: boolean;
 };
 
 function storageKey(slug?: string) {

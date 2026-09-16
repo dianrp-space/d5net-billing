@@ -12,26 +12,32 @@ import (
 )
 
 type Invoice struct {
-	ID             xid.ID        `json:"id"`
-	TenantID       xid.ID        `json:"tenant_id"`
-	CustomerID     xid.ID        `json:"customer_id"`
-	SubscriptionID *xid.ID       `json:"subscription_id,omitempty"`
-	InvoiceNumber  string        `json:"invoice_number"`
-	Subtotal       int64         `json:"subtotal"`
-	TaxAmount      int64         `json:"tax_amount"`
-	DiscountAmount int64         `json:"discount_amount"`
-	TotalAmount    int64         `json:"total_amount"`
-	PaidAmount     int64         `json:"paid_amount"`
-	Status         string        `json:"status"`
-	DueDate        time.Time     `json:"due_date"`
-	IssuedAt       *time.Time    `json:"issued_at,omitempty"`
-	PaidAt         *time.Time    `json:"paid_at,omitempty"`
-	DeletedAt      *time.Time    `json:"deleted_at,omitempty"`
-	CustomerName   string        `json:"customer_name,omitempty"`
-	CustomerCode   string        `json:"customer_code,omitempty"`
-	CustomerPhone  string        `json:"customer_phone,omitempty"`
-	ItemsSummary   string        `json:"items_summary,omitempty"`
-	Items          []InvoiceItem `json:"items,omitempty"`
+	ID             xid.ID     `json:"id"`
+	TenantID       xid.ID     `json:"tenant_id"`
+	CustomerID     xid.ID     `json:"customer_id"`
+	SubscriptionID *xid.ID    `json:"subscription_id,omitempty"`
+	InvoiceNumber  string     `json:"invoice_number"`
+	Subtotal       int64      `json:"subtotal"`
+	TaxAmount      int64      `json:"tax_amount"`
+	DiscountAmount int64      `json:"discount_amount"`
+	TotalAmount    int64      `json:"total_amount"`
+	PaidAmount     int64      `json:"paid_amount"`
+	Status         string     `json:"status"`
+	DueDate        time.Time  `json:"due_date"`
+	IssuedAt       *time.Time `json:"issued_at,omitempty"`
+	PaidAt         *time.Time `json:"paid_at,omitempty"`
+	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
+	// Isolir menandai tagihan ini mengisolir langganan saat lewat jatuh tempo.
+	// Tagihan langganan otomatis selalu true; tagihan manual mengikuti opsi admin.
+	Isolir bool `json:"isolir"`
+	// IsolirSubscriptionID adalah langganan sasaran isolir untuk tagihan manual.
+	IsolirSubscriptionID *xid.ID       `json:"isolir_subscription_id,omitempty"`
+	LateFeeAppliedAt     *time.Time    `json:"late_fee_applied_at,omitempty"`
+	CustomerName         string        `json:"customer_name,omitempty"`
+	CustomerCode         string        `json:"customer_code,omitempty"`
+	CustomerPhone        string        `json:"customer_phone,omitempty"`
+	ItemsSummary         string        `json:"items_summary,omitempty"`
+	Items                []InvoiceItem `json:"items,omitempty"`
 	// AdminFee / PayableAmount diisi handler portal bila MDR ditanggung customer.
 	AdminFee      int64 `json:"admin_fee,omitempty"`
 	PayableAmount int64 `json:"payable_amount,omitempty"`
@@ -112,11 +118,11 @@ func (s *Store) CreateInvoice(ctx context.Context, inv *Invoice, items []Invoice
 
 	now := time.Now()
 	err = tx.QueryRow(ctx, `
-		INSERT INTO invoices (tenant_id, customer_id, subscription_id, invoice_number, subtotal, tax_amount,
+		INSERT INTO invoices (tenant_id, customer_id, subscription_id, isolir_subscription_id, isolir, invoice_number, subtotal, tax_amount,
 		                      discount_amount, total_amount, status, due_date, issued_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id
-	`, inv.TenantID, inv.CustomerID, inv.SubscriptionID, inv.InvoiceNumber, inv.Subtotal, inv.TaxAmount,
-		inv.DiscountAmount, inv.TotalAmount, inv.Status, inv.DueDate, now).Scan(&inv.ID)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id
+	`, inv.TenantID, inv.CustomerID, inv.SubscriptionID, inv.IsolirSubscriptionID, inv.Isolir, inv.InvoiceNumber,
+		inv.Subtotal, inv.TaxAmount, inv.DiscountAmount, inv.TotalAmount, inv.Status, inv.DueDate, now).Scan(&inv.ID)
 	if err != nil {
 		return err
 	}
@@ -168,7 +174,8 @@ func (s *Store) ListInvoices(ctx context.Context, tenantID xid.ID, status, searc
 	args = append(args, limit, offset)
 	q := `
 		SELECT i.id, i.tenant_id, i.customer_id, i.subscription_id, i.invoice_number, i.subtotal, i.tax_amount,
-		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name
+		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name,
+		       i.isolir, i.isolir_subscription_id, i.late_fee_applied_at
 		FROM invoices i JOIN customers c ON c.id = i.customer_id
 		` + where + fmt.Sprintf(" ORDER BY COALESCE(i.deleted_at, i.issued_at) DESC, i.id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
 	rows, err := s.Pool.Query(ctx, q, args...)
@@ -181,7 +188,8 @@ func (s *Store) ListInvoices(ctx context.Context, tenantID xid.ID, status, searc
 		var inv Invoice
 		if err := rows.Scan(&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.SubscriptionID, &inv.InvoiceNumber,
 			&inv.Subtotal, &inv.TaxAmount, &inv.DiscountAmount, &inv.TotalAmount, &inv.PaidAmount,
-			&inv.Status, &inv.DueDate, &inv.IssuedAt, &inv.PaidAt, &inv.DeletedAt, &inv.CustomerName); err != nil {
+			&inv.Status, &inv.DueDate, &inv.IssuedAt, &inv.PaidAt, &inv.DeletedAt, &inv.CustomerName,
+			&inv.Isolir, &inv.IsolirSubscriptionID, &inv.LateFeeAppliedAt); err != nil {
 			return nil, 0, err
 		}
 		list = append(list, inv)
@@ -198,7 +206,8 @@ func (s *Store) ListCustomerInvoices(ctx context.Context, tenantID, customerID x
 	}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT i.id, i.tenant_id, i.customer_id, i.subscription_id, i.invoice_number, i.subtotal, i.tax_amount,
-		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name
+		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name,
+		       i.isolir, i.isolir_subscription_id, i.late_fee_applied_at
 		FROM invoices i JOIN customers c ON c.id = i.customer_id
 		WHERE i.tenant_id = $1 AND i.customer_id = $2 AND i.deleted_at IS NULL
 		ORDER BY i.due_date DESC, i.id DESC
@@ -213,7 +222,8 @@ func (s *Store) ListCustomerInvoices(ctx context.Context, tenantID, customerID x
 		var inv Invoice
 		if err := rows.Scan(&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.SubscriptionID, &inv.InvoiceNumber,
 			&inv.Subtotal, &inv.TaxAmount, &inv.DiscountAmount, &inv.TotalAmount, &inv.PaidAmount,
-			&inv.Status, &inv.DueDate, &inv.IssuedAt, &inv.PaidAt, &inv.DeletedAt, &inv.CustomerName); err != nil {
+			&inv.Status, &inv.DueDate, &inv.IssuedAt, &inv.PaidAt, &inv.DeletedAt, &inv.CustomerName,
+			&inv.Isolir, &inv.IsolirSubscriptionID, &inv.LateFeeAppliedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, inv)
@@ -242,13 +252,15 @@ func (s *Store) getInvoice(ctx context.Context, tenantID, id xid.ID, includeDele
 	}
 	row := s.Pool.QueryRow(ctx, `
 		SELECT i.id, i.tenant_id, i.customer_id, i.subscription_id, i.invoice_number, i.subtotal, i.tax_amount,
-		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name
+		       i.discount_amount, i.total_amount, i.paid_amount, i.status, i.due_date, i.issued_at, i.paid_at, i.deleted_at, c.full_name,
+		       i.isolir, i.isolir_subscription_id, i.late_fee_applied_at
 		FROM invoices i JOIN customers c ON c.id = i.customer_id
 		`+where, tenantID, id)
 	var inv Invoice
 	err := row.Scan(&inv.ID, &inv.TenantID, &inv.CustomerID, &inv.SubscriptionID, &inv.InvoiceNumber,
 		&inv.Subtotal, &inv.TaxAmount, &inv.DiscountAmount, &inv.TotalAmount, &inv.PaidAmount,
-		&inv.Status, &inv.DueDate, &inv.IssuedAt, &inv.PaidAt, &inv.DeletedAt, &inv.CustomerName)
+		&inv.Status, &inv.DueDate, &inv.IssuedAt, &inv.PaidAt, &inv.DeletedAt, &inv.CustomerName,
+		&inv.Isolir, &inv.IsolirSubscriptionID, &inv.LateFeeAppliedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrNotFound
 	}
@@ -563,7 +575,8 @@ func (s *Store) SetInvoiceDiscountAmounts(ctx context.Context, tenantID, id xid.
 	return nil
 }
 
-func (s *Store) RestoreInvoice(ctx context.Context, tenantID, id xid.ID) error {	inv, _, err := s.GetInvoiceIncludingDeleted(ctx, tenantID, id)
+func (s *Store) RestoreInvoice(ctx context.Context, tenantID, id xid.ID) error {
+	inv, _, err := s.GetInvoiceIncludingDeleted(ctx, tenantID, id)
 	if err != nil {
 		return err
 	}
@@ -882,6 +895,87 @@ func (s *Store) SumOverdueUnpaidForSubscription(ctx context.Context, tenantID xi
 	return sum, err
 }
 
+// ListManualOverdueInvoicesForLateFee mengambil tagihan manual (tanpa
+// subscription_id) yang lewat jatuh tempo dan belum pernah dikenai denda.
+func (s *Store) ListManualOverdueInvoicesForLateFee(ctx context.Context, tenantID xid.ID) ([]Invoice, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT i.id, i.customer_id, i.invoice_number, i.total_amount, i.paid_amount, i.due_date
+		FROM invoices i
+		WHERE i.tenant_id = $1
+		  AND i.subscription_id IS NULL
+		  AND i.deleted_at IS NULL
+		  AND i.status IN ('issued','partial','overdue')
+		  AND i.total_amount > i.paid_amount
+		  AND i.due_date < CURRENT_DATE
+		  AND i.late_fee_applied_at IS NULL
+		ORDER BY i.due_date, i.id
+	`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []Invoice
+	for rows.Next() {
+		var inv Invoice
+		if err := rows.Scan(&inv.ID, &inv.CustomerID, &inv.InvoiceNumber, &inv.TotalAmount, &inv.PaidAmount, &inv.DueDate); err != nil {
+			return nil, err
+		}
+		list = append(list, inv)
+	}
+	return list, rows.Err()
+}
+
+// ApplyInvoiceLateFee menambahkan baris denda dan menaikkan nominal tagihan.
+// Ditandai late_fee_applied_at agar idempoten (tidak dobel saat worker
+// dijalankan berulang).
+func (s *Store) ApplyInvoiceLateFee(ctx context.Context, tenantID, invoiceID xid.ID, amount int64, description string) error {
+	if amount <= 0 {
+		return nil
+	}
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return err
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var applied *time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT late_fee_applied_at FROM invoices
+		WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL
+		FOR UPDATE
+	`, tenantID, invoiceID).Scan(&applied)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if applied != nil {
+		return tx.Commit(ctx)
+	}
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO invoice_items (tenant_id, invoice_id, description, quantity, unit_price, amount)
+		VALUES ($1,$2,$3,1,$4,$4)
+	`, tenantID, invoiceID, description, amount); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `
+		UPDATE invoices
+		SET subtotal = subtotal + $3, total_amount = total_amount + $3,
+		    late_fee_applied_at = NOW(), updated_at = NOW()
+		WHERE tenant_id=$1 AND id=$2
+	`, tenantID, invoiceID, amount); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // SubscriptionHasPastDueUnpaid reports whether the subscription still has unpaid invoices
 // past due_date + tenant isolir_grace_days (same rule as auto-isolir).
 func (s *Store) SubscriptionHasPastDueUnpaid(ctx context.Context, tenantID, subscriptionID xid.ID) (bool, error) {
@@ -889,7 +983,9 @@ func (s *Store) SubscriptionHasPastDueUnpaid(ctx context.Context, tenantID, subs
 	err := s.Pool.QueryRow(ctx, `
 		SELECT COUNT(*)::int
 		FROM invoices i
-		WHERE i.tenant_id = $1 AND i.subscription_id = $2
+		WHERE i.tenant_id = $1
+		  AND i.isolir = TRUE
+		  AND (i.subscription_id = $2 OR i.isolir_subscription_id = $2)
 		  AND i.deleted_at IS NULL
 		  AND i.status IN ('issued','partial','overdue')
 		  AND i.total_amount > i.paid_amount

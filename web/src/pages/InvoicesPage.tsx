@@ -15,6 +15,13 @@ type CustomerLookup = {
   phone: string;
 };
 
+type SubscriptionLookup = {
+  id: string;
+  username: string;
+  status: string;
+  plan_name?: string;
+};
+
 type UnpaidSource = {
   invoice: { invoice_number: string; total_amount: number; paid_amount: number };
   items: { description: string; quantity: number; unit_price: number }[];
@@ -156,6 +163,8 @@ export function InvoicesPage() {
   const [discount, setDiscount] = useState(0);
   const [taxPct, setTaxPct] = useState(0);
   const [dueDate, setDueDate] = useState("");
+  const [isolir, setIsolir] = useState(false);
+  const [subscriptionId, setSubscriptionId] = useState("");
 
   const customersQ = useQuery({
     queryKey: ["customers-lookup"],
@@ -167,6 +176,20 @@ export function InvoicesPage() {
     label: `${c.full_name} (${c.customer_code})`,
     keywords: `${c.full_name} ${c.customer_code} ${c.phone}`,
   }));
+
+  // Langganan sasaran isolir: hanya dimuat saat opsi isolir dicentang.
+  const subsQ = useQuery({
+    queryKey: ["customer-subscriptions", customerId],
+    queryFn: () => api<{ data: SubscriptionLookup[] }>(`/api/subscriptions?customer_id=${customerId}&limit=100`),
+    enabled: issueOpen && Boolean(customerId) && isolir,
+  });
+  const subOpts = (subsQ.data?.data ?? [])
+    .filter((s) => !["cancelled", "canceled", "dismantled"].includes((s.status || "").toLowerCase()))
+    .map((s) => ({
+      value: s.id,
+      label: `${s.username}${s.plan_name ? ` · ${s.plan_name}` : ""}`,
+      keywords: `${s.username} ${s.plan_name ?? ""}`,
+    }));
 
   // Tagihan belum lunas pelanggan → item terisi otomatis (pengganti tagihan
   // yang terhapus/salah). Hanya diisi ulang saat pelanggan berganti.
@@ -204,6 +227,8 @@ export function InvoicesPage() {
     setDiscount(0);
     setTaxPct(0);
     setDueDate("");
+    setIsolir(false);
+    setSubscriptionId("");
     setIssueOpen(true);
   }
 
@@ -226,6 +251,8 @@ export function InvoicesPage() {
           due_date: dueDate || undefined,
           discount_amount: discountClamped || undefined,
           tax_percent: taxPct || undefined,
+          isolir,
+          subscription_id: isolir && subscriptionId ? subscriptionId : undefined,
           items: items.map((it) => ({
             description: it.description.trim(),
             quantity: Math.max(1, Math.floor(Number(it.quantity) || 1)),
@@ -420,7 +447,10 @@ export function InvoicesPage() {
               searchPlaceholder="Cari nama, kode, atau HP…"
               emptyText={customersQ.isLoading ? "Memuat…" : "Tidak ada hasil"}
               value={customerId}
-              onValueChange={setCustomerId}
+              onValueChange={(v) => {
+                setCustomerId(v);
+                setSubscriptionId("");
+              }}
               options={customerOpts}
             />
           </div>
@@ -490,6 +520,45 @@ export function InvoicesPage() {
             </button>
           </div>
 
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] px-3 py-2">
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={isolir}
+                onChange={(e) => {
+                  setIsolir(e.target.checked);
+                  if (!e.target.checked) setSubscriptionId("");
+                }}
+              />
+              <span>
+                <span className="font-medium">Isolir layanan bila lewat jatuh tempo</span>
+                <span className="block text-xs text-[var(--muted)]">
+                  Centang untuk tagihan yang berkaitan dengan layanan. Bila tidak dicentang, layanan tidak diisolir
+                  saat lewat jatuh tempo (tagihan tetap kena denda).
+                </span>
+              </span>
+            </label>
+            {isolir ? (
+              <div className="mt-3 flex min-w-0 flex-col gap-1.5">
+                <Label htmlFor="issue-sub">Langganan yang diisolir</Label>
+                <SearchableSelect
+                  id="issue-sub"
+                  required
+                  placeholder="— Pilih langganan —"
+                  searchPlaceholder="Cari username atau paket…"
+                  emptyText={subsQ.isLoading ? "Memuat…" : "Pelanggan ini belum punya langganan aktif"}
+                  value={subscriptionId}
+                  onValueChange={setSubscriptionId}
+                  options={subOpts}
+                />
+                <p className="text-xs text-[var(--muted)]">
+                  Hanya langganan ini yang diisolir bila tagihan belum dibayar sampai jatuh tempo + masa tenggang.
+                </p>
+              </div>
+            ) : null}
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="flex min-w-0 flex-col gap-1.5">
               <Label htmlFor="issue-discount">Diskon (Rp)</Label>
@@ -543,7 +612,10 @@ export function InvoicesPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={issueInvoice.isPending || !customerId || grandTotal <= 0}>
+            <Button
+              type="submit"
+              disabled={issueInvoice.isPending || !customerId || grandTotal <= 0 || (isolir && !subscriptionId)}
+            >
               {issueInvoice.isPending ? "Menerbitkan…" : "Terbitkan"}
             </Button>
             <Button type="button" variant="secondary" onClick={closeIssue}>

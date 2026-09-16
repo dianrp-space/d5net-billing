@@ -27,18 +27,37 @@ func WithInfo(ctx context.Context, info Info) context.Context {
 	return context.WithValue(ctx, ctxKey{}, info)
 }
 
-func Middleware(tokens *auth.TokenService) func(http.Handler) http.Handler {
+// CanAccessTenantFunc melaporkan apakah user masih boleh memakai token-nya di
+// tenant tertentu (aktif + masih terdaftar). Dipakai untuk menolak access token
+// milik user yang dinonaktifkan atau dihapus dari tenant, yang token JWT-nya
+// masih valid sampai kedaluwarsa.
+type CanAccessTenantFunc func(ctx context.Context, userID, tenantID xid.ID) (bool, error)
+
+func Middleware(tokens *auth.TokenService, canAccess CanAccessTenantFunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
 				claims, err := tokens.ParseToken(authHeader[7:])
 				if err == nil && claims.Type == "access" {
-					tid, err := xid.Parse(claims.TenantID)
-					if err != nil {
+					tid, terr := xid.Parse(claims.TenantID)
+					uid, _ := xid.Parse(claims.UserID)
+					if canAccess != nil && !xid.IsNil(uid) {
+						if xid.IsNil(tid) || terr != nil {
+							// Token tanpa tenant tidak bisa diverifikasi.
+							next.ServeHTTP(w, r)
+							return
+						}
+						ok, aerr := canAccess(r.Context(), uid, tid)
+						if aerr != nil || !ok {
+							// Perlakukan seperti tidak terautentikasi.
+							next.ServeHTTP(w, r)
+							return
+						}
+					}
+					if terr != nil {
 						tid = xid.Nil()
 					}
-					uid, _ := xid.Parse(claims.UserID)
 					info := Info{ID: tid, Role: claims.Role, UserID: uid}
 					ctx := WithInfo(r.Context(), info)
 					ctx = db.WithTenant(ctx, tid)
