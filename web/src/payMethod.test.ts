@@ -41,7 +41,7 @@ describe("payMethod", () => {
     expect(isInvoiceUnpaid({ id: "1", invoice_number: "INV", status: "paid", total_amount: 100, paid_amount: 100 })).toBe(false);
     expect(paymentMethodLabel("qris")).toBe("QRIS");
     expect(paymentMethodLabel("drp")).toBe("QRIS");
-    expect(paymentMethodLabel("duitku")).toBe("Duitku Payment Gateway");
+    expect(paymentMethodLabel("duitku")).toBe("DUITKU");
     expect(paymentMethodLabel("doku")).toBe("DOKU");
     expect(paymentMethodLabel("")).toBe("—");
     expect(paymentMethodLabel("midtrans")).toBe("midtrans");

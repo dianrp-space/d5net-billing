@@ -47,7 +47,7 @@ export type PayMethodDef = {
 export const PORTAL_PAY_METHODS: PayMethodDef[] = [
   {
     id: PAY_METHOD_DUITKU,
-    label: "Duitku Payment Gateway",
+    label: "DUITKU",
     description: "Halaman pembayaran Duitku (VA, e-wallet, retail, QRIS)",
   },
   {
@@ -172,7 +172,7 @@ export function paymentMethodLabel(method?: string | null, sandbox?: boolean | n
   let label: string;
   if (fromCatalog) label = fromCatalog.label;
   else if (key === "drp" || key === "qr" || key === PAY_METHOD_QRIS) label = "QRIS";
-  else if (key === "duitku_pop" || key === "duitkupop" || key === "pop") label = "Duitku Payment Gateway";
+  else if (key === "duitku_pop" || key === "duitkupop" || key === "pop") label = "DUITKU";
   else if (key === PAY_METHOD_DOKU) label = "DOKU";
   else if (key === PAY_METHOD_TUNAI || key === "cash" || key === "kasir" || key === "manual") label = "Tunai";
   else if (key === "saldo" || key === "wallet") label = "Saldo";

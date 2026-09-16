@@ -34,6 +34,20 @@ function methodIcon(id: PayMethodId) {
   }
 }
 
+const PG_LOGO: Partial<Record<PayMethodId, string>> = {
+  [PAY_METHOD_DUITKU]: "/pg/duitku.webp",
+  [PAY_METHOD_DOKU]: "/pg/doku.svg",
+};
+
+/** Logo PG bila tersedia, jika tidak pakai ikon generik. */
+function methodLogo(id: PayMethodId) {
+  const src = PG_LOGO[id];
+  if (src) {
+    return <img src={src} alt="" className="h-7 w-auto max-w-full object-contain" loading="lazy" decoding="async" />;
+  }
+  return <span className="text-[var(--accent)]">{methodIcon(id)}</span>;
+}
+
 function feeBreakdown(base: number, fee: number) {
   if (fee <= 0) return null;
   return (
@@ -83,29 +97,22 @@ export function PayMethodDialog({
         ) : (
           <div className="grid gap-2" role="list" aria-label="Metode pembayaran">
             <p className="text-xs text-[var(--muted)]">Klik salah satu untuk langsung bayar:</p>
-            {methods.map((m) => {
-              const fee = methodCustomerFee(m, amount);
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  role="listitem"
-                  disabled={busy}
-                  onClick={() => onConfirm(m.id)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3 text-left transition-colors hover:border-[var(--accent)] disabled:opacity-60"
-                >
-                  <span className="mt-0.5 text-[var(--accent)]">{methodIcon(m.id)}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold">{m.label}</span>
-                    <span className="mt-0.5 block text-xs text-[var(--muted)]">{m.description}</span>
-                    {feeBreakdown(amount, fee)}
-                  </span>
-                  <span className="shrink-0 text-[var(--muted)]" aria-hidden>
-                    →
-                  </span>
-                </button>
-              );
-            })}
+            {methods.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                role="listitem"
+                disabled={busy}
+                onClick={() => onConfirm(m.id)}
+                className="flex w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3 text-left transition-colors hover:border-[var(--accent)] disabled:opacity-60"
+              >
+                <span className="flex h-8 w-14 shrink-0 items-center justify-center">{methodLogo(m.id)}</span>
+                <span className="min-w-0 flex-1 text-sm font-semibold">{m.label}</span>
+                <span className="shrink-0 text-[var(--muted)]" aria-hidden>
+                  →
+                </span>
+              </button>
+            ))}
           </div>
         )}
         {sandboxAvailable && onSandboxPay ? (

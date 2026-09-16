@@ -1504,7 +1504,7 @@ func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payO
 	if cfg, _ := loadDuitkuIntegration(ctx, d, tenantID); duitkuCredentialsReady(d, cfg) {
 		opt := payOptionView{
 			Provider:    payment.ProviderDuitku,
-			Label:       "Duitku Payment Gateway",
+			Label:       "DUITKU",
 			Description: "Halaman pembayaran Duitku (VA, e-wallet, retail, QRIS)",
 			Kind:        "redirect",
 			Sandbox:     cfg.Sandbox,

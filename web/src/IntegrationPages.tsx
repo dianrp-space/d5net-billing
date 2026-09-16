@@ -9,7 +9,7 @@ import { usePersistedTab } from "./navPersist";
 import { formatRp, FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
 
 const PG_LOGO = {
-  duitku: "/pg/duitku.svg",
+  duitku: "/pg/duitku.webp",
   doku: "/pg/doku.svg",
 } as const;
 
