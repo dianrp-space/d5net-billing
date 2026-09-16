@@ -1807,3 +1807,90 @@ html[data-theme="dark"] .auth-visual-brand {
   .auth-split { grid-template-columns: 1fr; }
   .auth-visual { display: none; }
 }
+
+/* ---- auth background motion (CSS-only, subtle) ---- */
+@keyframes auth-drift {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(-3%, 2.5%, 0) scale(1.1); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes auth-drift-alt {
+  0%   { transform: translate3d(0, 0, 0) scale(1.06); }
+  50%  { transform: translate3d(3%, -2.5%, 0) scale(1); }
+  100% { transform: translate3d(0, 0, 0) scale(1.06); }
+}
+@keyframes auth-glow-breathe {
+  0%, 100% { opacity: 0.65; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.06); }
+}
+@keyframes auth-grid-pan {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 44px 44px, 44px 44px; }
+}
+@keyframes auth-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Centered layout: floating color blobs behind the card. */
+.auth-wrap::before,
+.auth-wrap::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 50%;
+}
+.auth-wrap::before {
+  width: 46rem;
+  height: 46rem;
+  top: -20rem;
+  left: -14rem;
+  background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 68%);
+  animation: auth-drift 20s ease-in-out infinite;
+}
+.auth-wrap::after {
+  width: 40rem;
+  height: 40rem;
+  bottom: -20rem;
+  right: -14rem;
+  background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--secondary) 26%, transparent), transparent 68%);
+  animation: auth-drift-alt 26s ease-in-out infinite;
+}
+.auth-wrap .auth-glow { animation: auth-glow-breathe 10s ease-in-out infinite; }
+.auth-wrap .auth-card { z-index: 1; }
+
+/* Right pane of the split layout: breathing glow + drifting wash. */
+.auth-pane::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  inset: -25%;
+  background:
+    radial-gradient(38rem 32rem at 12% 18%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%),
+    radial-gradient(34rem 30rem at 88% 82%, color-mix(in srgb, var(--secondary) 14%, transparent), transparent 70%);
+  animation: auth-drift 24s ease-in-out infinite;
+}
+.auth-pane .auth-glow { animation: auth-glow-breathe 12s ease-in-out infinite; }
+.auth-pane .auth-card { z-index: 1; }
+
+/* Left visual: drift the gradient wash, pan the grid slowly. */
+.auth-visual::before { animation: auth-drift-alt 28s ease-in-out infinite; }
+.auth-visual::after { animation: auth-grid-pan 14s linear infinite; }
+
+/* Card entrance. */
+.auth-card { animation: auth-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-wrap::before,
+  .auth-wrap::after,
+  .auth-wrap .auth-glow,
+  .auth-pane::before,
+  .auth-pane .auth-glow,
+  .auth-visual::before,
+  .auth-visual::after,
+  .auth-card {
+    animation: none;
+  }
+}
