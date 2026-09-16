@@ -143,7 +143,7 @@ function LoginVisual({ mode, brand }: { mode: LoginMode; brand: string }) {
           <span className="auth-mock-no">INV-D5N-2026090001-092026</span>
           <span className="auth-mock-paid">Lunas</span>
         </div>
-        <div className="auth-mock-amount">Rp 150.000</div>
+        <div className="auth-mock-amount">Rp xx.xxx</div>
         <div className="auth-mock-bar" aria-hidden>
           <i />
         </div>

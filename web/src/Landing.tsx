@@ -240,18 +240,18 @@ export function Landing({ onGoLogin }: { onGoLogin: () => void }) {
               <div className="landing-invoice-items">
                 <div>
                   <span>Paket Internet 30 Mbps</span>
-                  <span>Rp 150.000</span>
+                  <span>Rp xx.xxx</span>
                 </div>
                 <div>
                   <span>Biaya instalasi</span>
                   <span className="landing-invoice-free">
-                    <s>Rp 50.000</s> Gratis
+                    <s>Rp xx.xxx</s> Gratis
                   </span>
                 </div>
               </div>
               <div className="landing-invoice-total">
                 <span>Total</span>
-                <b>Rp 150.000</b>
+                <b>Rp xx.xxx</b>
               </div>
               <div className="landing-invoice-bar" aria-hidden>
                 <i />
