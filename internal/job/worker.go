@@ -145,7 +145,11 @@ func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.Jo
 		if invoices, err := w.billing.ProcessDueBilling(ctx, t.ID); err == nil {
 			out.Invoices = len(invoices)
 			for i := range invoices {
-				w.autoPayIssuedInvoice(ctx, t.ID, invoices[i])
+				// Bila saldo menangani tagihan ini (lunas / saldo kurang), notifikasi
+				// invoice yang terbit dilewati agar tidak dobel.
+				if !w.autoPayIssuedInvoice(ctx, t.ID, invoices[i]) {
+					w.notifyInvoiceGenerated(ctx, t.ID, invoices[i])
+				}
 			}
 		}
 		if n, err := w.billing.ProcessManualLateFees(ctx, t.ID); err == nil {
@@ -179,27 +183,46 @@ func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.Jo
 
 // autoPayIssuedInvoice mencoba melunasi tagihan yang baru terbit dari saldo
 // pelanggan. Bila saldo cukup: kirim konfirmasi pembayaran. Bila kurang:
-// kirim notifikasi saldo kurang (fitur saldo aktif).
-func (w *Worker) autoPayIssuedInvoice(ctx context.Context, tenantID xid.ID, inv store.Invoice) {
+// kirim notifikasi saldo kurang (fitur saldo aktif). Mengembalikan true bila
+// notifikasi terkait saldo sudah dikirim (pemanggil tak perlu kirim notif
+// tagihan terbit), false bila saldo tidak dipakai/tidak applicable.
+func (w *Worker) autoPayIssuedInvoice(ctx context.Context, tenantID xid.ID, inv store.Invoice) bool {
 	if w == nil || w.billing == nil {
-		return
+		return false
 	}
 	res, err := w.billing.TryAutoPayInvoice(ctx, tenantID, inv.ID)
 	if err != nil || res == nil || !res.WalletEnabled || res.Customer == nil {
-		return
+		return false
 	}
 	cust := res.Customer
 	planName := w.store.PlanNameForSubscription(ctx, tenantID, inv.SubscriptionID)
 	itemName := store.NotificationItemName(planName, res.Items)
 	if res.Paid && res.Payment != nil {
 		_ = w.notify.SendPaymentConfirmation(ctx, tenantID, cust.Phone, cust.FullName, planName, itemName, inv.InvoiceNumber, res.Payment.Amount)
-		return
+		return true
 	}
 	remaining := inv.TotalAmount - inv.PaidAmount
 	if remaining < 0 {
 		remaining = 0
 	}
 	_ = w.notify.SendWalletInsufficient(ctx, tenantID, cust.Phone, cust.FullName, inv.InvoiceNumber, remaining, res.Balance)
+	return true
+}
+
+// notifyInvoiceGenerated mengirim WA "tagihan terbit" untuk invoice langganan
+// yang terbit otomatis (tagihan rutin). Dilewati bila nomor HP kosong.
+func (w *Worker) notifyInvoiceGenerated(ctx context.Context, tenantID xid.ID, inv store.Invoice) {
+	if w == nil || w.notify == nil {
+		return
+	}
+	cust, err := w.store.GetCustomer(ctx, tenantID, inv.CustomerID)
+	if err != nil || cust == nil || strings.TrimSpace(cust.Phone) == "" {
+		return
+	}
+	planName := w.store.PlanNameForSubscription(ctx, tenantID, inv.SubscriptionID)
+	itemName := store.NotificationItemName(planName, inv.Items)
+	_ = w.notify.SendInvoiceGenerated(ctx, tenantID, cust.Phone, cust.FullName, planName, itemName,
+		inv.InvoiceNumber, inv.TotalAmount, inv.DueDate.Format("02/01/2006"))
 }
 
 func (w *Worker) weeklyReconcile(ctx context.Context, tenantID xid.ID, now time.Time, weekday, hour int) {

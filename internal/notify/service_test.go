@@ -6,7 +6,7 @@ func TestTemplateCatalogHasItemName(t *testing.T) {
 	t.Parallel()
 	found := 0
 	for _, ev := range TemplateCatalog() {
-		if ev.Event != "invoice_issued" && ev.Event != "invoice_reminder" && ev.Event != "payment_confirmation" {
+		if ev.Event != "invoice_issued" && ev.Event != "invoice_generated" && ev.Event != "invoice_reminder" && ev.Event != "payment_confirmation" {
 			continue
 		}
 		ok := false
@@ -24,8 +24,8 @@ func TestTemplateCatalogHasItemName(t *testing.T) {
 		}
 		found++
 	}
-	if found != 3 {
-		t.Fatalf("expected 3 events, got %d", found)
+	if found != 4 {
+		t.Fatalf("expected 4 events, got %d", found)
 	}
 }
 

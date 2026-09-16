@@ -2722,6 +2722,16 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}
+		// Notifikasi WA tagihan pertama (terbit otomatis saat aktivasi).
+		if inv != nil && d.Notify != nil {
+			if cust, cerr := d.Store.GetCustomer(ctx, tid, inv.CustomerID); cerr == nil && cust != nil && strings.TrimSpace(cust.Phone) != "" {
+				planName := d.Store.PlanNameForSubscription(ctx, tid, inv.SubscriptionID)
+				if nerr := d.Notify.SendInvoiceGenerated(ctx, tid, cust.Phone, cust.FullName, planName, planName,
+					inv.InvoiceNumber, inv.TotalAmount, inv.DueDate.Format("02/01/2006")); nerr != nil {
+					slog.Warn("activate invoice whatsapp", "invoice", inv.InvoiceNumber, "err", nerr)
+				}
+			}
+		}
 
 		cycleDays := 30
 		switch plan.BillingCycle {

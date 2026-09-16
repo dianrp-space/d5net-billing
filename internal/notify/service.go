@@ -540,6 +540,21 @@ func TemplateCatalog() []TemplateEvent {
 			DefaultBody: "Halo {{customer_name}}, tagihan baru {{item_name}} ({{invoice_number}}) sebesar Rp {{amount}} telah diterbitkan. Jatuh tempo {{due_date}}. Bayar via portal pelanggan.",
 		},
 		{
+			Event:       "invoice_generated",
+			Label:       "Tagihan langganan baru (otomatis)",
+			Description: "Dikirim otomatis saat tagihan langganan terbit (aktivasi pertama & tagihan rutin).",
+			Channels:    []string{"whatsapp"},
+			Variables: []TemplateVariable{
+				{Name: "customer_name", Desc: "Nama pelanggan"},
+				{Name: "plan_name", Desc: "Nama paket/langganan"},
+				{Name: "item_name", Desc: "Nama item tagihan (baris invoice, tanpa denda)"},
+				{Name: "invoice_number", Desc: "Nomor tagihan"},
+				{Name: "amount", Desc: "Nominal tagihan (angka)"},
+				{Name: "due_date", Desc: "Tanggal jatuh tempo"},
+			},
+			DefaultBody: "Halo {{customer_name}}, tagihan {{item_name}} ({{invoice_number}}) sebesar Rp {{amount}} telah diterbitkan. Jatuh tempo {{due_date}}. Bayar via portal pelanggan.",
+		},
+		{
 			Event:       "invoice_reminder",
 			Label:       "Pengingat tagihan (dunning)",
 			Description: "Dikirim otomatis sesuai offset hari di menu Cronjob.",
@@ -657,6 +672,28 @@ func (s *Service) SendInvoiceIssued(ctx context.Context, tenantID xid.ID, phone,
 		return err
 	}
 	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "invoice_issued"})
+}
+
+// SendInvoiceGenerated notifies the customer when a subscription invoice is
+// generated automatically (first invoice on activation and routine billing).
+func (s *Service) SendInvoiceGenerated(ctx context.Context, tenantID xid.ID, phone, customerName, planName, itemName, invoiceNum string, amount int64, dueDate string) error {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return nil
+	}
+	vars := map[string]string{
+		"customer_name":  customerName,
+		"plan_name":      planName,
+		"item_name":      notificationItemName(planName, itemName),
+		"invoice_number": invoiceNum,
+		"amount":         fmt.Sprintf("%d", amount),
+		"due_date":       dueDate,
+	}
+	_, body, err := s.RenderTemplate(ctx, tenantID, "whatsapp", "invoice_generated", vars)
+	if err != nil {
+		return err
+	}
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "invoice_generated"})
 }
 
 func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, phone, customerName, planName, itemName, invoiceNum string, amount int64, dueDate string) error {
