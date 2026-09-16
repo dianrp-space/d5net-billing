@@ -1,6 +1,6 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import { api, apiUpload } from "./api";
 import { DEFAULT_BRAND_LOGO } from "./branding";
 import { toastError, toastSuccess } from "./swal";
 import { DEFAULT_PRIMARY, parseHexColor } from "./theme";
@@ -20,6 +20,7 @@ type IsolirNetwork = {
 type IsolirSettings = {
   network: IsolirNetwork;
   html: string;
+  logo_url?: string;
   isolir_url: string;
   docs_hint: string;
 };
@@ -119,8 +120,10 @@ export function IsolirTemplatePage() {
 
   const [network, setNetwork] = useState<IsolirNetwork>(emptyNetwork);
   const [html, setHtml] = useState("");
+  const [logo, setLogo] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [showDocs, setShowDocs] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!q.data || hydrated) return;
@@ -135,6 +138,7 @@ export function IsolirTemplatePage() {
       isolir_host_ip: q.data.network.isolir_host_ip || "",
     });
     setHtml(q.data.html || "");
+    setLogo(q.data.logo_url || "");
     setHydrated(true);
   }, [q.data, hydrated]);
 
@@ -158,7 +162,9 @@ export function IsolirTemplatePage() {
   );
 
   const appName = brandingQ.data?.name || brandingQ.data?.app_name || "ISP";
-  const logoURL = brandingQ.data?.logo_url || DEFAULT_BRAND_LOGO;
+  const brandingLogo = brandingQ.data?.logo_url || DEFAULT_BRAND_LOGO;
+  // Gambar khusus halaman isolir menimpa logo aplikasi bila diunggah.
+  const logoURL = logo.trim() || brandingLogo;
   const primaryHex = parseHexColor(brandingQ.data?.primary_color) || DEFAULT_PRIMARY;
   const base = network.portal_base_url.replace(/\/$/, "");
   const loginURL = base ? `${base}/login` : "/login";
@@ -212,7 +218,28 @@ export function IsolirTemplatePage() {
         isolir_host_port: data.network.isolir_host_port || "8090",
         isolir_host_ip: data.network.isolir_host_ip || "",
       });
+      setLogo(data.logo_url || "");
       void toastSuccess("Pengaturan isolir disimpan");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const uploadLogo = useMutation({
+    mutationFn: (file: File) => apiUpload<{ url: string }>("/api/settings/isolir/logo", file),
+    onSuccess: (res) => {
+      setLogo(res.url || "");
+      void qc.invalidateQueries({ queryKey: ["settings-isolir"] });
+      void toastSuccess("Gambar halaman isolir diunggah");
+    },
+    onError: (e: Error) => void toastError(e.message),
+  });
+
+  const removeLogo = useMutation({
+    mutationFn: () => api<{ url: string }>("/api/settings/isolir/logo", { method: "DELETE" }),
+    onSuccess: () => {
+      setLogo("");
+      void qc.invalidateQueries({ queryKey: ["settings-isolir"] });
+      void toastSuccess("Gambar dihapus, kembali ke logo aplikasi");
     },
     onError: (e: Error) => void toastError(e.message),
   });
@@ -357,6 +384,56 @@ export function IsolirTemplatePage() {
                 RouterOS (sama seperti di Winbox), bukan DNS di server billing (sering dapat IP LAN).
               </span>
             </label>
+          </div>
+
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] p-3">
+            <p className="text-sm font-medium">Gambar halaman isolir</p>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              Kosong = pakai logo aplikasi. Unggah gambar khusus untuk menggantikan logo di halaman isolir.
+            </p>
+            <div className="mt-3 flex items-center gap-3">
+              <div className="flex h-16 w-28 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--border)] bg-[var(--panel-muted)]">
+                {logoURL ? (
+                  <img src={logoURL} alt="" className="max-h-full max-w-full object-contain p-0.5" />
+                ) : (
+                  <span className="text-xs text-[var(--muted)]">—</span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={uploadLogo.isPending}
+                  onClick={() => logoInputRef.current?.click()}
+                >
+                  {uploadLogo.isPending ? "Mengunggah…" : "Unggah gambar"}
+                </Button>
+                {logo.trim() ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={removeLogo.isPending}
+                    onClick={() => removeLogo.mutate()}
+                  >
+                    {removeLogo.isPending ? "Menghapus…" : "Hapus"}
+                  </Button>
+                ) : null}
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadLogo.mutate(f);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-[var(--muted)]">
+              {logo.trim() ? "Memakai gambar khusus." : "Saat ini memakai logo aplikasi."}
+            </p>
           </div>
 
           <label className="grid gap-1 text-sm">

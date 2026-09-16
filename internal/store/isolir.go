@@ -11,6 +11,9 @@ import (
 const (
 	IsolirNetworkSettingKey = "isolir.network"
 	IsolirHTMLSettingKey    = "isolir.captive_html"
+	// IsolirLogoSettingKey stores an optional custom image for the isolir landing
+	// page, overriding the app branding logo.
+	IsolirLogoSettingKey = "isolir.logo_url"
 
 	// IsolirRedirectDSTNAT is the only supported redirect mode: RouterOS dst-nat
 	// redirects isolir-pool tcp/80 to the app's captive listener (no web-proxy).
@@ -182,6 +185,22 @@ func (s *Store) GetIsolirHTML(ctx context.Context, tenantID xid.ID) (string, err
 
 func (s *Store) UpsertIsolirHTML(ctx context.Context, tenantID xid.ID, html string) error {
 	return s.UpsertSettingJSON(ctx, tenantID, IsolirHTMLSettingKey, map[string]string{"html": html})
+}
+
+// GetIsolirLogoURL returns the custom isolir landing image URL (empty = use app logo).
+func (s *Store) GetIsolirLogoURL(ctx context.Context, tenantID xid.ID) (string, error) {
+	var raw struct {
+		URL string `json:"url"`
+	}
+	err := s.GetSettingJSON(ctx, tenantID, IsolirLogoSettingKey, &raw)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return "", err
+	}
+	return strings.TrimSpace(raw.URL), nil
+}
+
+func (s *Store) UpsertIsolirLogoURL(ctx context.Context, tenantID xid.ID, url string) error {
+	return s.UpsertSettingJSON(ctx, tenantID, IsolirLogoSettingKey, map[string]string{"url": strings.TrimSpace(url)})
 }
 
 // DefaultIsolirHTML is the built-in captive landing (login CTA).

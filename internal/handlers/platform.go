@@ -86,3 +86,70 @@ func registerPublicBranding(api huma.API, d *Deps) {
 		return out, nil
 	})
 }
+
+// registerPublicSite exposes the content required on the public website:
+// business description, product/plan list with prices, and support contact.
+func registerPublicSite(api huma.API, d *Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "public-site", Method: http.MethodGet, Path: "/api/public/site",
+		Summary: "Public site content (business profile, products, support)", Tags: []string{"Public"},
+	}, func(ctx context.Context, _ *struct{}) (*struct {
+		Body struct {
+			Name               string             `json:"name"`
+			AppName            string             `json:"app_name"`
+			LogoURL            *string            `json:"logo_url,omitempty"`
+			FaviconURL         *string            `json:"favicon_url,omitempty"`
+			PrimaryColor       string             `json:"primary_color,omitempty"`
+			About              string             `json:"about"`
+			ProductDescription string             `json:"product_description"`
+			SupportEmail       string             `json:"support_email"`
+			SupportPhone       string             `json:"support_phone"`
+			SupportAddress     string             `json:"support_address"`
+			Plans              []store.PublicPlan `json:"plans"`
+		}
+	}, error) {
+		ten, err := singleTenant(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		view, err := d.Store.ResolveTenantBranding(ctx, ten.ID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		gen, _ := d.Store.GetGeneralSettings(ctx, ten.ID)
+		plans, _ := d.Store.ListPublicPlans(ctx, ten.ID)
+		if plans == nil {
+			plans = []store.PublicPlan{}
+		}
+		out := &struct {
+			Body struct {
+				Name               string             `json:"name"`
+				AppName            string             `json:"app_name"`
+				LogoURL            *string            `json:"logo_url,omitempty"`
+				FaviconURL         *string            `json:"favicon_url,omitempty"`
+				PrimaryColor       string             `json:"primary_color,omitempty"`
+				About              string             `json:"about"`
+				ProductDescription string             `json:"product_description"`
+				SupportEmail       string             `json:"support_email"`
+				SupportPhone       string             `json:"support_phone"`
+				SupportAddress     string             `json:"support_address"`
+				Plans              []store.PublicPlan `json:"plans"`
+			}
+		}{}
+		out.Body.Name = ten.Name
+		if strings.TrimSpace(out.Body.Name) == "" {
+			out.Body.Name = view.Effective.AppName
+		}
+		out.Body.AppName = view.Effective.AppName
+		out.Body.LogoURL = view.Effective.LogoURL
+		out.Body.FaviconURL = view.Effective.FaviconURL
+		out.Body.PrimaryColor = gen.PrimaryColor
+		out.Body.About = gen.About
+		out.Body.ProductDescription = gen.ProductDescription
+		out.Body.SupportEmail = gen.SupportEmail
+		out.Body.SupportPhone = gen.SupportPhone
+		out.Body.SupportAddress = gen.SupportAddress
+		out.Body.Plans = plans
+		return out, nil
+	})
+}

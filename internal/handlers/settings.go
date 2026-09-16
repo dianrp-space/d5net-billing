@@ -65,6 +65,11 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			PrimaryColor         string  `json:"primary_color"`
 			WalletEnabled        bool    `json:"wallet_enabled"`
 			WalletMinTopup       int64   `json:"wallet_min_topup"`
+			About                string  `json:"about"`
+			ProductDescription   string  `json:"product_description"`
+			SupportEmail         string  `json:"support_email"`
+			SupportPhone         string  `json:"support_phone"`
+			SupportAddress       string  `json:"support_address"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -96,6 +101,11 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				PrimaryColor         string  `json:"primary_color"`
 				WalletEnabled        bool    `json:"wallet_enabled"`
 				WalletMinTopup       int64   `json:"wallet_min_topup"`
+				About                string  `json:"about"`
+				ProductDescription   string  `json:"product_description"`
+				SupportEmail         string  `json:"support_email"`
+				SupportPhone         string  `json:"support_phone"`
+				SupportAddress       string  `json:"support_address"`
 			}
 		}{}
 		out.Body.TenantBrandingView = *view
@@ -109,6 +119,11 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out.Body.PrimaryColor = gen.PrimaryColor
 		out.Body.WalletEnabled = gen.WalletEnabled
 		out.Body.WalletMinTopup = gen.WalletMinTopup
+		out.Body.About = gen.About
+		out.Body.ProductDescription = gen.ProductDescription
+		out.Body.SupportEmail = gen.SupportEmail
+		out.Body.SupportPhone = gen.SupportPhone
+		out.Body.SupportAddress = gen.SupportAddress
 		return out, nil
 	})
 
@@ -128,6 +143,11 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			PrimaryColor         string  `json:"primary_color"`
 			WalletEnabled        bool    `json:"wallet_enabled"`
 			WalletMinTopup       int64   `json:"wallet_min_topup"`
+			About                string  `json:"about"`
+			ProductDescription   string  `json:"product_description"`
+			SupportEmail         string  `json:"support_email"`
+			SupportPhone         string  `json:"support_phone"`
+			SupportAddress       string  `json:"support_address"`
 			LogoURL              *string `json:"logo_url,omitempty"`
 			FaviconURL           *string `json:"favicon_url,omitempty"`
 			MapPopIconURL        *string `json:"map_pop_icon_url,omitempty"`
@@ -152,6 +172,11 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			PrimaryColor         string  `json:"primary_color"`
 			WalletEnabled        bool    `json:"wallet_enabled"`
 			WalletMinTopup       int64   `json:"wallet_min_topup"`
+			About                string  `json:"about"`
+			ProductDescription   string  `json:"product_description"`
+			SupportEmail         string  `json:"support_email"`
+			SupportPhone         string  `json:"support_phone"`
+			SupportAddress       string  `json:"support_address"`
 		}
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -189,6 +214,11 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			PrimaryColor:         input.Body.PrimaryColor,
 			WalletEnabled:        input.Body.WalletEnabled,
 			WalletMinTopup:       input.Body.WalletMinTopup,
+			About:                input.Body.About,
+			ProductDescription:   input.Body.ProductDescription,
+			SupportEmail:         input.Body.SupportEmail,
+			SupportPhone:         input.Body.SupportPhone,
+			SupportAddress:       input.Body.SupportAddress,
 		})
 		if err := d.Store.UpsertGeneralSettings(ctx, tid, gen); err != nil {
 			return nil, httpx.Internal(err)
@@ -214,6 +244,11 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				PrimaryColor         string  `json:"primary_color"`
 				WalletEnabled        bool    `json:"wallet_enabled"`
 				WalletMinTopup       int64   `json:"wallet_min_topup"`
+				About                string  `json:"about"`
+				ProductDescription   string  `json:"product_description"`
+				SupportEmail         string  `json:"support_email"`
+				SupportPhone         string  `json:"support_phone"`
+				SupportAddress       string  `json:"support_address"`
 			}
 		}{}
 		out.Body.TenantBrandingView = *view
@@ -227,6 +262,11 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out.Body.PrimaryColor = gen.PrimaryColor
 		out.Body.WalletEnabled = gen.WalletEnabled
 		out.Body.WalletMinTopup = gen.WalletMinTopup
+		out.Body.About = gen.About
+		out.Body.ProductDescription = gen.ProductDescription
+		out.Body.SupportEmail = gen.SupportEmail
+		out.Body.SupportPhone = gen.SupportPhone
+		out.Body.SupportAddress = gen.SupportAddress
 		return out, nil
 	})
 }
@@ -240,6 +280,8 @@ func MountStaticAndUploads(r chi.Router, d *Deps) {
 	r.Post("/api/settings/branding/map-pop", uploadHandler(d, "map-pop"))
 	r.Post("/api/settings/branding/map-odp", uploadHandler(d, "map-odp"))
 	r.Post("/api/settings/branding/map-customer", uploadHandler(d, "map-customer"))
+	r.Post("/api/settings/isolir/logo", isolirLogoUpload(d))
+	r.Delete("/api/settings/isolir/logo", isolirLogoRemove(d))
 	r.Post("/api/work-orders/{id}/photos", workOrderPhotoUpload(d))
 	r.Post("/api/leads/{id}/comments/photos", leadCommentPhotoUpload(d))
 	r.Post("/api/leads/{id}/documents/photos", leadDocumentPhotoUpload(d))
@@ -719,6 +761,66 @@ func setBrandingURL(b *store.Branding, kind string, url *string) {
 
 func isMapIconKind(kind string) bool {
 	return kind == "map-pop" || kind == "map-odp" || kind == "map-customer"
+}
+
+// isolirLogoUpload stores a custom image for the isolir landing page. It is
+// independent of the app branding logo (stored under the isolir settings).
+func isolirLogoUpload(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			if _, ok := tenant.FromContext(ctx); !ok {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			return
+		}
+		if err := r.ParseMultipartForm(2 << 20); err != nil {
+			http.Error(w, `{"error":"invalid multipart"}`, http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, `{"error":"file is required"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		url, err := saveUpload(d, tid, false, "isolir-logo", file, header.Filename, header.Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+		if err := d.Store.UpsertIsolirLogoURL(ctx, tid, url); err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": url})
+	}
+}
+
+// isolirLogoRemove clears the custom isolir image so the app logo is used again.
+func isolirLogoRemove(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		tid, err := requireSettings(ctx, d)
+		if err != nil {
+			if _, ok := tenant.FromContext(ctx); !ok {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			return
+		}
+		if err := d.Store.UpsertIsolirLogoURL(ctx, tid, ""); err != nil {
+			http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"url": ""})
+	}
 }
 
 func saveUpload(d *Deps, tenantID xid.ID, platform bool, kind string, src io.Reader, filename string, size int64) (string, error) {

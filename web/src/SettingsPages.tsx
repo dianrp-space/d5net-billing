@@ -128,6 +128,11 @@ export function GeneralSettingsPage() {
           primary_color?: string;
           wallet_enabled?: boolean;
           wallet_min_topup?: number;
+          about?: string;
+          product_description?: string;
+          support_email?: string;
+          support_phone?: string;
+          support_address?: string;
         }
       >("/api/settings/branding"),
   });
@@ -141,6 +146,11 @@ export function GeneralSettingsPage() {
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY);
   const [walletEnabled, setWalletEnabled] = useState(false);
   const [walletMinTopup, setWalletMinTopup] = useState(10000);
+  const [about, setAbout] = useState("");
+  const [productDescription, setProductDescription] = useState("");
+  const [supportEmail, setSupportEmail] = useState("");
+  const [supportPhone, setSupportPhone] = useState("");
+  const [supportAddress, setSupportAddress] = useState("");
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -155,6 +165,11 @@ export function GeneralSettingsPage() {
     setPrimaryColor(parseHexColor(q.data.primary_color) || DEFAULT_PRIMARY);
     setWalletEnabled(Boolean(q.data.wallet_enabled));
     setWalletMinTopup(Number(q.data.wallet_min_topup) || 10000);
+    setAbout(q.data.about || "");
+    setProductDescription(q.data.product_description || "");
+    setSupportEmail(q.data.support_email || "");
+    setSupportPhone(q.data.support_phone || "");
+    setSupportAddress(q.data.support_address || "");
   }, [q.data]);
 
   function brandingBody(extra?: Record<string, unknown>) {
@@ -169,6 +184,11 @@ export function GeneralSettingsPage() {
       primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
       wallet_enabled: walletEnabled,
       wallet_min_topup: Math.max(1000, Math.floor(Number(walletMinTopup) || 10000)),
+      about: about.trim(),
+      product_description: productDescription.trim(),
+      support_email: supportEmail.trim(),
+      support_phone: supportPhone.trim(),
+      support_address: supportAddress.trim(),
       ...extra,
     };
   }
@@ -486,6 +506,69 @@ export function GeneralSettingsPage() {
                 onFile={(f) => void onUpload("map-customer", f)}
                 onClear={() => clearField.mutate("map-customer")}
               />
+            </div>
+          </div>
+
+          <div className="grid gap-3">
+            <div>
+              <p className="text-sm font-medium">Profil publik (website)</p>
+              <p className="text-xs text-[var(--muted)]">
+                Tampil di halaman depan untuk pengunjung — juga dipakai untuk verifikasi payment gateway. Daftar
+                produk &amp; harga diambil otomatis dari menu Paket (yang ditandai tampil di portal).
+              </p>
+            </div>
+            <div className="panel-card grid gap-4 p-4 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm sm:col-span-2">
+                <span className="font-medium">Deskripsi usaha</span>
+                <textarea
+                  className="input min-h-[90px]"
+                  value={about}
+                  onChange={(e) => setAbout(e.target.value)}
+                  placeholder="Contoh: PT Delima Net adalah penyedia jasa layanan internet (ISP) untuk rumah dan bisnis di wilayah ..."
+                />
+              </label>
+              <label className="grid gap-1 text-sm sm:col-span-2">
+                <span className="font-medium">Deskripsi produk / layanan</span>
+                <textarea
+                  className="input min-h-[90px]"
+                  value={productDescription}
+                  onChange={(e) => setProductDescription(e.target.value)}
+                  placeholder="Contoh: Layanan internet unlimited bulanan. Daftar paket dan harga (Rupiah) tampil otomatis dari menu Paket."
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="font-medium">Email dukungan</span>
+                <input
+                  className="input"
+                  type="email"
+                  value={supportEmail}
+                  onChange={(e) => setSupportEmail(e.target.value)}
+                  placeholder="support@example.com"
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="font-medium">Nomor telepon</span>
+                <input
+                  className="input"
+                  value={supportPhone}
+                  onChange={(e) => setSupportPhone(e.target.value)}
+                  placeholder="021-1234567 atau 0812-3456-7890"
+                />
+              </label>
+              <label className="grid gap-1 text-sm sm:col-span-2">
+                <span className="font-medium">Alamat usaha</span>
+                <textarea
+                  className="input min-h-[70px]"
+                  value={supportAddress}
+                  onChange={(e) => setSupportAddress(e.target.value)}
+                  placeholder="Alamat lengkap kantor / usaha"
+                />
+              </label>
+              <div className="sm:col-span-2">
+                <button type="button" className="btn" disabled={save.isPending} onClick={() => save.mutate()}>
+                  {save.isPending ? "Menyimpan..." : "Simpan profil publik"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

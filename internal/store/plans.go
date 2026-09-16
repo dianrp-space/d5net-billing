@@ -178,6 +178,56 @@ func (s *Store) ListPortalPlans(ctx context.Context, tenantID xid.ID, clusterID 
 	return list, rows.Err()
 }
 
+// PublicPlan is a plan shown on the public catalog (no cluster context): the
+// base plan price, or the cheapest active cluster-offer price when the base is 0.
+type PublicPlan struct {
+	ID           xid.ID `json:"id"`
+	Name         string `json:"name"`
+	Price        int64  `json:"price"`
+	BillingCycle string `json:"billing_cycle"`
+	ServiceType  string `json:"service_type"`
+	DownloadMbps int    `json:"download_mbps"`
+	UploadMbps   int    `json:"upload_mbps"`
+	QuotaGB      *int   `json:"quota_gb,omitempty"`
+}
+
+// ListPublicPlans lists active, portal-visible plans for the public landing page.
+func (s *Store) ListPublicPlans(ctx context.Context, tenantID xid.ID) ([]PublicPlan, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, err
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT p.id, p.name, p.price, p.billing_cycle, p.service_type, p.download_mbps, p.upload_mbps, p.quota_gb,
+		       COALESCE(MIN(o.price) FILTER (WHERE o.is_active), 0) AS min_offer
+		FROM plans p
+		LEFT JOIN plan_cluster_offers o ON o.plan_id = p.id AND o.tenant_id = p.tenant_id
+		WHERE p.tenant_id = $1 AND p.is_active AND p.portal_visible
+		GROUP BY p.id
+		ORDER BY p.price, p.name
+	`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []PublicPlan
+	for rows.Next() {
+		var p PublicPlan
+		var minOffer int64
+		if err := rows.Scan(&p.ID, &p.Name, &p.Price, &p.BillingCycle, &p.ServiceType,
+			&p.DownloadMbps, &p.UploadMbps, &p.QuotaGB, &minOffer); err != nil {
+			return nil, err
+		}
+		if p.Price <= 0 && minOffer > 0 {
+			p.Price = minOffer
+		}
+		list = append(list, p)
+	}
+	if list == nil {
+		list = []PublicPlan{}
+	}
+	return list, rows.Err()
+}
+
 type Subscription struct {
 	ID           xid.ID     `json:"id"`
 	TenantID     xid.ID     `json:"tenant_id"`

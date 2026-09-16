@@ -21,6 +21,7 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 		Body struct {
 			Network   store.IsolirNetworkSettings `json:"network"`
 			HTML      string                      `json:"html"`
+			LogoURL   string                      `json:"logo_url"`
 			IsolirURL string                      `json:"isolir_url"`
 			DocsHint  string                      `json:"docs_hint"`
 		}
@@ -35,17 +36,20 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 		}
 		_ = d.Store.ResolveIsolirPool(ctx, tid, &net)
 		htmlBody, _ := d.Store.GetIsolirHTML(ctx, tid)
+		logoURL, _ := d.Store.GetIsolirLogoURL(ctx, tid)
 		isolirURL := store.IsolirLandingURL(net.PortalBaseURL)
 		out := &struct {
 			Body struct {
 				Network   store.IsolirNetworkSettings `json:"network"`
 				HTML      string                      `json:"html"`
+				LogoURL   string                      `json:"logo_url"`
 				IsolirURL string                      `json:"isolir_url"`
 				DocsHint  string                      `json:"docs_hint"`
 			}
 		}{}
 		out.Body.Network = net
 		out.Body.HTML = htmlBody
+		out.Body.LogoURL = logoURL
 		out.Body.IsolirURL = isolirURL
 		out.Body.DocsHint = isolirDocsHint(isolirURL, net)
 		return out, nil
@@ -58,11 +62,13 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 		Body struct {
 			Network store.IsolirNetworkSettings `json:"network"`
 			HTML    *string                     `json:"html,omitempty"`
+			LogoURL *string                     `json:"logo_url,omitempty"`
 		}
 	}) (*struct {
 		Body struct {
 			Network   store.IsolirNetworkSettings `json:"network"`
 			HTML      string                      `json:"html"`
+			LogoURL   string                      `json:"logo_url"`
 			IsolirURL string                      `json:"isolir_url"`
 			DocsHint  string                      `json:"docs_hint"`
 		}
@@ -103,20 +109,28 @@ func registerIsolirSettings(api huma.API, d *Deps) {
 				return nil, httpx.Internal(err)
 			}
 		}
+		if input.Body.LogoURL != nil {
+			if err := d.Store.UpsertIsolirLogoURL(ctx, tid, *input.Body.LogoURL); err != nil {
+				return nil, httpx.Internal(err)
+			}
+		}
 		net, _ = d.Store.GetIsolirNetworkSettings(ctx, tid)
 		_ = d.Store.ResolveIsolirPool(ctx, tid, &net)
 		htmlBody, _ := d.Store.GetIsolirHTML(ctx, tid)
+		logoURL, _ := d.Store.GetIsolirLogoURL(ctx, tid)
 		isolirURL := store.IsolirLandingURL(net.PortalBaseURL)
 		out := &struct {
 			Body struct {
 				Network   store.IsolirNetworkSettings `json:"network"`
 				HTML      string                      `json:"html"`
+				LogoURL   string                      `json:"logo_url"`
 				IsolirURL string                      `json:"isolir_url"`
 				DocsHint  string                      `json:"docs_hint"`
 			}
 		}{}
 		out.Body.Network = net
 		out.Body.HTML = htmlBody
+		out.Body.LogoURL = logoURL
 		out.Body.IsolirURL = isolirURL
 		out.Body.DocsHint = isolirDocsHint(isolirURL, net)
 		return out, nil
@@ -219,6 +233,24 @@ func isolirDocsHint(isolirURL string, net store.IsolirNetworkSettings) string {
 		"Comment: d5n-isolir:* · Secret isolir: prefix \"ISOLIR \""
 }
 
+// absolutizeIsolirURL turns a relative asset path (e.g. /uploads/..) into an
+// absolute URL using the portal base URL, so images render on the captive
+// listener where only the isolir HTML is served.
+func absolutizeIsolirURL(base, u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" || strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "data:") {
+		return u
+	}
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		return u
+	}
+	if !strings.HasPrefix(u, "/") {
+		u = "/" + u
+	}
+	return base + u
+}
+
 // renderIsolirPage builds the isolir landing HTML for the single provider,
 // applying the admin template + branding. Shared by the /api/public/isolir
 // endpoint and the DST-NAT captive listener.
@@ -240,6 +272,13 @@ func renderIsolirPage(ctx context.Context, d *Deps) ([]byte, error) {
 			logoURL = *brand.Effective.LogoURL
 		}
 	}
+	// Gambar khusus halaman isolir (manual) menimpa logo aplikasi bila diisi.
+	if customLogo, cerr := d.Store.GetIsolirLogoURL(ctx, ten.ID); cerr == nil && strings.TrimSpace(customLogo) != "" {
+		logoURL = strings.TrimSpace(customLogo)
+	}
+	// Captive listener (DST-NAT :port) hanya menyajikan HTML, bukan /uploads,
+	// jadi gambar relatif harus dibuat absolut ke portal base URL.
+	logoURL = absolutizeIsolirURL(net.PortalBaseURL, logoURL)
 	loginURL := store.IsolirPortalURL(net.PortalBaseURL, ten.Slug)
 	body := custom
 	if strings.TrimSpace(body) == "" {

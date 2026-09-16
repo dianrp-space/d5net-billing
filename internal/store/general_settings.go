@@ -33,6 +33,12 @@ type GeneralSettings struct {
 	WalletEnabled bool `json:"wallet_enabled"`
 	// WalletMinTopup adalah minimum nominal topup saldo (Rp).
 	WalletMinTopup int64 `json:"wallet_min_topup"`
+	// Profil publik situs (dipakai halaman landing & onboarding payment gateway).
+	About              string `json:"about,omitempty"`
+	ProductDescription string `json:"product_description,omitempty"`
+	SupportEmail       string `json:"support_email,omitempty"`
+	SupportPhone       string `json:"support_phone,omitempty"`
+	SupportAddress     string `json:"support_address,omitempty"`
 }
 
 func DefaultGeneralSettings() GeneralSettings {
@@ -119,6 +125,11 @@ func NormalizeGeneralSettings(g GeneralSettings) GeneralSettings {
 	if g.WalletMinTopup > 100_000_000 {
 		g.WalletMinTopup = 100_000_000
 	}
+	g.About = strings.TrimSpace(g.About)
+	g.ProductDescription = strings.TrimSpace(g.ProductDescription)
+	g.SupportEmail = strings.TrimSpace(g.SupportEmail)
+	g.SupportPhone = strings.TrimSpace(g.SupportPhone)
+	g.SupportAddress = strings.TrimSpace(g.SupportAddress)
 	return g
 }
 

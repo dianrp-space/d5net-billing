@@ -57,6 +57,7 @@ func RegisterAll(api huma.API, d *Deps) {
 	httpx.RegisterHealth(api)
 	registerAuth(api, d)
 	registerPublicBranding(api, d)
+	registerPublicSite(api, d)
 	registerSettings(api, d)
 	registerIsolirSettings(api, d)
 	registerJobsSettings(api, d)
