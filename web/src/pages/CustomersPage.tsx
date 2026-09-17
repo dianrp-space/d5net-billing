@@ -54,6 +54,7 @@ export function CustomersPage({
     reseller_name?: string;
     sales_user_id?: string | null;
     sales_user_name?: string;
+    balance?: number;
   };
   type ClusterOpt = { id: string; name: string; code: string; customer_code_prefix: string };
   type CustForm = {
@@ -380,6 +381,7 @@ export function CustomersPage({
   const rows = q.data?.data ?? [];
   const total = q.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / limit));
+  const showWallet = Boolean(featuresQ.data?.wallet_enabled);
 
   // Batch select: ubah status aktif, cabut, hapus permanen.
   const [selected, setSelected] = useState<string[]>([]);
@@ -603,7 +605,17 @@ export function CustomersPage({
       ) : null}
       <Table
         rowNumberStart={page * limit + 1}
-        columns={["", "Kode", "Cluster", "Nama", "Telepon", "Atribusi", "Status", "Aksi"]}
+        columns={[
+          "",
+          "Kode",
+          "Cluster",
+          "Nama",
+          "Telepon",
+          ...(showWallet ? ["Saldo"] : []),
+          "Atribusi",
+          "Status",
+          "Aksi",
+        ]}
         rows={rows.map((c) => [
           <input
             key={`sel-${c.id}`}
@@ -616,6 +628,7 @@ export function CustomersPage({
           c.cluster_name || c.cluster_code || "—",
           c.full_name,
           c.phone,
+          ...(showWallet ? [formatRp(c.balance ?? 0)] : []),
           c.reseller_name ? `Reseller: ${c.reseller_name}` : c.sales_user_name ? `Sales: ${c.sales_user_name}` : "—",
           statusLabel(c),
           <span key="act" className="flex flex-wrap items-center gap-1.5">

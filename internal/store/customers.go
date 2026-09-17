@@ -40,6 +40,8 @@ type Customer struct {
 	ResellerName  string    `json:"reseller_name,omitempty"`
 	SalesUserID   *xid.ID   `json:"sales_user_id,omitempty"`
 	SalesUserName string    `json:"sales_user_name,omitempty"`
+	// Balance adalah saldo wallet pelanggan (0 bila belum pernah topup).
+	Balance int64 `json:"balance"`
 }
 
 func (c *Customer) IsDismantled() bool {
@@ -150,6 +152,7 @@ func customerScanDest(c *Customer) []any {
 		&c.ID, &c.TenantID, &c.ClusterID, &c.CustomerCode, &c.FullName, &c.Email, &c.Phone, &c.Address,
 		&c.Latitude, &c.Longitude, &c.IdentityType, &c.IdentityNumber, &c.IsActive, &c.PortalEnabled, &c.PhotoURL, &c.DismantledAt, &c.CreatedAt,
 		&c.ClusterName, &c.ClusterCode, &c.ResellerID, &c.ResellerName, &c.SalesUserID, &c.SalesUserName, &c.SubStatus,
+		&c.Balance,
 	}
 }
 
@@ -181,7 +184,8 @@ const customerSelect = `
 	           FROM subscriptions sub
 	           WHERE sub.tenant_id = c.tenant_id AND sub.customer_id = c.id
 	             AND sub.status IN ('active','suspended','overdue')
-	       ), '')
+	       ), ''),
+	       COALESCE((SELECT w.balance FROM wallets w WHERE w.tenant_id = c.tenant_id AND w.customer_id = c.id), 0)
 	FROM customers c
 	LEFT JOIN sites s ON s.id = c.cluster_id
 	LEFT JOIN resellers r ON r.id = c.reseller_id

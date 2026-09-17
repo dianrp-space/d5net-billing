@@ -439,4 +439,41 @@ func registerWallet(api huma.API, d *Deps) {
 		resumeAfterInvoicePaid(ctx, d, ten.ID, inv)
 		return out, nil
 	})
+
+	// Riwayat topup saldo (isi saldo) lintas pelanggan untuk halaman Pembayaran.
+	huma.Register(api, huma.Operation{
+		OperationID: "list-wallet-topups", Method: http.MethodGet, Path: "/api/wallet/topups",
+		Tags: []string{"Payments"}, Security: []map[string][]string{{"bearer": {}}},
+	}, func(ctx context.Context, input *struct {
+		Search string `query:"search"`
+		Limit  int    `query:"limit"`
+		Offset int    `query:"offset"`
+	}) (*struct {
+		Body struct {
+			Data  []store.WalletTopup `json:"data"`
+			Total int64               `json:"total"`
+		}
+	}, error) {
+		tid, err := tenantIDFromCtx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := &struct {
+			Body struct {
+				Data  []store.WalletTopup `json:"data"`
+				Total int64               `json:"total"`
+			}
+		}{}
+		if !d.Store.WalletEnabled(ctx, tid) {
+			out.Body.Data = []store.WalletTopup{}
+			return out, nil
+		}
+		list, total, err := d.Store.ListWalletTopups(ctx, tid, input.Search, input.Limit, input.Offset)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		out.Body.Data = list
+		out.Body.Total = total
+		return out, nil
+	})
 }

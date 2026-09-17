@@ -61,6 +61,70 @@ func (s *Store) ListWalletTxns(ctx context.Context, tenantID, customerID xid.ID,
 	return list, total, rows.Err()
 }
 
+// WalletTopup adalah satu baris riwayat topup saldo beserta pelanggannya.
+type WalletTopup struct {
+	ID           xid.ID    `json:"id"`
+	CustomerID   xid.ID    `json:"customer_id"`
+	CustomerName string    `json:"customer_name,omitempty"`
+	CustomerCode string    `json:"customer_code,omitempty"`
+	Amount       int64     `json:"amount"`
+	Type         string    `json:"type"`
+	Reference    string    `json:"reference,omitempty"`
+	Description  string    `json:"description,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// ListWalletTopups mengembalikan riwayat topup saldo lintas pelanggan
+// (topup gateway & topup manual admin), terbaru lebih dulu.
+func (s *Store) ListWalletTopups(ctx context.Context, tenantID xid.ID, search string, limit, offset int) ([]WalletTopup, int64, error) {
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return nil, 0, err
+	}
+	where := "WHERE wt.tenant_id = $1 AND wt.type IN ('topup','topup_admin') AND wt.amount > 0"
+	args := []any{tenantID}
+	if q := strings.TrimSpace(search); q != "" {
+		args = append(args, "%"+q+"%")
+		n := len(args)
+		where += fmt.Sprintf(` AND (
+			c.full_name ILIKE $%d OR c.customer_code ILIKE $%d
+			OR COALESCE(wt.reference,'') ILIKE $%d OR COALESCE(wt.description,'') ILIKE $%d
+		)`, n, n, n, n)
+	}
+	var total int64
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM wallet_transactions wt
+		JOIN wallets w ON w.id = wt.wallet_id
+		LEFT JOIN customers c ON c.id = w.customer_id AND c.tenant_id = wt.tenant_id
+		`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	args = append(args, limit, offset)
+	rows, err := s.Pool.Query(ctx, `
+		SELECT wt.id, w.customer_id, COALESCE(c.full_name,''), COALESCE(c.customer_code,''),
+		       wt.amount, wt.type, COALESCE(wt.reference,''), COALESCE(wt.description,''), wt.created_at
+		FROM wallet_transactions wt
+		JOIN wallets w ON w.id = wt.wallet_id
+		LEFT JOIN customers c ON c.id = w.customer_id AND c.tenant_id = wt.tenant_id
+		`+where+fmt.Sprintf(` ORDER BY wt.created_at DESC, wt.id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	list := []WalletTopup{}
+	for rows.Next() {
+		var t WalletTopup
+		if err := rows.Scan(&t.ID, &t.CustomerID, &t.CustomerName, &t.CustomerCode, &t.Amount, &t.Type, &t.Reference, &t.Description, &t.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		list = append(list, t)
+	}
+	return list, total, rows.Err()
+}
+
 // OutstandingInvoiceIDs mengembalikan tagihan belum lunas milik pelanggan,
 // terurut dari yang paling lama (due_date, lalu terbit).
 func (s *Store) OutstandingInvoiceIDs(ctx context.Context, tenantID, customerID xid.ID) ([]xid.ID, error) {
