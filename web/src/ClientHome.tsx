@@ -98,6 +98,29 @@ function formatPortalWhen(iso?: string) {
   }
 }
 
+/** Kunci bulan "YYYY-MM" untuk pemakaian (default: bulan berjalan). */
+export function currentMonthKey(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function shiftMonthKey(key: string, delta: number) {
+  const [y, m] = String(key || "").split("-").map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return currentMonthKey();
+  return currentMonthKey(new Date(y, m - 1 + delta, 1));
+}
+
+/** Label Indonesia untuk kunci bulan, mis. "2026-09" → "September 2026". */
+export function monthKeyLabel(key: string) {
+  const d = new Date(`${key}-01T00:00:00`);
+  if (Number.isNaN(d.getTime())) return key;
+  try {
+    const s = d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  } catch {
+    return key;
+  }
+}
+
 const WALLET_TXN_LABEL: Record<string, string> = {
   topup: "Topup online",
   topup_admin: "Topup admin",
@@ -506,25 +529,25 @@ export function ClientHome({
     total_bytes: number;
     rows: { customer_id: string; customer_code?: string; month: string; rx_bytes: number; tx_bytes: number; total_bytes: number }[];
   };
+  const [usageMonth, setUsageMonth] = useState(() => currentMonthKey());
   const usageQ = useQuery({
-    queryKey: ["portal-usage", data.tenant_slug],
-    queryFn: () => api<PortalUsage>("/api/portal/usage", { headers: portalHeaders }),
+    queryKey: ["portal-usage", data.tenant_slug, usageMonth],
+    queryFn: () => api<PortalUsage>(`/api/portal/usage?month=${encodeURIComponent(usageMonth)}`, { headers: portalHeaders }),
     enabled: Boolean(data.portal_token),
     retry: false,
     refetchOnWindowFocus: true,
     refetchInterval: 60000,
   });
-  const usageMonthLabel = (() => {
-    const m = `${usageQ.data?.month || ""}-01`;
-    const d = new Date(`${m}T00:00:00`);
-    if (Number.isNaN(d.getTime())) return "";
-    try {
-      const s = d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
-      return s.charAt(0).toUpperCase() + s.slice(1);
-    } catch {
-      return usageQ.data?.month || "";
-    }
-  })();
+  const profileSubs = subscriptions.filter(
+    (s) => !photoTarget?.id || !s.customer_id || s.customer_id === photoTarget.id,
+  );
+  const usageMonthLabel = monthKeyLabel(usageQ.data?.month || usageMonth);
+  const usageTodayKey = currentMonthKey();
+  function pickUsageMonth(next: string) {
+    const v = String(next || "").trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) return;
+    setUsageMonth(v > usageTodayKey ? usageTodayKey : v);
+  }
 
   useEffect(() => {
     if (paymentReturnHandled.current) return;
@@ -1612,11 +1635,157 @@ export function ClientHome({
           ) : null}
 
           {page === "account" ? (
+            <div className="grid gap-6">
+            <Section title="Profil saya">
+              {photoTarget ? (
+                <div className="panel-card grid max-w-md gap-4 p-4">
+                  <div className="flex flex-wrap items-center gap-4">
+                    {photoTargetUrl ? (
+                      <img src={photoTargetUrl} alt="" className="h-20 w-20 rounded-2xl object-cover" />
+                    ) : (
+                      <span
+                        className="flex h-20 w-20 items-center justify-center rounded-2xl text-2xl font-bold text-white"
+                        style={{ background: "linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000))" }}
+                        aria-hidden
+                      >
+                        {(photoTarget.full_name.trim()[0] || "P").toUpperCase()}
+                      </span>
+                    )}
+                    <div className="grid min-w-0 flex-1 gap-2">
+                      {multi ? (
+                        <label className="grid max-w-md gap-1 text-sm">
+                          <span className="text-[var(--muted)]">Akun</span>
+                          <select
+                            className="input"
+                            value={photoSelKey}
+                            onChange={(e) => setPhotoKeySel(e.target.value)}
+                          >
+                            {fullAccounts.map((a) => (
+                              <option key={photoKeyOf(a)} value={photoKeyOf(a)}>
+                                {accountLabel(a.customer_code, a.full_name)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <p className="text-sm font-medium">{accountLabel(photoTarget.customer_code, photoTarget.full_name)}</p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          disabled={photoBusy}
+                          onClick={() => fileRef.current?.click()}
+                        >
+                          {photoBusy ? "Mengunggah..." : "Pilih foto..."}
+                        </button>
+                        {photoTargetUrl ? (
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={photoBusy}
+                            onClick={() => void removePhoto()}
+                          >
+                            Hapus foto
+                          </button>
+                        ) : null}
+                      </div>
+                      <input
+                        ref={fileRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          e.target.value = "";
+                          if (f) void uploadPhoto(f);
+                        }}
+                      />
+                      <p className="text-xs text-[var(--muted)]">JPG / PNG / WebP, otomatis dikompresi.</p>
+                      {photoErr && <p className="text-sm text-[var(--danger)]">{photoErr}</p>}
+                    </div>
+                  </div>
+                  <dl className="grid gap-2 border-t border-[var(--border)] pt-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-[var(--muted)]">Kode pelanggan</dt>
+                      <dd className="font-semibold">{photoTarget.customer_code}</dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-[var(--muted)]">Nama</dt>
+                      <dd className="font-semibold">{photoTarget.full_name}</dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-[var(--muted)]">Telepon</dt>
+                      <dd className="font-semibold">{photoTarget.phone}</dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-[var(--muted)]">Email</dt>
+                      <dd className="truncate font-semibold">{(photoTarget.email || "").trim() || "—"}</dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-[var(--muted)]">Alamat</dt>
+                      <dd className="max-w-[60%] truncate font-semibold" title={photoTarget.address || ""}>
+                        {(photoTarget.address || "").trim() || "—"}
+                      </dd>
+                    </div>
+                    <div className="grid gap-1">
+                      <dt className="text-[var(--muted)]">Paket</dt>
+                      {profileSubs.length > 0 ? (
+                        profileSubs.map((s) => (
+                          <dd key={s.id || s.username} className="font-medium">
+                            {s.username} · {s.plan_name} · {subscriptionStatusLabel(s.status)}
+                          </dd>
+                        ))
+                      ) : (
+                        <dd className="font-medium">—</dd>
+                      )}
+                    </div>
+                  </dl>
+                </div>
+              ) : (
+                <p className="text-sm text-[var(--muted)]">Belum ada akun.</p>
+              )}
+            </Section>
             <Section title={`Pemakaian Bulan ${usageMonthLabel}`}>
+              <div className="panel-card grid max-w-md gap-3 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  aria-label="Bulan sebelumnya"
+                  onClick={() => pickUsageMonth(shiftMonthKey(usageMonth, -1))}
+                >
+                  ‹
+                </button>
+                <input
+                  type="month"
+                  className="input w-auto"
+                  aria-label="Pilih bulan"
+                  value={usageMonth}
+                  max={usageTodayKey}
+                  onChange={(e) => pickUsageMonth(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  aria-label="Bulan berikutnya"
+                  disabled={usageMonth >= usageTodayKey}
+                  onClick={() => pickUsageMonth(shiftMonthKey(usageMonth, 1))}
+                >
+                  ›
+                </button>
+                {usageMonth !== usageTodayKey ? (
+                  <button type="button" className="btn-ghost text-sm" onClick={() => setUsageMonth(usageTodayKey)}>
+                    Bulan ini
+                  </button>
+                ) : null}
+              </div>
               {usageQ.isLoading ? (
                 <p className="text-sm text-[var(--muted)]">Memuat pemakaian…</p>
               ) : usageQ.isError ? (
                 <p className="text-sm text-[var(--muted)]">Pemakaian belum tersedia.</p>
+              ) : (usageQ.data?.total_bytes ?? 0) === 0 ? (
+                <p className="text-sm text-[var(--muted)]">Belum ada pemakaian tercatat pada {usageMonthLabel}.</p>
               ) : (
                 <div className="grid gap-3">
                   <div>
@@ -1638,85 +1807,10 @@ export function ClientHome({
                   ) : null}
                 </div>
               )}
+              </div>
             </Section>
-          ) : null}
-          {page === "account" ? (
-            <Section title="Foto profil">
-              {photoTarget ? (
-                <div className="flex flex-wrap items-center gap-4">
-                  {photoTargetUrl ? (
-                    <img src={photoTargetUrl} alt="" className="h-20 w-20 rounded-2xl object-cover" />
-                  ) : (
-                    <span
-                      className="flex h-20 w-20 items-center justify-center rounded-2xl text-2xl font-bold text-white"
-                      style={{ background: "linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #000))" }}
-                      aria-hidden
-                    >
-                      {(photoTarget.full_name.trim()[0] || "P").toUpperCase()}
-                    </span>
-                  )}
-                  <div className="grid min-w-0 flex-1 gap-2">
-                    {multi ? (
-                      <label className="grid max-w-md gap-1 text-sm">
-                        <span className="text-[var(--muted)]">Akun</span>
-                        <select
-                          className="input"
-                          value={photoSelKey}
-                          onChange={(e) => setPhotoKeySel(e.target.value)}
-                        >
-                          {fullAccounts.map((a) => (
-                            <option key={photoKeyOf(a)} value={photoKeyOf(a)}>
-                              {accountLabel(a.customer_code, a.full_name)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : (
-                      <p className="text-sm font-medium">{accountLabel(photoTarget.customer_code, photoTarget.full_name)}</p>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        disabled={photoBusy}
-                        onClick={() => fileRef.current?.click()}
-                      >
-                        {photoBusy ? "Mengunggah..." : "Pilih foto..."}
-                      </button>
-                      {photoTargetUrl ? (
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          disabled={photoBusy}
-                          onClick={() => void removePhoto()}
-                        >
-                          Hapus foto
-                        </button>
-                      ) : null}
-                    </div>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        e.target.value = "";
-                        if (f) void uploadPhoto(f);
-                      }}
-                    />
-                    <p className="text-xs text-[var(--muted)]">JPG / PNG / WebP, otomatis dikompresi.</p>
-                    {photoErr && <p className="text-sm text-[var(--danger)]">{photoErr}</p>}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-[var(--muted)]">Belum ada akun.</p>
-              )}
-            </Section>
-          ) : null}
-          {page === "account" ? (
             <Section title="Ganti password">
-              <form className="grid max-w-md gap-3" onSubmit={onChangePassword}>
+              <form className="panel-card grid max-w-md gap-3 p-4" onSubmit={onChangePassword}>
                 {multi ? (
                   <label className="grid gap-1 text-sm">
                     <span className="text-[var(--muted)]">Akun</span>
@@ -1762,6 +1856,7 @@ export function ClientHome({
                 {formErr && <p className="text-sm text-[var(--danger)]">{formErr}</p>}
               </form>
             </Section>
+            </div>
           ) : null}
         </main>
       </div>
