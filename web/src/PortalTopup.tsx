@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { QrisPayDialog, type QrisIntent } from "./QrisPayDialog";
-import { payMethodToProvider, payOptionsToMethods, type PayMethodId, type PayOption } from "./payMethod";
-import { toastError, toastSuccess } from "./swal";
+import { markPendingTopup, payMethodToProvider, payOptionsToMethods, portalPaymentReturnURL, type PayMethodId, type PayOption } from "./payMethod";
+import { alertTopupSuccess, toastError } from "./swal";
 import { formatRp, FormDialog } from "./ui";
 
 /** Dialog topup saldo portal: input nominal + metode, lalu QR/redirect seperti bayar tagihan. */
@@ -71,14 +71,20 @@ export function PortalTopupDialog({
       const pi = await api<QrisIntent>("/api/portal/wallet/topup", {
         method: "POST",
         headers,
-        body: JSON.stringify({ amount: amt, provider: payMethodToProvider(chosen) }),
+        body: JSON.stringify({
+          amount: amt,
+          provider: payMethodToProvider(chosen),
+          return_url: portalPaymentReturnURL(),
+        }),
       });
       const checkoutURL = String(pi.checkout_url || "").trim();
       const meta = (pi.metadata || {}) as Record<string, unknown>;
       const codePay = Boolean(meta.va_number || meta.payment_code);
       // Satu PG dengan halaman redirect: langsung ke halaman checkout tanpa
-      // dialog perantara (sama seperti alur bayar tagihan).
+      // dialog perantara (sama seperti alur bayar tagihan). Simpan external_id
+      // agar status topup bisa diverifikasi begitu kembali ke dashboard portal.
       if (singleMethod && checkoutURL && !pi.qr_image_base64 && !codePay) {
+        markPendingTopup(String(pi.external_id || ""));
         window.location.assign(checkoutURL);
         return;
       }
@@ -161,7 +167,7 @@ export function PortalTopupDialog({
         pollHeaders={headers}
         onPaid={() => {
           setIntent(null);
-          void toastSuccess("Topup saldo berhasil");
+          void alertTopupSuccess();
           onDone?.();
           onClose();
         }}

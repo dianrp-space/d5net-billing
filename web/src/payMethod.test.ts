@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   confirmPaymentAfterReturn,
+  confirmTopupAfterReturn,
   consumePaymentReturn,
   consumePaymentReturnSuccess,
+  consumePendingTopup,
   getSavedPayMethod,
   invoiceRemaining,
   isInvoiceUnpaid,
   isIsolirStatus,
   isPayMethodId,
+  markPendingTopup,
   notePaymentReturnFromLocation,
   PAY_METHOD_DUITKU,
   paymentMethodLabel,
@@ -101,6 +104,35 @@ describe("payMethod", () => {
         { id: "1", invoice_number: "INV-1", status: "issued", total_amount: 100, paid_amount: 0 },
       ],
       fetchPaymentIntent: async () => ({ status: "pending" }),
+    });
+    expect(confirmed).toBe(false);
+  });
+
+  it("stores and consumes a pending topup marker once", () => {
+    expect(consumePendingTopup()).toBe("");
+    markPendingTopup("TOPUP-1");
+    expect(consumePendingTopup()).toBe("TOPUP-1");
+    expect(consumePendingTopup()).toBe("");
+  });
+
+  it("confirms topup after return once the intent is paid", async () => {
+    const confirmed = await confirmTopupAfterReturn({
+      externalId: "TOPUP-1",
+      resultCode: "00",
+      attempts: 2,
+      delayMs: 1,
+      fetchIntent: async () => ({ status: "paid" }),
+    });
+    expect(confirmed).toBe(true);
+  });
+
+  it("does not confirm topup when Duitku resultCode is canceled", async () => {
+    const confirmed = await confirmTopupAfterReturn({
+      externalId: "TOPUP-1",
+      resultCode: "02",
+      attempts: 2,
+      delayMs: 1,
+      fetchIntent: async () => ({ status: "paid" }),
     });
     expect(confirmed).toBe(false);
   });

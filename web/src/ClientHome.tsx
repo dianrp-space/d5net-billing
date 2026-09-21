@@ -8,7 +8,7 @@ import { ClientIdCard } from "./ClientIdCard";
 import { ClientBell } from "./ClientBell";
 import { PortalTopupDialog } from "./PortalTopup";
 import { ChatwootWidget } from "./ChatwootWidget";
-import { alertPaymentSuccess, toastError, toastSuccess } from "./swal";
+import { alertPaymentSuccess, alertTopupSuccess, toastError, toastSuccess } from "./swal";
 import { ThemeToggle } from "./ThemeToggle";
 import {
   Breadcrumb,
@@ -28,8 +28,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserAvatar } from "./UserMenu";
-import { clearSavedPayMethod, consumePaymentReturn, confirmPaymentAfterReturn, hasSavedPayMethod, invoiceRemaining, isInvoiceUnpaid, isIsolirStatus, paymentMethodLabel, type PayableInvoice } from "./payMethod";
+import { clearSavedPayMethod, consumePaymentReturn, consumePendingTopup, confirmPaymentAfterReturn, confirmTopupAfterReturn, hasSavedPayMethod, invoiceRemaining, isInvoiceUnpaid, isIsolirStatus, paymentMethodLabel, type PayableInvoice } from "./payMethod";
 import { canChangePortalPlan, PortalChangePlanDialog, PortalPlanCatalog, type PortalPlan, type PortalSub } from "./PortalChangePlan";
 import { getSidebarOpen, setSidebarOpen, usePersistedTab } from "./navPersist";
 
@@ -95,6 +96,28 @@ function formatPortalWhen(iso?: string) {
   } catch {
     return iso;
   }
+}
+
+const WALLET_TXN_LABEL: Record<string, string> = {
+  topup: "Topup online",
+  topup_admin: "Topup admin",
+  invoice_payment: "Bayar tagihan",
+  adjustment: "Penyesuaian",
+  adjust: "Penyesuaian",
+};
+
+/** Label jenis transaksi saldo (masuk/keluar). */
+function walletTxnLabel(type?: string | null) {
+  const key = String(type || "").trim().toLowerCase();
+  if (!key) return "Transaksi";
+  return WALLET_TXN_LABEL[key] || type || "Transaksi";
+}
+
+/** Nominal saldo dengan tanda + untuk masuk dan − untuk keluar. */
+function formatWalletAmount(amount: number) {
+  const n = Math.floor(Number(amount) || 0);
+  if (n > 0) return `+${formatRp(n)}`;
+  return formatRp(n);
 }
 
 function PortalTicketCard({
@@ -473,14 +496,38 @@ export function ClientHome({
   });
   const [topupOpen, setTopupOpen] = useState(false);
   const [payingWallet, setPayingWallet] = useState("");
+  const [payTab, setPayTab] = useState<"payments" | "wallet">("payments");
 
   useEffect(() => {
     if (paymentReturnHandled.current) return;
     const ret = consumePaymentReturn();
     if (!ret.returned) return;
     paymentReturnHandled.current = true;
-    setPage("invoices");
+    const pendingTopup = consumePendingTopup();
     void (async () => {
+      // Kembali dari PG untuk topup saldo: verifikasi status intent topup.
+      if (pendingTopup) {
+        const ok = await confirmTopupAfterReturn({
+          externalId: pendingTopup,
+          resultCode: ret.resultCode,
+          fetchIntent: async (externalId) => {
+            try {
+              return await api<{ status?: string }>(`/api/portal/wallet/topup/${externalId}`, {
+                headers: portalHeaders,
+              });
+            } catch {
+              return null;
+            }
+          },
+        });
+        void qc.invalidateQueries({ queryKey: ["portal-wallet", data.tenant_slug] });
+        void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
+        void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
+        void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
+        if (ok) void alertTopupSuccess();
+        return;
+      }
+      setPage("invoices");
       const confirmed = await confirmPaymentAfterReturn({
         resultCode: ret.resultCode,
         fetchInvoices: async () => {
@@ -851,6 +898,17 @@ export function ClientHome({
         ];
   });
 
+  const walletTxns = walletQ.data?.transactions ?? [];
+  const walletRows = walletTxns.map((t) => {
+    const when = t.created_at ? new Date(t.created_at).toLocaleString("id-ID") : "—";
+    const amount = (
+      <span style={{ color: t.amount < 0 ? "var(--danger)" : "var(--ok, #2b9a66)" }}>
+        {formatWalletAmount(t.amount)}
+      </span>
+    );
+    return [when, (t.description || "").trim() || "—", walletTxnLabel(t.type), amount];
+  });
+
   return (
     <div className={`app-shell app-shell--portal${sidebarOpen ? "" : " is-sidebar-collapsed"}`}>
       <ChatwootWidget
@@ -1031,23 +1089,6 @@ export function ClientHome({
                       Topup saldo
                     </button>
                   </div>
-                  {walletQ.data.transactions.length > 0 ? (
-                    <details>
-                      <summary className="cursor-pointer text-xs text-[var(--accent)]">Riwayat saldo</summary>
-                      <ul className="mt-2 grid gap-1 text-xs">
-                        {walletQ.data.transactions.slice(0, 10).map((t) => (
-                          <li key={t.id} className="flex items-center justify-between gap-2">
-                            <span className="text-[var(--muted)]">
-                              {new Date(t.created_at).toLocaleDateString("id-ID")} · {t.description || t.type}
-                            </span>
-                            <span style={{ color: t.amount < 0 ? "var(--danger)" : "var(--ok, #2b9a66)" }}>
-                              {formatRp(t.amount)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  ) : null}
                 </div>
               ) : null}
               {isolirSubs.length > 0 || unpaidInvoices.length > 0 ? (
@@ -1299,49 +1340,143 @@ export function ClientHome({
           ) : null}
 
           {page === "payments" ? (
-            <Section title="Riwayat pembayaran">
-              <div className="portal-table-desktop">
-                <Table
-                  columns={multi ? ["Akun", "Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status", "Aksi"] : ["Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status", "Aksi"]}
-                  rows={paymentRows}
-                />
-              </div>
-              <div className="portal-cards-mobile">
-                {payments.length === 0 ? (
-                  <p className="text-sm text-[var(--muted)]">Belum ada pembayaran.</p>
-                ) : (
-                  payments.map((p, idx) => (
-                    <article key={`${p.invoice_number || ""}-${p.created_at || p.paid_at || idx}`} className="portal-item-card">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-semibold">{p.invoice_number || "Pembayaran"}</p>
-                        <p className="text-xs text-[var(--muted)]">{paymentStatusLabel(p.status)}</p>
+            <Section title="Pembayaran">
+              {walletQ.data?.enabled ? (
+                <Tabs value={payTab} onValueChange={(v) => setPayTab(v as "payments" | "wallet")}>
+                  <TabsList aria-label="Pembayaran">
+                    <TabsTrigger value="payments">Pembayaran</TabsTrigger>
+                    <TabsTrigger value="wallet">Riwayat Saldo</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="payments">
+                    <div className="portal-table-desktop">
+                      <Table
+                        columns={multi ? ["Akun", "Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status", "Aksi"] : ["Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status", "Aksi"]}
+                        rows={paymentRows}
+                      />
+                    </div>
+                    <div className="portal-cards-mobile">
+                      {payments.length === 0 ? (
+                        <p className="text-sm text-[var(--muted)]">Belum ada pembayaran.</p>
+                      ) : (
+                        payments.map((p, idx) => (
+                          <article key={`${p.invoice_number || ""}-${p.created_at || p.paid_at || idx}`} className="portal-item-card">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm font-semibold">{p.invoice_number || "Pembayaran"}</p>
+                              <p className="text-xs text-[var(--muted)]">{paymentStatusLabel(p.status)}</p>
+                            </div>
+                            {multi ? <p className="text-xs text-[var(--muted)]">{accountLabel(p.customer_code, p.customer_name)}</p> : null}
+                            {(p.items_summary || "").trim() ? (
+                              <p className="text-xs text-[var(--muted)]">{p.items_summary}</p>
+                            ) : null}
+                            <p className="text-base font-bold">{formatRp(p.amount)}</p>
+                            <p className="text-xs text-[var(--muted)]">
+                              {paymentMethodLabel(p.method, p.sandbox)}
+                              {" · "}
+                              {p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—"}
+                            </p>
+                            {isCancellablePayment(p.status) && (p.invoice_id || "").trim() ? (
+                              <button
+                                type="button"
+                                className="btn-ghost w-fit text-sm"
+                                disabled={cancellingKey === `${p.invoice_id || ""}-${p.created_at || p.paid_at || p.invoice_number || ""}`}
+                                onClick={() => void cancelPendingPayment(p)}
+                              >
+                                {cancellingKey === `${p.invoice_id || ""}-${p.created_at || p.paid_at || p.invoice_number || ""}`
+                                  ? "Membatalkan…"
+                                  : "Batalkan pembayaran"}
+                              </button>
+                            ) : null}
+                          </article>
+                        ))
+                      )}
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="wallet">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm text-[var(--muted)]">Saldo saat ini</p>
+                        <p className="text-2xl font-bold">{formatRp(walletQ.data.balance)}</p>
+                        <p className="text-xs text-[var(--muted)]">
+                          Catatan saldo masuk (topup) dan keluar (pembayaran otomatis).
+                        </p>
                       </div>
-                      {multi ? <p className="text-xs text-[var(--muted)]">{accountLabel(p.customer_code, p.customer_name)}</p> : null}
-                      {(p.items_summary || "").trim() ? (
-                        <p className="text-xs text-[var(--muted)]">{p.items_summary}</p>
-                      ) : null}
-                      <p className="text-base font-bold">{formatRp(p.amount)}</p>
-                      <p className="text-xs text-[var(--muted)]">
-                        {paymentMethodLabel(p.method, p.sandbox)}
-                        {" · "}
-                        {p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—"}
-                      </p>
-                      {isCancellablePayment(p.status) && (p.invoice_id || "").trim() ? (
-                        <button
-                          type="button"
-                          className="btn-ghost w-fit text-sm"
-                          disabled={cancellingKey === `${p.invoice_id || ""}-${p.created_at || p.paid_at || p.invoice_number || ""}`}
-                          onClick={() => void cancelPendingPayment(p)}
-                        >
-                          {cancellingKey === `${p.invoice_id || ""}-${p.created_at || p.paid_at || p.invoice_number || ""}`
-                            ? "Membatalkan…"
-                            : "Batalkan pembayaran"}
-                        </button>
-                      ) : null}
-                    </article>
-                  ))
-                )}
-              </div>
+                      <button type="button" className="btn" onClick={() => setTopupOpen(true)}>
+                        Topup saldo
+                      </button>
+                    </div>
+                    <div className="portal-table-desktop">
+                      <Table columns={["Tanggal", "Keterangan", "Jenis", "Jumlah"]} rows={walletRows} />
+                    </div>
+                    <div className="portal-cards-mobile">
+                      {walletTxns.length === 0 ? (
+                        <p className="text-sm text-[var(--muted)]">Belum ada transaksi saldo.</p>
+                      ) : (
+                        walletTxns.map((t) => (
+                          <article key={t.id} className="portal-item-card">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm font-semibold">{(t.description || "").trim() || walletTxnLabel(t.type)}</p>
+                              <p
+                                className="text-base font-bold"
+                                style={{ color: t.amount < 0 ? "var(--danger)" : "var(--ok, #2b9a66)" }}
+                              >
+                                {formatWalletAmount(t.amount)}
+                              </p>
+                            </div>
+                            <p className="text-xs text-[var(--muted)]">
+                              {walletTxnLabel(t.type)} · {t.created_at ? new Date(t.created_at).toLocaleString("id-ID") : "—"}
+                            </p>
+                          </article>
+                        ))
+                      )}
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              ) : (
+                <>
+                  <div className="portal-table-desktop">
+                    <Table
+                      columns={multi ? ["Akun", "Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status", "Aksi"] : ["Tagihan", "Item", "Tanggal", "Jumlah", "Metode", "Status", "Aksi"]}
+                      rows={paymentRows}
+                    />
+                  </div>
+                  <div className="portal-cards-mobile">
+                    {payments.length === 0 ? (
+                      <p className="text-sm text-[var(--muted)]">Belum ada pembayaran.</p>
+                    ) : (
+                      payments.map((p, idx) => (
+                        <article key={`${p.invoice_number || ""}-${p.created_at || p.paid_at || idx}`} className="portal-item-card">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-semibold">{p.invoice_number || "Pembayaran"}</p>
+                            <p className="text-xs text-[var(--muted)]">{paymentStatusLabel(p.status)}</p>
+                          </div>
+                          {multi ? <p className="text-xs text-[var(--muted)]">{accountLabel(p.customer_code, p.customer_name)}</p> : null}
+                          {(p.items_summary || "").trim() ? (
+                            <p className="text-xs text-[var(--muted)]">{p.items_summary}</p>
+                          ) : null}
+                          <p className="text-base font-bold">{formatRp(p.amount)}</p>
+                          <p className="text-xs text-[var(--muted)]">
+                            {paymentMethodLabel(p.method, p.sandbox)}
+                            {" · "}
+                            {p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—"}
+                          </p>
+                          {isCancellablePayment(p.status) && (p.invoice_id || "").trim() ? (
+                            <button
+                              type="button"
+                              className="btn-ghost w-fit text-sm"
+                              disabled={cancellingKey === `${p.invoice_id || ""}-${p.created_at || p.paid_at || p.invoice_number || ""}`}
+                              onClick={() => void cancelPendingPayment(p)}
+                            >
+                              {cancellingKey === `${p.invoice_id || ""}-${p.created_at || p.paid_at || p.invoice_number || ""}`
+                                ? "Membatalkan…"
+                                : "Batalkan pembayaran"}
+                            </button>
+                          ) : null}
+                        </article>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
             </Section>
           ) : null}
 

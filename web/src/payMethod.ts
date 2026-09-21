@@ -318,6 +318,56 @@ export function consumePaymentReturnSuccess(): boolean {
   return consumePaymentReturn().returned;
 }
 
+const TOPUP_RETURN_STORAGE = "drp_pending_topup";
+
+/** Simpan external_id topup sebelum redirect ke PG, agar statusnya bisa
+ * diverifikasi saat pelanggan kembali ke portal (topup tidak punya invoice). */
+export function markPendingTopup(externalId: string) {
+  try {
+    const id = String(externalId || "").trim();
+    if (id) sessionStorage.setItem(TOPUP_RETURN_STORAGE, id);
+  } catch {
+    /* private mode */
+  }
+}
+
+/** Ambil sekali pakai external_id topup yang menunggu verifikasi setelah kembali dari PG. */
+export function consumePendingTopup(): string {
+  try {
+    const id = String(sessionStorage.getItem(TOPUP_RETURN_STORAGE) || "").trim();
+    if (id) sessionStorage.removeItem(TOPUP_RETURN_STORAGE);
+    return id;
+  } catch {
+    return "";
+  }
+}
+
+/** Setelah kembali dari PG untuk topup saldo: poll status sampai lunas, atau batal.
+ * resultCode Duitku "02" = dibatalkan → jangan tampilkan sukses. */
+export async function confirmTopupAfterReturn(opts: {
+  externalId: string;
+  resultCode?: string;
+  fetchIntent: (externalId: string) => Promise<{ status?: string } | null>;
+  attempts?: number;
+  delayMs?: number;
+}): Promise<boolean> {
+  if (String(opts.resultCode || "").trim() === "02") return false;
+  const id = String(opts.externalId || "").trim();
+  if (!id) return false;
+  const attempts = Math.max(1, opts.attempts ?? 6);
+  const delayMs = Math.max(200, opts.delayMs ?? 1500);
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await sleep(delayMs);
+    try {
+      const pi = await opts.fetchIntent(id);
+      if (pi && isPaidStatus(pi.status)) return true;
+    } catch {
+      /* belum lunas / belum tersedia */
+    }
+  }
+  return false;
+}
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }

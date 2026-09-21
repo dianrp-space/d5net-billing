@@ -87,6 +87,14 @@ export function alertPaymentSuccess() {
   });
 }
 
+export function alertTopupSuccess() {
+  return swalAlert({
+    title: "Topup saldo berhasil",
+    description: "Saldo Anda sudah bertambah. Tagihan menunggak otomatis dibayar dari saldo bila cukup.",
+    icon: "success",
+  });
+}
+
 export function toastSuccess(title: string) {
   return Swal.fire({
     toast: true,
