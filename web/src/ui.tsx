@@ -126,6 +126,43 @@ export function formatRp(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 }
 
+/** Format byte ke satuan manusiawi (KB/MB/GB) ala Indonesia, mis. 1500 → "1,46 KB". */
+export function formatBytesID(n: number) {
+  const v = Math.max(0, Number(n) || 0);
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let x = v;
+  let u = 0;
+  while (x >= 1024 && u < units.length - 1) {
+    x /= 1024;
+    u += 1;
+  }
+  const digits = u === 0 ? 0 : x >= 100 ? 0 : x >= 10 ? 1 : 2;
+  const num = new Intl.NumberFormat("id-ID", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(x);
+  return `${num} ${units[u]}`;
+}
+
+/** Format bit-per-second ke satuan manusiawi, mis. 1500000 → "1,5 Mbps". */
+export function formatBpsID(n: number) {
+  const v = Math.max(0, Number(n) || 0);
+  if (v <= 0) return "0 bps";
+  const units = ["bps", "Kbps", "Mbps", "Gbps"];
+  let x = v;
+  let u = 0;
+  while (x >= 1000 && u < units.length - 1) {
+    x /= 1000;
+    u += 1;
+  }
+  const digits = x >= 100 ? 0 : x >= 10 ? 1 : 2;
+  const num = new Intl.NumberFormat("id-ID", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(x);
+  return `${num} ${units[u]}`;
+}
+
 const INVOICE_STATUS_ID: Record<string, string> = {
   paid: "Sudah bayar",
   issued: "Belum bayar",

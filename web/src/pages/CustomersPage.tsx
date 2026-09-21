@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
-import { IconBanknote, IconDownload, IconImage, IconLock, IconPencil, IconTrash, IconUnplug, IconUpload } from "../icons";
+import { IconBanknote, IconDownload, IconImage, IconLock, IconPencil, IconRadar, IconTrash, IconUnplug, IconUpload } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
-import { Button, FormDialog, IconButton, Section, Table, formatRp } from "../ui";
+import { Button, FormDialog, IconButton, Section, Table, formatBpsID, formatRp } from "../ui";
 import { AttributionSelects, CommissionBasisSelect } from "../AdminExtra";
 
 const IDENTITY_TYPES: { id: string; label: string }[] = [
@@ -105,6 +105,27 @@ export function CustomersPage({
   };
   const [walletCustomer, setWalletCustomer] = useState<CustomerRow | null>(null);
   const [topupAmount, setTopupAmount] = useState("");
+  type LiveRow = {
+    subscription_id: string;
+    username: string;
+    router_id: string;
+    router_name?: string;
+    status: string;
+    online: boolean;
+    ip_address?: string;
+    uptime?: string;
+    rx_bps: number;
+    tx_bps: number;
+    error?: string;
+  };
+  const [liveCustomer, setLiveCustomer] = useState<CustomerRow | null>(null);
+  const liveQ = useQuery({
+    queryKey: ["live-traffic", liveCustomer?.id],
+    queryFn: () => api<{ data: LiveRow[] }>(`/api/customers/${liveCustomer!.id}/live-traffic`),
+    enabled: Boolean(liveCustomer?.id),
+    refetchInterval: 3000,
+    retry: false,
+  });
   const walletQ = useQuery({
     queryKey: ["customer-wallet", walletCustomer?.id],
     queryFn: () => api<CustomerWallet>(`/api/customers/${walletCustomer!.id}/wallet`),
@@ -637,6 +658,9 @@ export function CustomersPage({
                 <IconBanknote />
               </IconButton>
             ) : null}
+            <IconButton label="Live traffic" onClick={() => setLiveCustomer(c)}>
+              <IconRadar />
+            </IconButton>
             <IconButton label="Dokumentasi / galeri" onClick={() => onOpenGallery(c.id)}>
               <IconImage />
             </IconButton>
@@ -908,6 +932,56 @@ export function CustomersPage({
               ])}
             />
           </div>
+        </div>
+      </FormDialog>
+
+      <FormDialog
+        open={Boolean(liveCustomer)}
+        title={`Live traffic · ${liveCustomer?.full_name || liveCustomer?.customer_code || ""}`}
+        onClose={() => setLiveCustomer(null)}
+      >
+        <div className="grid gap-3">
+          {liveQ.isLoading ? (
+            <p className="text-sm text-[var(--muted)]">Membaca router…</p>
+          ) : liveQ.isError ? (
+            <p className="text-sm text-[var(--danger)]">Gagal membaca traffic. Coba lagi.</p>
+          ) : (liveQ.data?.data ?? []).length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">Tidak ada langganan PPPoE aktif pada pelanggan ini.</p>
+          ) : (
+            (liveQ.data?.data ?? []).map((r) => (
+              <div key={r.subscription_id} className="rounded-xl border border-[var(--border)] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">{r.username}</p>
+                  <span
+                    className="text-xs font-medium"
+                    style={{ color: r.online ? "var(--ok, #2b9a66)" : "var(--muted)" }}
+                  >
+                    {r.online ? "● Online" : "○ Offline"}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  {r.router_name || "Router"} · {r.status}
+                  {r.ip_address ? ` · ${r.ip_address}` : ""}
+                  {r.uptime ? ` · uptime ${r.uptime}` : ""}
+                </p>
+                {r.error ? (
+                  <p className="mt-1 text-xs text-[var(--danger)]">{r.error}</p>
+                ) : r.online ? (
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div className="rounded-lg bg-[var(--panel-muted,rgba(0,0,0,0.03))] p-2">
+                      <p className="text-[11px] text-[var(--muted)]">↓ Download</p>
+                      <p className="text-base font-bold tabular-nums">{formatBpsID(r.rx_bps)}</p>
+                    </div>
+                    <div className="rounded-lg bg-[var(--panel-muted,rgba(0,0,0,0.03))] p-2">
+                      <p className="text-[11px] text-[var(--muted)]">↑ Upload</p>
+                      <p className="text-base font-bold tabular-nums">{formatBpsID(r.tx_bps)}</p>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
+          <p className="text-[11px] text-[var(--muted)]">Diperbarui otomatis tiap 3 detik selama dialog terbuka.</p>
         </div>
       </FormDialog>
     </Section>

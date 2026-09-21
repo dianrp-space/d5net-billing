@@ -17,7 +17,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { formatRp, IconButton, invoiceStatusLabel, paymentStatusLabel, Section, SecretInput, subscriptionStatusLabel, Table, ticketStatusHint, ticketStatusLabel, ticketStatusTone } from "./ui";
+import { formatBytesID, formatRp, IconButton, invoiceStatusLabel, paymentStatusLabel, Section, SecretInput, subscriptionStatusLabel, Table, ticketStatusHint, ticketStatusLabel, ticketStatusTone } from "./ui";
 import { IconBan, IconBanknote, IconChart, IconDownload, IconGauge, IconLogout, IconShield, IconTicket, IconUser } from "./icons";
 import { PortalPayHost } from "./PayMethodDialog";
 import {
@@ -499,6 +499,32 @@ export function ClientHome({
   const [topupOpen, setTopupOpen] = useState(false);
   const [payingWallet, setPayingWallet] = useState("");
   const [payTab, setPayTab] = useState<"payments" | "wallet">("payments");
+  type PortalUsage = {
+    month: string;
+    rx_bytes: number;
+    tx_bytes: number;
+    total_bytes: number;
+    rows: { customer_id: string; customer_code?: string; month: string; rx_bytes: number; tx_bytes: number; total_bytes: number }[];
+  };
+  const usageQ = useQuery({
+    queryKey: ["portal-usage", data.tenant_slug],
+    queryFn: () => api<PortalUsage>("/api/portal/usage", { headers: portalHeaders }),
+    enabled: Boolean(data.portal_token),
+    retry: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: 60000,
+  });
+  const usageMonthLabel = (() => {
+    const m = `${usageQ.data?.month || ""}-01`;
+    const d = new Date(`${m}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return "";
+    try {
+      const s = d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    } catch {
+      return usageQ.data?.month || "";
+    }
+  })();
 
   useEffect(() => {
     if (paymentReturnHandled.current) return;
@@ -1585,6 +1611,35 @@ export function ClientHome({
             </div>
           ) : null}
 
+          {page === "account" ? (
+            <Section title={`Pemakaian Bulan ${usageMonthLabel}`}>
+              {usageQ.isLoading ? (
+                <p className="text-sm text-[var(--muted)]">Memuat pemakaian…</p>
+              ) : usageQ.isError ? (
+                <p className="text-sm text-[var(--muted)]">Pemakaian belum tersedia.</p>
+              ) : (
+                <div className="grid gap-3">
+                  <div>
+                    <p className="text-sm text-[var(--muted)]">Total pemakaian</p>
+                    <p className="text-2xl font-bold">{formatBytesID(usageQ.data?.total_bytes ?? 0)}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      ↓ {formatBytesID(usageQ.data?.rx_bytes ?? 0)} · ↑ {formatBytesID(usageQ.data?.tx_bytes ?? 0)}
+                    </p>
+                  </div>
+                  {multi && (usageQ.data?.rows ?? []).length > 0 ? (
+                    <ul className="grid gap-1 text-xs">
+                      {(usageQ.data?.rows ?? []).map((r) => (
+                        <li key={r.customer_id} className="flex items-center justify-between gap-2">
+                          <span className="text-[var(--muted)]">{r.customer_code || "Akun"}</span>
+                          <span className="font-semibold">{formatBytesID(r.total_bytes)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              )}
+            </Section>
+          ) : null}
           {page === "account" ? (
             <Section title="Foto profil">
               {photoTarget ? (

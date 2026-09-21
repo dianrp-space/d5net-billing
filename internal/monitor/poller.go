@@ -164,5 +164,8 @@ func (p *Poller) PollRouter(ctx context.Context, tenantID xid.ID, routerID xid.I
 	now := time.Now()
 	_ = p.store.UpdateRouterStatus(ctx, tenantID, routerID, &now, nil)
 	slog.Debug("polled router", "router", r.Name, "sessions", activeCount, "cpu", cpuLoad, "mem", memUsed)
+	if err == nil {
+		p.CollectTraffic(ctx, tenantID, routerID)
+	}
 	return err
 }

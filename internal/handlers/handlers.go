@@ -83,6 +83,7 @@ func RegisterAll(api huma.API, d *Deps) {
 	registerAlerts(api, d)
 	registerPortal(api, d)
 	registerWallet(api, d)
+	registerTraffic(api, d)
 	registerWebhooks(api, d)
 	registerVouchers(api, d)
 	registerReports(api, d)

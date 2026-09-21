@@ -1,7 +1,6 @@
 package routeros
 
 import (
-	"strings"
 	"testing"
 )
 
