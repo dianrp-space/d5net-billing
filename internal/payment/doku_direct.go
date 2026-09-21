@@ -31,6 +31,7 @@ const (
 	DokuTokenPath      = "/authorization/v1/access-token/b2b"
 	DokuQRGeneratePath = "/snap-adapter/b2b/v1.0/qr/qr-mpm-generate"
 	DokuQRQueryPath    = "/snap-adapter/b2b/v1.0/qr/qr-mpm-query"
+	DokuQRExpirePath   = "/snap-adapter/b2b/v1.0/qr/qr-expire"
 	DokuQRServiceCode  = "47"
 	DokuQRChannelID    = "H2H"
 )
@@ -356,6 +357,33 @@ func (p *DokuProvider) QueryQR(ctx context.Context, dokuRef, partnerRef string) 
 		}
 		return "pending", amt, nil
 	}
+}
+
+// ExpireQR membatalkan QRIS via Direct API (qr-expire) agar kode QR tidak
+// bisa dibayar lagi. Dipakai saat pelanggan/admin membatalkan pembayaran.
+func (p *DokuProvider) ExpireQR(ctx context.Context, dokuRef, partnerRef string) error {
+	dokuRef = strings.TrimSpace(dokuRef)
+	partnerRef = strings.TrimSpace(partnerRef)
+	if dokuRef == "" || partnerRef == "" {
+		return fmt.Errorf("reference QRIS kosong")
+	}
+	if strings.TrimSpace(p.MerchantID) == "" {
+		return fmt.Errorf("merchant ID DOKU belum diisi di Integrasi")
+	}
+	m, err := dokuSnapDo(ctx, p, DokuQRExpirePath, map[string]any{
+		"partnerReferenceNo": partnerRef,
+		"referenceNo":        dokuRef,
+		"merchantId":         strings.TrimSpace(p.MerchantID),
+		"reason":             "Cancelled by merchant",
+	})
+	if err != nil {
+		return err
+	}
+	if rc := strings.TrimSpace(firstString(m, "responseCode")); !strings.HasPrefix(rc, "200") {
+		msg := strings.TrimSpace(firstString(m, "responseMessage"))
+		return fmt.Errorf("DOKU %s: %s", firstNonEmpty(rc, "expire"), firstNonEmpty(msg, "gagal membatalkan QRIS"))
+	}
+	return nil
 }
 
 // dokuVerifySnapWebhook handles an incoming SNAP QR notification.

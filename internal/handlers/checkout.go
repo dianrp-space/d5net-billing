@@ -441,6 +441,11 @@ func cancelInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 	if st == "cancelled" || st == "canceled" || st == "expired" {
 		return pi, nil
 	}
+	// DOKU QRIS Direct: matikan QR di DOKU via qr-expire agar tidak bisa
+	// dibayar lagi setelah dibatalkan dari aplikasi (portal maupun admin).
+	if pi.Provider == payment.ProviderDoku && metaString(pi.Metadata, "doku_kind") == payment.DokuKindQR {
+		return cancelDokuQRIntent(ctx, d, tid, pi)
+	}
 	prov, err := resolvePaymentProvider(ctx, d, tid, pi.Provider)
 	if err != nil {
 		return nil, err
@@ -462,6 +467,35 @@ func cancelInvoicePaymentIntent(ctx context.Context, d *Deps, tid xid.ID, inv *s
 			}
 		}
 		return nil, httpx.BadRequest(cerr.Error())
+	}
+	_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, "cancelled")
+	pi.Status = "cancelled"
+	return pi, nil
+}
+
+// cancelDokuQRIntent membatalkan intent QRIS Direct: expire QR di DOKU dulu
+// (env mengikuti intent, sandbox/prod), baru tandai cancelled di DB. Gagal
+// expire = gagal batal (QR masih bisa dibayar) agar user bisa coba lagi.
+func cancelDokuQRIntent(ctx context.Context, d *Deps, tid xid.ID, pi *store.PaymentIntent) (*store.PaymentIntent, error) {
+	dokuRef := metaString(pi.Metadata, "reference")
+	if dokuRef == "" {
+		dokuRef = metaString(pi.Metadata, "transaction_id")
+	}
+	if pi.ExternalID == "" || dokuRef == "" {
+		return nil, httpx.BadRequest("reference QRIS tidak lengkap")
+	}
+	prov, err := resolvePaymentProviderForEnv(ctx, d, tid, pi.Provider, intentSandbox(pi.Metadata))
+	if err != nil {
+		return nil, err
+	}
+	expirer, ok := prov.(interface {
+		ExpireQR(ctx context.Context, dokuRef, partnerRef string) error
+	})
+	if !ok {
+		return nil, httpx.Internal(errors.New("provider tidak mendukung pembatalan QRIS"))
+	}
+	if err := expirer.ExpireQR(ctx, dokuRef, pi.ExternalID); err != nil {
+		return nil, httpx.BadRequest(err.Error())
 	}
 	_ = d.Store.UpdatePaymentIntentStatus(ctx, pi.ExternalID, "cancelled")
 	pi.Status = "cancelled"

@@ -249,6 +249,53 @@ func TestDokuGenerateQR(t *testing.T) {
 	}
 }
 
+func TestDokuExpireQR(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/authorization/v1/access-token/b2b", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"accessToken":"tok-exp","expiresIn":900}`))
+	})
+	mux.HandleFunc("/snap-adapter/b2b/v1.0/qr/qr-expire", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"responseCode":"2004900","responseMessage":"Success","referenceNo":"DOKU-QR-1","partnerReferenceNo":"INV-9"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := NewDokuProvider("MCH-QR-4", "s3cr3t", testRSAPrivateKey(t), "MALL-1", "T001", "28111", true, 30)
+	p.baseOverride = srv.URL
+	if err := p.ExpireQR(t.Context(), "DOKU-QR-1", "INV-9"); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["partnerReferenceNo"] != "INV-9" || gotBody["referenceNo"] != "DOKU-QR-1" {
+		t.Fatalf("body = %v", gotBody)
+	}
+	if gotBody["merchantId"] != "MALL-1" {
+		t.Fatalf("merchantId = %v", gotBody["merchantId"])
+	}
+	if err := p.ExpireQR(t.Context(), "", "INV-9"); err == nil {
+		t.Fatal("expected empty reference error")
+	}
+}
+
+func TestDokuExpireQRFailsOnErrorCode(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/authorization/v1/access-token/b2b", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"accessToken":"tok-exp","expiresIn":900}`))
+	})
+	mux.HandleFunc("/snap-adapter/b2b/v1.0/qr/qr-expire", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"responseCode":"4044912","responseMessage":"QR not found"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := NewDokuProvider("MCH-QR-5", "s3cr3t", testRSAPrivateKey(t), "MALL-1", "T001", "28111", true, 30)
+	p.baseOverride = srv.URL
+	if err := p.ExpireQR(t.Context(), "DOKU-QR-1", "INV-9"); err == nil {
+		t.Fatal("expected expire error")
+	}
+}
+
 func TestDokuVerifySnapWebhook(t *testing.T) {
 	var queried bool
 	mux := http.NewServeMux()
