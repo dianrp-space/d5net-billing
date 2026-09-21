@@ -128,6 +128,8 @@ export function GeneralSettingsPage() {
           primary_color?: string;
           wallet_enabled?: boolean;
           wallet_min_topup?: number;
+          admin_tagline?: string;
+          portal_tagline?: string;
           about?: string;
           product_description?: string;
           support_email?: string;
@@ -146,6 +148,8 @@ export function GeneralSettingsPage() {
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY);
   const [walletEnabled, setWalletEnabled] = useState(false);
   const [walletMinTopup, setWalletMinTopup] = useState(10000);
+  const [adminTagline, setAdminTagline] = useState("ISP Billing");
+  const [portalTagline, setPortalTagline] = useState("Portal pelanggan");
   const [about, setAbout] = useState("");
   const [productDescription, setProductDescription] = useState("");
   const [supportEmail, setSupportEmail] = useState("");
@@ -165,6 +169,8 @@ export function GeneralSettingsPage() {
     setPrimaryColor(parseHexColor(q.data.primary_color) || DEFAULT_PRIMARY);
     setWalletEnabled(Boolean(q.data.wallet_enabled));
     setWalletMinTopup(Number(q.data.wallet_min_topup) || 10000);
+    setAdminTagline(q.data.admin_tagline?.trim() || "ISP Billing");
+    setPortalTagline(q.data.portal_tagline?.trim() || "Portal pelanggan");
     setAbout(q.data.about || "");
     setProductDescription(q.data.product_description || "");
     setSupportEmail(q.data.support_email || "");
@@ -184,6 +190,8 @@ export function GeneralSettingsPage() {
       primary_color: parseHexColor(primaryColor) === DEFAULT_PRIMARY ? "" : primaryColor,
       wallet_enabled: walletEnabled,
       wallet_min_topup: Math.max(1000, Math.floor(Number(walletMinTopup) || 10000)),
+      admin_tagline: adminTagline.trim(),
+      portal_tagline: portalTagline.trim(),
       about: about.trim(),
       product_description: productDescription.trim(),
       support_email: supportEmail.trim(),
@@ -280,6 +288,32 @@ export function GeneralSettingsPage() {
                 required
               />
               <span className="text-xs text-[var(--muted)]">Ditampilkan di sidebar, login, dan dokumen.</span>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Label sidebar admin</span>
+              <input
+                className="input"
+                value={adminTagline}
+                onChange={(e) => setAdminTagline(e.target.value)}
+                placeholder="ISP Billing"
+                maxLength={60}
+              />
+              <span className="text-xs text-[var(--muted)]">Teks kecil di atas nama provider pada sidebar admin.</span>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Label sidebar portal</span>
+              <input
+                className="input"
+                value={portalTagline}
+                onChange={(e) => setPortalTagline(e.target.value)}
+                placeholder="Portal pelanggan"
+                maxLength={60}
+              />
+              <span className="text-xs text-[var(--muted)]">
+                Teks kecil di atas nama provider pada sidebar portal pelanggan.
+              </span>
             </label>
 
             <label className="grid gap-1 text-sm">

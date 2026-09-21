@@ -38,6 +38,8 @@ func registerPublicBranding(api huma.API, d *Deps) {
 			LogoURL      *string `json:"logo_url,omitempty"`
 			FaviconURL   *string `json:"favicon_url,omitempty"`
 			PrimaryColor string  `json:"primary_color,omitempty"`
+			AdminTagline string  `json:"admin_tagline,omitempty"`
+			PortalTagline string `json:"portal_tagline,omitempty"`
 			Chatwoot     *struct {
 				BaseURL      string `json:"base_url"`
 				WebsiteToken string `json:"website_token"`
@@ -60,6 +62,8 @@ func registerPublicBranding(api huma.API, d *Deps) {
 				LogoURL      *string `json:"logo_url,omitempty"`
 				FaviconURL   *string `json:"favicon_url,omitempty"`
 				PrimaryColor string  `json:"primary_color,omitempty"`
+				AdminTagline string  `json:"admin_tagline,omitempty"`
+				PortalTagline string `json:"portal_tagline,omitempty"`
 				Chatwoot     *struct {
 					BaseURL      string `json:"base_url"`
 					WebsiteToken string `json:"website_token"`
@@ -74,6 +78,8 @@ func registerPublicBranding(api huma.API, d *Deps) {
 		out.Body.LogoURL = view.Effective.LogoURL
 		out.Body.FaviconURL = view.Effective.FaviconURL
 		out.Body.PrimaryColor = gen.PrimaryColor
+		out.Body.AdminTagline = gen.AdminTagline
+		out.Body.PortalTagline = gen.PortalTagline
 		if msg, lerr := loadMessagingIntegration(ctx, d, ten.ID); lerr == nil && msg.ChatwootEnabled {
 			if base := strings.TrimRight(strings.TrimSpace(msg.ChatwootBaseURL), "/"); base != "" &&
 				strings.TrimSpace(msg.ChatwootWebsiteToken) != "" {

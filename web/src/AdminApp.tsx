@@ -277,6 +277,7 @@ export function AdminApp({
         logo_url?: string | null;
         favicon_url?: string | null;
         name?: string;
+        admin_tagline?: string;
       }>("/api/public/branding"),
     retry: false,
   });
@@ -318,6 +319,7 @@ export function AdminApp({
   }, [meQ.data, page, onNavigate]);
 
   const appName = (branding.data?.name || branding.data?.app_name || "Delima Net").trim();
+  const adminTagline = (branding.data?.admin_tagline || "ISP Billing").trim() || "ISP Billing";
   const logoUrl = branding.data?.logo_url;
   const faviconUrl = branding.data?.favicon_url;
   const [sidebarOpen, setSidebarOpenState] = useState(() => getSidebarOpen());
@@ -382,7 +384,7 @@ export function AdminApp({
         <a className="app-sidebar-brand" href="/" title="Ke halaman utama" aria-label="Ke halaman utama">
           <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="app-sidebar-logo object-contain" />
           <div className="app-sidebar-brand-text">
-            <p className="text-[10px] font-medium text-[var(--stone)]">ISP Billing</p>
+            <p className="text-[10px] font-medium text-[var(--stone)]">{adminTagline}</p>
             <h1 className="text-sm font-bold">{appName}</h1>
           </div>
         </a>

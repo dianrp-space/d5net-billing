@@ -300,11 +300,13 @@ export function ClientHome({
         name?: string;
         logo_url?: string | null;
         favicon_url?: string | null;
+        portal_tagline?: string;
       }>("/api/public/branding"),
     retry: false,
   });
 
   const appName = (branding.data?.name || branding.data?.app_name || data.tenant_name || data.tenant_slug || "Portal").trim();
+  const portalTagline = (branding.data?.portal_tagline || "Portal pelanggan").trim() || "Portal pelanggan";
   const logoUrl = branding.data?.logo_url;
   const faviconUrl = branding.data?.favicon_url;
 
@@ -927,7 +929,7 @@ export function ClientHome({
         <a className="app-sidebar-brand" href="/" title="Ke halaman utama" aria-label="Ke halaman utama">
           <img src={logoUrl || DEFAULT_BRAND_LOGO} alt="" className="app-sidebar-logo object-contain" />
           <div className="app-sidebar-brand-text">
-            <p className="text-[10px] font-medium text-[var(--stone)]">Portal pelanggan</p>
+            <p className="text-[10px] font-medium text-[var(--stone)]">{portalTagline}</p>
             <h1 className="text-sm font-bold">{appName}</h1>
           </div>
         </a>

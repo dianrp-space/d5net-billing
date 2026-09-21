@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeHexColor(t *testing.T) {
 	if got := NormalizeHexColor(""); got != "" {
@@ -94,5 +97,26 @@ func TestNormalizeGeneralSettingsWallet(t *testing.T) {
 	}
 	if !NormalizeGeneralSettings(GeneralSettings{WalletEnabled: true}).WalletEnabled {
 		t.Fatal("wallet_enabled harus dipertahankan")
+	}
+}
+
+func TestNormalizeGeneralSettingsTaglines(t *testing.T) {
+	if DefaultAdminTagline != "ISP Billing" {
+		t.Fatalf("default admin tagline = %q", DefaultAdminTagline)
+	}
+	if DefaultPortalTagline != "Portal pelanggan" {
+		t.Fatalf("default portal tagline = %q", DefaultPortalTagline)
+	}
+	got := NormalizeGeneralSettings(GeneralSettings{})
+	if got.AdminTagline != DefaultAdminTagline || got.PortalTagline != DefaultPortalTagline {
+		t.Fatalf("tagline kosong harus jatuh ke default, got %+v", got)
+	}
+	got = NormalizeGeneralSettings(GeneralSettings{AdminTagline: "  Panel  ", PortalTagline: "Area Pelanggan"})
+	if got.AdminTagline != "Panel" || got.PortalTagline != "Area Pelanggan" {
+		t.Fatalf("tagline harus di-trim & dipertahankan, got %+v", got)
+	}
+	long := strings.Repeat("x", 100)
+	if got := NormalizeGeneralSettings(GeneralSettings{AdminTagline: long}).AdminTagline; len([]rune(got)) != 60 {
+		t.Fatalf("tagline harus dipotong 60 karakter, got %d", len([]rune(got)))
 	}
 }

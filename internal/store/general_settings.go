@@ -33,6 +33,11 @@ type GeneralSettings struct {
 	WalletEnabled bool `json:"wallet_enabled"`
 	// WalletMinTopup adalah minimum nominal topup saldo (Rp).
 	WalletMinTopup int64 `json:"wallet_min_topup"`
+	// AdminTagline adalah teks kecil di sidebar admin (default "ISP Billing").
+	AdminTagline string `json:"admin_tagline,omitempty"`
+	// PortalTagline adalah teks kecil di sidebar portal pelanggan
+	// (default "Portal pelanggan").
+	PortalTagline string `json:"portal_tagline,omitempty"`
 	// Profil publik situs (dipakai halaman landing & onboarding payment gateway).
 	About              string `json:"about,omitempty"`
 	ProductDescription string `json:"product_description,omitempty"`
@@ -130,7 +135,30 @@ func NormalizeGeneralSettings(g GeneralSettings) GeneralSettings {
 	g.SupportEmail = strings.TrimSpace(g.SupportEmail)
 	g.SupportPhone = strings.TrimSpace(g.SupportPhone)
 	g.SupportAddress = strings.TrimSpace(g.SupportAddress)
+	g.AdminTagline = normalizeTagline(g.AdminTagline, DefaultAdminTagline)
+	g.PortalTagline = normalizeTagline(g.PortalTagline, DefaultPortalTagline)
 	return g
+}
+
+// DefaultAdminTagline/ DefaultPortalTagline adalah teks kecil bawaan di
+// sidebar admin & portal pelanggan (bisa diubah di Pengaturan → Umum).
+const (
+	DefaultAdminTagline  = "ISP Billing"
+	DefaultPortalTagline = "Portal pelanggan"
+	maxTaglineRunes      = 60
+)
+
+// normalizeTagline merapikan label sidebar: trim, potong 60 karakter, dan
+// jatuh ke default bila kosong.
+func normalizeTagline(s, def string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return def
+	}
+	if r := []rune(s); len(r) > maxTaglineRunes {
+		return strings.TrimSpace(string(r[:maxTaglineRunes]))
+	}
+	return s
 }
 
 func (s *Store) GetGeneralSettings(ctx context.Context, tenantID xid.ID) (GeneralSettings, error) {

@@ -65,6 +65,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			PrimaryColor         string  `json:"primary_color"`
 			WalletEnabled        bool    `json:"wallet_enabled"`
 			WalletMinTopup       int64   `json:"wallet_min_topup"`
+			AdminTagline         string  `json:"admin_tagline"`
+			PortalTagline        string  `json:"portal_tagline"`
 			About                string  `json:"about"`
 			ProductDescription   string  `json:"product_description"`
 			SupportEmail         string  `json:"support_email"`
@@ -101,6 +103,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				PrimaryColor         string  `json:"primary_color"`
 				WalletEnabled        bool    `json:"wallet_enabled"`
 				WalletMinTopup       int64   `json:"wallet_min_topup"`
+				AdminTagline         string  `json:"admin_tagline"`
+				PortalTagline        string  `json:"portal_tagline"`
 				About                string  `json:"about"`
 				ProductDescription   string  `json:"product_description"`
 				SupportEmail         string  `json:"support_email"`
@@ -119,6 +123,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out.Body.PrimaryColor = gen.PrimaryColor
 		out.Body.WalletEnabled = gen.WalletEnabled
 		out.Body.WalletMinTopup = gen.WalletMinTopup
+		out.Body.AdminTagline = gen.AdminTagline
+		out.Body.PortalTagline = gen.PortalTagline
 		out.Body.About = gen.About
 		out.Body.ProductDescription = gen.ProductDescription
 		out.Body.SupportEmail = gen.SupportEmail
@@ -143,6 +149,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			PrimaryColor         string  `json:"primary_color"`
 			WalletEnabled        bool    `json:"wallet_enabled"`
 			WalletMinTopup       int64   `json:"wallet_min_topup"`
+			AdminTagline         string  `json:"admin_tagline"`
+			PortalTagline        string  `json:"portal_tagline"`
 			About                string  `json:"about"`
 			ProductDescription   string  `json:"product_description"`
 			SupportEmail         string  `json:"support_email"`
@@ -172,6 +180,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			PrimaryColor         string  `json:"primary_color"`
 			WalletEnabled        bool    `json:"wallet_enabled"`
 			WalletMinTopup       int64   `json:"wallet_min_topup"`
+			AdminTagline         string  `json:"admin_tagline"`
+			PortalTagline        string  `json:"portal_tagline"`
 			About                string  `json:"about"`
 			ProductDescription   string  `json:"product_description"`
 			SupportEmail         string  `json:"support_email"`
@@ -214,6 +224,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 			PrimaryColor:         input.Body.PrimaryColor,
 			WalletEnabled:        input.Body.WalletEnabled,
 			WalletMinTopup:       input.Body.WalletMinTopup,
+			AdminTagline:         input.Body.AdminTagline,
+			PortalTagline:        input.Body.PortalTagline,
 			About:                input.Body.About,
 			ProductDescription:   input.Body.ProductDescription,
 			SupportEmail:         input.Body.SupportEmail,
@@ -244,6 +256,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 				PrimaryColor         string  `json:"primary_color"`
 				WalletEnabled        bool    `json:"wallet_enabled"`
 				WalletMinTopup       int64   `json:"wallet_min_topup"`
+				AdminTagline         string  `json:"admin_tagline"`
+				PortalTagline        string  `json:"portal_tagline"`
 				About                string  `json:"about"`
 				ProductDescription   string  `json:"product_description"`
 				SupportEmail         string  `json:"support_email"`
@@ -262,6 +276,8 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 		out.Body.PrimaryColor = gen.PrimaryColor
 		out.Body.WalletEnabled = gen.WalletEnabled
 		out.Body.WalletMinTopup = gen.WalletMinTopup
+		out.Body.AdminTagline = gen.AdminTagline
+		out.Body.PortalTagline = gen.PortalTagline
 		out.Body.About = gen.About
 		out.Body.ProductDescription = gen.ProductDescription
 		out.Body.SupportEmail = gen.SupportEmail
