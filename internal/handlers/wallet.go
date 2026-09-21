@@ -40,7 +40,7 @@ func autoSettleCustomerWallet(ctx context.Context, d *Deps, tid, customerID xid.
 }
 
 // checkoutWalletTopup membuat payment intent topup saldo (tanpa invoice).
-func checkoutWalletTopup(ctx context.Context, d *Deps, tid, customerID xid.ID, amount int64, providerName, returnURL, origin string) (*store.PaymentIntent, error) {
+func checkoutWalletTopup(ctx context.Context, d *Deps, tid, customerID xid.ID, amount int64, providerName, channel, returnURL, origin string) (*store.PaymentIntent, error) {
 	if amount <= 0 {
 		return nil, httpx.BadRequest("nominal topup tidak valid")
 	}
@@ -68,6 +68,7 @@ func checkoutWalletTopup(ctx context.Context, d *Deps, tid, customerID xid.ID, a
 		CustomerID:      customerID,
 		Amount:          amount,
 		ReturnURL:       returnURL,
+		Channel:         strings.ToLower(strings.TrimSpace(channel)),
 		ProductDetails:  "Topup saldo",
 		CustomerName:    strings.TrimSpace(cust.FullName),
 		Phone:           strings.TrimSpace(cust.Phone),
@@ -236,6 +237,7 @@ func registerWallet(api huma.API, d *Deps) {
 		Body            *struct {
 			Amount    int64  `json:"amount"`
 			Provider  string `json:"provider,omitempty"`
+			Channel   string `json:"channel,omitempty"`
 			ReturnURL string `json:"return_url,omitempty"`
 		}
 	}) (*struct{ Body store.PaymentIntent }, error) {
@@ -252,10 +254,12 @@ func registerWallet(api huma.API, d *Deps) {
 		}
 		var amount int64
 		providerName := ""
+		channel := ""
 		returnURL := ""
 		if input.Body != nil {
 			amount = input.Body.Amount
 			providerName = strings.TrimSpace(input.Body.Provider)
+			channel = strings.TrimSpace(input.Body.Channel)
 			returnURL = strings.TrimSpace(input.Body.ReturnURL)
 		}
 		if providerName == "" {
@@ -269,7 +273,7 @@ func registerWallet(api huma.API, d *Deps) {
 		if returnURL == "" {
 			returnURL = origin
 		}
-		pi, err := checkoutWalletTopup(ctx, d, ten.ID, owner.ID, amount, providerName, returnURL, origin)
+		pi, err := checkoutWalletTopup(ctx, d, ten.ID, owner.ID, amount, providerName, channel, returnURL, origin)
 		if err != nil {
 			return nil, err
 		}

@@ -28,6 +28,8 @@ export type PayOption = {
   description: string;
   kind: string;
   sandbox?: boolean;
+  /** DOKU Direct API channel id (mis. "qris"); kosong = Checkout/redirect. */
+  channel?: string;
   fee_mode?: string;
   fee_flat?: number;
   fee_percent?: number;
@@ -38,6 +40,10 @@ export type PayMethodDef = {
   id: PayMethodId;
   label: string;
   description: string;
+  /** Provider backend (mis. "doku"); kosong = turunan dari id. */
+  provider?: string;
+  /** Channel Direct API (mis. "qris"); kosong = Checkout/redirect. */
+  channel?: string;
   feeMode?: string;
   feeFlat?: number;
   feePercent?: number;
@@ -104,12 +110,17 @@ export function payOptionsToMethods(options: PayOption[] | null | undefined): Pa
   if (!options?.length) return [];
   const out: PayMethodDef[] = [];
   for (const opt of options) {
-    const id = providerToPayMethod(opt.provider);
+    const channel = String(opt.channel || "").trim().toLowerCase();
+    const kind = String(opt.kind || "").trim().toLowerCase();
+    // Opsi QR Direct (channel qris) tampil sebagai metode QRIS tersendiri.
+    const id = channel === "qris" || kind === "qr" ? PAY_METHOD_QRIS : providerToPayMethod(opt.provider);
     if (!id) continue;
     out.push({
       id,
       label: opt.label || paymentMethodLabel(id),
       description: opt.description || "",
+      provider: String(opt.provider || "").trim() || undefined,
+      channel: channel || undefined,
       feeMode: opt.fee_mode,
       feeFlat: opt.fee_flat,
       feePercent: opt.fee_percent,
@@ -117,6 +128,17 @@ export function payOptionsToMethods(options: PayOption[] | null | undefined): Pa
     });
   }
   return out;
+}
+
+/** Provider + channel backend untuk satu metode yang dipilih di portal. */
+export function payMethodRequest(method: Pick<PayMethodDef, "id" | "provider" | "channel">): {
+  provider: string;
+  channel?: string;
+} {
+  const channel = String(method.channel || "").trim().toLowerCase();
+  const provider = String(method.provider || "").trim() || payMethodToProvider(method.id);
+  if (channel) return { provider, channel };
+  return { provider };
 }
 
 /** True when Duitku sandbox is the active PG — testers can mark paid without the Duitku dashboard. */

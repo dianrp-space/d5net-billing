@@ -88,9 +88,12 @@ type dokuIntegrationStored struct {
 	TerminalID       string `json:"terminal_id"`
 	PostalCode       string `json:"postal_code"`
 	PartnerServiceID string `json:"partner_service_id"`
-	Sandbox          bool   `json:"sandbox"`
-	Enabled          bool   `json:"enabled"`
-	ExpiresInMinutes int    `json:"expires_in_minutes"`
+	// QRISDirectEnabled: pakai Direct API (SNAP) QRIS saat true. Saat false
+	// (default) DOKU tetap jalan lewat Checkout.
+	QRISDirectEnabled bool `json:"qris_direct_enabled"`
+	Sandbox           bool `json:"sandbox"`
+	Enabled           bool `json:"enabled"`
+	ExpiresInMinutes  int  `json:"expires_in_minutes"`
 	// Kredensial per-environment agar sandbox & produksi tersimpan bersamaan.
 	// Field legacy ClientID/SecretKey/PrivateKey tetap sebagai fallback migrasi
 	// dan disinkron ke env yang aktif saat save. Merchant/terminal/postal/BIN
@@ -138,6 +141,7 @@ type dokuIntegrationView struct {
 	TerminalID       string               `json:"terminal_id"`
 	PostalCode       string               `json:"postal_code"`
 	PartnerServiceID string               `json:"partner_service_id"` // legacy fallback BIN
+	QRISDirectEnabled bool                `json:"qris_direct_enabled"`
 	ExpiresInMinutes int                  `json:"expires_in_minutes"`
 	QREnabled        bool                 `json:"qr_enabled"`
 	SnapAuthReady    bool                 `json:"snap_auth_ready"`
@@ -174,6 +178,7 @@ type dokuIntegrationPut struct {
 	TerminalID       string              `json:"terminal_id,omitempty"`
 	PostalCode       string              `json:"postal_code,omitempty"`
 	PartnerServiceID string              `json:"partner_service_id,omitempty"`
+	QRISDirectEnabled bool               `json:"qris_direct_enabled"`
 	ExpiresInMinutes int                 `json:"expires_in_minutes,omitempty"`
 	FeeMode          string              `json:"fee_mode,omitempty"`
 	FeeFlat          int64               `json:"fee_flat,omitempty"`
@@ -215,6 +220,8 @@ type payOptionView struct {
 	Description string `json:"description"`
 	Kind        string `json:"kind"`
 	Sandbox     bool   `json:"sandbox"`
+	// Channel = DOKU Direct API channel id (mis. "qris"); kosong = Checkout.
+	Channel string `json:"channel,omitempty"`
 	// FeeMode/fee_flat/fee_percent: biaya admin DOKU Checkout (MDR dasar × %).
 	FeeMode    string  `json:"fee_mode,omitempty"`
 	FeeFlat    int64   `json:"fee_flat,omitempty"`
@@ -608,6 +615,7 @@ func registerIntegrations(api huma.API, d *Deps) {
 			cur.PostalCode = v
 		}
 		cur.PartnerServiceID = strings.TrimSpace(input.Body.PartnerServiceID)
+		cur.QRISDirectEnabled = input.Body.QRISDirectEnabled
 		if input.Body.ExpiresInMinutes > 0 {
 			cur.ExpiresInMinutes = payment.ClampDokuExpiryMinutes(input.Body.ExpiresInMinutes)
 		}
@@ -1331,6 +1339,12 @@ func dokuQRReady(s dokuIntegrationStored, d *Deps) bool {
 	return strings.TrimSpace(s.MerchantID) != "" && strings.TrimSpace(s.TerminalID) != "" && strings.TrimSpace(s.PostalCode) != ""
 }
 
+// dokuQRDirectEnabled: toggle Direct API QRIS aktif DAN kredensialnya siap.
+// Saat false, DOKU tetap dipakai lewat Checkout dan QRIS tidak muncul di portal.
+func dokuQRDirectEnabled(s dokuIntegrationStored, d *Deps) bool {
+	return s.QRISDirectEnabled && dokuQRReady(s, d)
+}
+
 // dokuSNAPAuthReady: client ID (env aktif) + RSA private key (env aktif, fallback
 // legacy) wajib untuk token B2B VA/e-wallet/QRIS SNAP.
 func dokuSNAPAuthReady(s dokuIntegrationStored, d *Deps) bool {
@@ -1383,6 +1397,7 @@ func dokuView(ctx context.Context, d *Deps, tid xid.ID, s dokuIntegrationStored,
 		TerminalID:       strings.TrimSpace(s.TerminalID),
 		PostalCode:       strings.TrimSpace(s.PostalCode),
 		PartnerServiceID: strings.TrimSpace(s.PartnerServiceID),
+		QRISDirectEnabled: s.QRISDirectEnabled,
 		ExpiresInMinutes: payment.ClampDokuExpiryMinutes(s.ExpiresInMinutes),
 		QREnabled:        dokuQRReady(s, d),
 		SnapAuthReady:    dokuSNAPAuthReady(s, d),
@@ -1530,6 +1545,25 @@ func listEnabledPayOptions(ctx context.Context, d *Deps, tenantID xid.ID) []payO
 			opt.FeePercent = cfg.FeePercent
 		}
 		out = append(out, opt)
+		// Direct API QRIS: tampil sebagai metode terpisah yang langsung
+		// menampilkan QR (tanpa redirect), hanya bila toggle-nya aktif & siap.
+		if dokuQRDirectEnabled(cfg, d) {
+			qrOpt := payOptionView{
+				Provider:    payment.ProviderDoku,
+				Label:       "QRIS",
+				Description: "Scan QRIS langsung dari aplikasi (tanpa pindah halaman)",
+				Kind:        "qr",
+				Channel:     "qris",
+				Sandbox:     cfg.Sandbox,
+			}
+			if normalizeDokuFeeMode(cfg.FeeMode) == DokuFeeModeCustomer {
+				flat, pct := dokuChannelFeeConfig(cfg, "qris")
+				qrOpt.FeeMode = DokuFeeModeCustomer
+				qrOpt.FeeFlat = flat
+				qrOpt.FeePercent = pct
+			}
+			out = append(out, qrOpt)
+		}
 	}
 	return out
 }

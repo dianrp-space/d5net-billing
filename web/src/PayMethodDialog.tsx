@@ -8,7 +8,7 @@ import {
   PAY_METHOD_DOKU,
   PAY_METHOD_DUITKU,
   PAY_METHOD_QRIS,
-  payMethodToProvider,
+  payMethodRequest,
   payOptionsHasDuitkuSandbox,
   payOptionsToMethods,
   portalPaymentReturnURL,
@@ -18,6 +18,7 @@ import {
   type PayMethodId,
   type PayOption,
 } from "./payMethod";
+import { QrisPayDialog, type QrisIntent } from "./QrisPayDialog";
 import { toastError } from "./swal";
 import { formatRp, FormDialog } from "./ui";
 
@@ -80,7 +81,7 @@ export function PayMethodDialog({
   error?: string;
   sandboxAvailable?: boolean;
   onClose: () => void;
-  onConfirm: (method: PayMethodId) => void;
+  onConfirm: (method: PayMethodDef) => void;
   onSandboxPay?: () => void;
 }) {
   return (
@@ -103,7 +104,7 @@ export function PayMethodDialog({
                 type="button"
                 role="listitem"
                 disabled={busy}
-                onClick={() => onConfirm(m.id)}
+                onClick={() => onConfirm(m)}
                 className="flex w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3 text-left transition-colors hover:border-[var(--accent)] disabled:opacity-60"
               >
                 <span className="flex h-8 w-14 shrink-0 items-center justify-center">{methodLogo(m.id)}</span>
@@ -220,6 +221,7 @@ export function PortalPayHost({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(SINGLE_PG_REDIRECT_SECONDS);
+  const [intent, setIntent] = useState<QrisIntent | null>(null);
   const countdownFor = useRef<string | null>(null);
   const checkoutStarted = useRef(false);
   const options = useQuery({
@@ -230,31 +232,36 @@ export function PortalPayHost({
   const methods = payOptionsToMethods(options.data);
   const sandboxAvailable = payOptionsHasDuitkuSandbox(options.data);
   const singleMethod = methods.length === 1 ? methods[0] : null;
-  const singlePgFlow = !options.isLoading && methods.length === 1;
+  // Countdown/redirect otomatis hanya untuk metode redirect (Checkout/Duitku).
+  // Metode Direct (QR/kode) selalu menampilkan dialog, bukan redirect.
+  const singleRedirect = singleMethod && !singleMethod.channel ? singleMethod : null;
+  const singlePgFlow = !options.isLoading && Boolean(singleRedirect);
 
   useEffect(() => {
     setStep("method");
     setError("");
     setBusy(false);
+    setIntent(null);
     setSecondsLeft(SINGLE_PG_REDIRECT_SECONDS);
     countdownFor.current = null;
     checkoutStarted.current = false;
   }, [invoice?.id]);
 
-  // Satu PG aktif → tampilkan countdown, bukan daftar nama PG.
+  // Satu PG redirect aktif → tampilkan countdown, bukan daftar nama PG.
   useEffect(() => {
     if (!invoice?.id || options.isLoading || busy) return;
     if (step !== "method") return;
-    if (methods.length !== 1) return;
+    if (!singleRedirect) return;
     countdownFor.current = invoice.id;
     checkoutStarted.current = false;
     setSecondsLeft(SINGLE_PG_REDIRECT_SECONDS);
     setStep("redirect");
-  }, [invoice?.id, options.isLoading, methods.length, step, busy]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoice?.id, options.isLoading, Boolean(singleRedirect), methods.length, step, busy]);
 
   // Hitungan mundur lalu checkout.
   useEffect(() => {
-    if (!invoice?.id || step !== "redirect" || busy || !singleMethod) return;
+    if (!invoice?.id || step !== "redirect" || busy || !singleRedirect) return;
     if (countdownFor.current !== invoice.id) return;
     if (secondsLeft > 0) {
       const t = window.setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
@@ -262,27 +269,37 @@ export function PortalPayHost({
     }
     if (checkoutStarted.current) return;
     checkoutStarted.current = true;
-    void confirmMethod(singleMethod.id);
+    void confirmMethod(singleRedirect);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoice?.id, step, busy, secondsLeft, singleMethod?.id]);
+  }, [invoice?.id, step, busy, secondsLeft, singleRedirect?.id, singleRedirect?.channel]);
 
   if (!invoice?.id) return null;
 
-  async function confirmMethod(method: PayMethodId) {
+  async function confirmMethod(method: PayMethodDef) {
     if (!invoice?.id) return;
-    setSavedPayMethod(method, tenantSlug);
+    setSavedPayMethod(method.id, tenantSlug);
     setBusy(true);
     setError("");
     setStep("busy");
     try {
-      const next = await api<{ checkout_url?: string }>(`/api/portal/invoices/${invoice.id}/checkout`, {
+      const { provider, channel } = payMethodRequest(method);
+      const next = await api<QrisIntent>(`/api/portal/invoices/${invoice.id}/checkout`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          provider: payMethodToProvider(method),
+          provider,
+          channel,
           return_url: portalPaymentReturnURL(),
         }),
       });
+      const meta = (next.metadata || {}) as Record<string, unknown>;
+      const codePay = Boolean(meta.va_number || meta.payment_code);
+      const hasQR = Boolean(next.qr_image_base64 || next.qr_string);
+      // Direct (QR/kode): tampilkan dialog di tempat, tanpa redirect.
+      if (hasQR || codePay) {
+        setIntent(next);
+        return;
+      }
       const url = String(next.checkout_url || "").trim();
       if (!url) throw new Error("Link pembayaran kosong");
       window.location.assign(url);
@@ -291,11 +308,18 @@ export function PortalPayHost({
       setError(msg);
       void toastError(msg);
       checkoutStarted.current = false;
-      setStep(methods.length === 1 ? "redirect" : "method");
+      setStep(singleRedirect ? "redirect" : "method");
       setSecondsLeft(SINGLE_PG_REDIRECT_SECONDS);
     } finally {
       setBusy(false);
     }
+  }
+
+  function closeIntent() {
+    setIntent(null);
+    setStep("method");
+    checkoutStarted.current = false;
+    setSecondsLeft(SINGLE_PG_REDIRECT_SECONDS);
   }
 
   async function confirmSandboxPay() {
@@ -319,12 +343,12 @@ export function PortalPayHost({
   }
 
   const amount = invoiceRemaining(invoice);
-  const singleFee = singleMethod ? methodCustomerFee(singleMethod, amount) : 0;
+  const singleFee = singleRedirect ? methodCustomerFee(singleRedirect, amount) : 0;
 
   return (
     <>
       <PayMethodDialog
-        open={!options.isLoading && step === "method" && methods.length !== 1}
+        open={!options.isLoading && step === "method" && !singleRedirect}
         invoiceNumber={invoice.invoice_number}
         amount={amount}
         methods={methods}
@@ -347,10 +371,28 @@ export function PortalPayHost({
         sandboxAvailable={sandboxAvailable}
         onCancel={onClose}
         onSkipWait={() => {
-          if (!singleMethod || busy || checkoutStarted.current) return;
+          if (!singleRedirect || busy || checkoutStarted.current) return;
           setSecondsLeft(0);
         }}
         onSandboxPay={() => void confirmSandboxPay()}
+      />
+      <QrisPayDialog
+        open={Boolean(intent)}
+        title="Bayar tagihan"
+        invoiceNumber={invoice.invoice_number}
+        intent={intent}
+        onClose={closeIntent}
+        pollPath={invoice?.id ? `/api/portal/invoices/${invoice.id}/payment-intent` : undefined}
+        cancelPath={invoice?.id ? `/api/portal/invoices/${invoice.id}/payment-intent/cancel` : undefined}
+        pollHeaders={headers}
+        onPaid={() => {
+          setIntent(null);
+          onPaid?.();
+          onClose();
+        }}
+        onCancelled={() => {
+          closeIntent();
+        }}
       />
       {options.isLoading ? (
         <FormDialog open title="Menuju pembayaran" onClose={onClose}>

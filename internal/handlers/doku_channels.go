@@ -100,6 +100,17 @@ func dokuFeeFromBaseMDR(flat int64, percent float64) int64 {
 	return fee
 }
 
+// dokuChannelFeeConfig mengembalikan fee_flat & fee_percent efektif satu channel
+// Direct (dipakai untuk menampilkan biaya di opsi bayar portal).
+func dokuChannelFeeConfig(cfg dokuIntegrationStored, channelID string) (int64, float64) {
+	fees := effectiveDokuChannels(cfg)
+	f, ok := fees[strings.ToLower(strings.TrimSpace(channelID))]
+	if !ok {
+		return 0, 0
+	}
+	return f.FeeFlat, f.FeePercent
+}
+
 // dokuCustomerFeeForChannel menghitung biaya admin untuk satu channel Direct.
 // invoiceBase hanya gate (tagihan harus > 0); persen dihitung dari fee_flat (MDR), bukan dari nominal invoice.
 func dokuCustomerFeeForChannel(cfg dokuIntegrationStored, channelID string, invoiceBase int64) int64 {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { QrisPayDialog, type QrisIntent } from "./QrisPayDialog";
-import { markPendingTopup, payMethodToProvider, payOptionsToMethods, portalPaymentReturnURL, type PayMethodId, type PayOption } from "./payMethod";
+import { markPendingTopup, payMethodRequest, payOptionsToMethods, portalPaymentReturnURL, type PayMethodDef, type PayMethodId, type PayOption } from "./payMethod";
 import { alertTopupSuccess, toastError } from "./swal";
 import { formatRp, FormDialog } from "./ui";
 
@@ -60,11 +60,16 @@ export function PortalTopupDialog({
       setError(`Minimal topup ${formatRp(minTopup)}.`);
       return;
     }
-    const chosen = singleMethod?.id || method;
-    if (!chosen) {
+    const chosenId = singleMethod?.id || method;
+    if (!chosenId) {
       setError("Pilih metode pembayaran.");
       return;
     }
+    const chosenDef: PayMethodDef | undefined =
+      methods.find((m) => m.id === chosenId) || singleMethod || undefined;
+    const { provider, channel } = chosenDef
+      ? payMethodRequest(chosenDef)
+      : { provider: String(chosenId), channel: undefined };
     setBusy(true);
     setError("");
     try {
@@ -73,7 +78,8 @@ export function PortalTopupDialog({
         headers,
         body: JSON.stringify({
           amount: amt,
-          provider: payMethodToProvider(chosen),
+          provider,
+          channel,
           return_url: portalPaymentReturnURL(),
         }),
       });
@@ -125,9 +131,15 @@ export function PortalTopupDialog({
           ) : methods.length === 0 ? (
             <p className="text-sm text-[var(--danger)]">Belum ada metode pembayaran online yang aktif.</p>
           ) : singleMethod ? (
-            <p className="text-xs text-[var(--muted)]">
-              Anda akan diarahkan ke <strong>gateway pembayaran online</strong> untuk menyelesaikan topup.
-            </p>
+            singleMethod.channel ? (
+              <p className="text-xs text-[var(--muted)]">
+                Kode QR <strong>{singleMethod.label}</strong> akan ditampilkan untuk menyelesaikan topup.
+              </p>
+            ) : (
+              <p className="text-xs text-[var(--muted)]">
+                Anda akan diarahkan ke <strong>gateway pembayaran online</strong> untuk menyelesaikan topup.
+              </p>
+            )
           ) : (
             <div>
               <label className="mb-1.5 block text-sm font-medium">Metode pembayaran</label>

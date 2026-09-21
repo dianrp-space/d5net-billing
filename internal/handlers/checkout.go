@@ -18,7 +18,8 @@ import (
 // paymentCustomerFee mengembalikan biaya admin yang dibebankan ke customer untuk
 // provider tertentu (0 bila merchant menanggung / tidak berlaku).
 // Rumus: biaya dasar MDR × % ke customer (sama untuk DOKU & Duitku).
-func paymentCustomerFee(ctx context.Context, d *Deps, tid xid.ID, providerName, _ string, base int64) int64 {
+// channel diisi untuk DOKU Direct API (fee per channel); kosong = DOKU Checkout.
+func paymentCustomerFee(ctx context.Context, d *Deps, tid xid.ID, providerName, channel string, base int64) int64 {
 	if base <= 0 {
 		return 0
 	}
@@ -27,6 +28,9 @@ func paymentCustomerFee(ctx context.Context, d *Deps, tid xid.ID, providerName, 
 		cfg, err := loadDokuIntegration(ctx, d, tid)
 		if err != nil {
 			return 0
+		}
+		if ch := strings.ToLower(strings.TrimSpace(channel)); ch != "" {
+			return dokuCustomerFeeForChannel(cfg, ch, base)
 		}
 		return dokuCustomerFee(cfg, base)
 	case payment.ProviderDuitku:
@@ -120,10 +124,11 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	if providerName == payment.ProviderManual {
 		return nil, httpx.BadRequest("gunakan pembayaran online (Duitku)")
 	}
-	_ = channel // Checkout DOKU tidak memakai channel Direct; parameter tetap untuk kompatibel API.
-	// Biaya admin yang dibebankan ke customer (DOKU Checkout: MDR dasar × %).
+	// Channel DOKU Direct API (qris/va_*/ewallet_*/retail_*); kosong = Checkout.
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	// Biaya admin yang dibebankan ke customer (DOKU Checkout/Direct: MDR dasar × %).
 	baseAmount := amount
-	feeAmount := paymentCustomerFee(ctx, d, tid, providerName, "", baseAmount)
+	feeAmount := paymentCustomerFee(ctx, d, tid, providerName, channel, baseAmount)
 	chargeAmount := baseAmount + feeAmount
 	// Target callback webhook PG untuk order ini. Dipakai untuk memutuskan
 	// reuse intent: callback yang berubah wajib order baru ke PG.
@@ -131,8 +136,8 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	if origin != "" {
 		wantCallback = strings.TrimRight(origin, "/") + paymentWebhookPathFor(providerName)
 	}
-	if existing, err := d.Store.GetLatestPendingPaymentIntent(ctx, tid, inv.ID, providerName); err == nil && existing != nil && existing.Amount == chargeAmount {
-		hasPay := strings.TrimSpace(existing.CheckoutURL) != "" || existing.QRString != ""
+	if existing, err := d.Store.GetLatestPendingPaymentIntent(ctx, tid, inv.ID, providerName); err == nil && existing != nil && existing.Amount == chargeAmount && strings.EqualFold(metaString(existing.Metadata, "doku_channel"), channel) {
+		hasPay := strings.TrimSpace(existing.CheckoutURL) != "" || strings.TrimSpace(existing.QRString) != ""
 		if hasPay {
 			if storedCB := intentCallbackURL(existing); wantCallback == "" || storedCB == "" || storedCB == wantCallback {
 				_ = d.Store.CancelPendingPaymentIntentsExcept(ctx, tid, inv.ID, existing.ExternalID)
@@ -151,7 +156,7 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	}
 	req := payment.IntentRequest{
 		TenantID: tid, CustomerID: inv.CustomerID, InvoiceID: inv.ID,
-		Amount: chargeAmount, ReturnURL: returnURL,
+		Amount: chargeAmount, ReturnURL: returnURL, Channel: channel,
 		ProductDetails: "Tagihan " + strings.TrimSpace(inv.InvoiceNumber),
 	}
 	var ten *store.Tenant

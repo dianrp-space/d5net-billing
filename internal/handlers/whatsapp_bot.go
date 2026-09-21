@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dianrp-space/d5net-billing/internal/payment"
 	"github.com/dianrp-space/d5net-billing/internal/store"
 	"github.com/dianrp-space/d5net-billing/internal/wa"
 	"github.com/dianrp-space/d5net-billing/internal/xid"
@@ -345,12 +347,38 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 		}
 		origin := appPublicOrigin(ctx, d, tid, "", "", "", "", "")
 		providerName := opts[0].Provider
+		channel := ""
+		// /qris: pakai DOKU Direct API QRIS bila kredensialnya siap, supaya bot
+		// bisa mengirim gambar QR langsung (bukan sekadar link halaman checkout).
+		if cmd == "/qris" && dokuQRPaymentReady(ctx, d, tid) {
+			providerName = payment.ProviderDoku
+			channel = "qris"
+		}
 		returnURL := origin
-		pi, err := checkoutInvoice(ctx, d, tid, &target, providerName, "", returnURL, origin)
+		pi, err := checkoutInvoice(ctx, d, tid, &target, providerName, channel, returnURL, origin)
 		if err != nil {
 			slog.Warn("wabot: checkout", "bot", BotName, "tenant_id", tid, "provider", providerName, "err", err)
 			_ = client.SendText(ctx, phone, waCheckoutFailMsg(err))
 			return
+		}
+		expiry := ""
+		if pi.ExpiresAt != nil && !pi.ExpiresAt.IsZero() {
+			expiry = pi.ExpiresAt.Format("02/01/2006 15:04")
+		}
+		// QRIS Direct: kirim gambar QR bila provider mengembalikannya.
+		if cmd == "/qris" && strings.TrimSpace(pi.QRImageBase64) != "" {
+			png, derr := base64.StdEncoding.DecodeString(pi.QRImageBase64)
+			if derr == nil && len(png) > 0 {
+				caption := fmt.Sprintf("QRIS tagihan %s sebesar %s.%s\nScan dengan e-wallet / m-banking.", target.InvoiceNumber, formatRupiahID(remaining), extra)
+				if expiry != "" {
+					caption += "\nBerlaku s.d. " + expiry
+				}
+				if err := client.SendImage(ctx, phone, caption, png); err != nil {
+					slog.Warn("wabot: kirim QRIS", "bot", BotName, "tenant_id", tid, "err", err)
+				} else {
+					return
+				}
+			}
 		}
 		if strings.TrimSpace(pi.CheckoutURL) == "" {
 			_ = client.SendText(ctx, phone, "Link bayar belum tersedia. Hubungi admin.")
@@ -358,14 +386,25 @@ func handleWhatsAppBotMessage(ctx context.Context, d *Deps, tid xid.ID, in waBot
 		}
 		text := fmt.Sprintf("Tagihan %s sebesar %s.\nBayar online di sini:\n%s%s",
 			target.InvoiceNumber, formatRupiahID(remaining), strings.TrimSpace(pi.CheckoutURL), extra)
-		if pi.ExpiresAt != nil && !pi.ExpiresAt.IsZero() {
-			text += "\nBerlaku s.d. " + pi.ExpiresAt.Format("02/01/2006 15:04")
+		if expiry != "" {
+			text += "\nBerlaku s.d. " + expiry
 		}
 		if cmd == "/qris" {
 			text += "\n(QRIS tersedia di halaman bayar.)"
 		}
 		_ = client.SendText(ctx, phone, text)
 	}
+}
+
+// dokuQRPaymentReady true bila DOKU Direct API QRIS siap dipakai (toggle
+// aktif + kredensial SNAP + merchant/terminal/postal terisi). Dipakai bot /qris
+// untuk memutuskan apakah mengirim gambar QR atau fallback ke link checkout.
+func dokuQRPaymentReady(ctx context.Context, d *Deps, tid xid.ID) bool {
+	cfg, err := loadDokuIntegration(ctx, d, tid)
+	if err != nil || !cfg.Enabled {
+		return false
+	}
+	return dokuQRDirectEnabled(cfg, d)
 }
 
 func waCheckoutFailMsg(err error) string {

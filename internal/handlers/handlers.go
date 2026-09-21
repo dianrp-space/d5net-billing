@@ -5340,9 +5340,11 @@ func registerPortal(api huma.API, d *Deps) {
 			return nil, httpx.NotFound("invoice not found")
 		}
 		providerName := ""
+		channel := ""
 		returnURL := ""
 		if input.Body != nil {
 			providerName = strings.TrimSpace(input.Body.Provider)
+			channel = strings.TrimSpace(input.Body.Channel)
 			returnURL = strings.TrimSpace(input.Body.ReturnURL)
 		}
 		if providerName == "" {
@@ -5356,7 +5358,7 @@ func registerPortal(api huma.API, d *Deps) {
 		if returnURL == "" {
 			returnURL = origin
 		}
-		pi, err := checkoutInvoice(ctx, d, ten.ID, inv, providerName, "", returnURL, origin)
+		pi, err := checkoutInvoice(ctx, d, ten.ID, inv, providerName, channel, returnURL, origin)
 		if err != nil {
 			return nil, err
 		}

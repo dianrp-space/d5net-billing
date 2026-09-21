@@ -101,6 +101,39 @@ func TestDokuCreateQRIntent(t *testing.T) {
 	}
 }
 
+func TestDokuCreateIntentDispatchesQRIS(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/authorization/v1/access-token/b2b", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"accessToken":"tok-dispatch","expiresIn":900}`))
+	})
+	mux.HandleFunc("/snap-adapter/b2b/v1.0/qr/qr-mpm-generate", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"responseCode":"2004700","qrContent":"00020101021226650016ID.CO.DOKU.WWW011893600","referenceNo":"REF-DISPATCH-1"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", testRSAPrivateKey(t), "MALL1", "T001", "28111", true, 60)
+	p.baseOverride = srv.URL
+	res, err := p.CreateIntent(t.Context(), IntentRequest{
+		Amount: 150000, MerchantOrderID: "INV-QR-D", Channel: "qris",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.QRString == "" || res.Metadata["doku_kind"] != DokuKindQR {
+		t.Fatalf("expected QRIS dispatch, got %+v", res)
+	}
+	if res.CheckoutURL != "" {
+		t.Fatalf("unexpected checkout url = %q", res.CheckoutURL)
+	}
+}
+
+func TestDokuCreateIntentUnknownChannel(t *testing.T) {
+	p := NewDokuProvider("MCH-TEST-1", "s3cr3t", "", "", "", "", true, 60)
+	if _, err := p.CreateIntent(t.Context(), IntentRequest{Amount: 100, MerchantOrderID: "INV-X", Channel: "nope"}); err == nil {
+		t.Fatal("expected unknown channel error")
+	}
+}
+
 func TestDokuCreateRetailAlfamart(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

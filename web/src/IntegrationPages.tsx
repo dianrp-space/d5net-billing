@@ -66,6 +66,16 @@ type DokuIntegration = {
   prod_secret_key?: string;
   sandbox_configured: boolean;
   prod_configured: boolean;
+  has_private_key: boolean;
+  has_sandbox_private_key: boolean;
+  has_prod_private_key: boolean;
+  merchant_id: string;
+  terminal_id: string;
+  postal_code: string;
+  partner_service_id: string;
+  qris_direct_enabled: boolean;
+  qr_enabled: boolean;
+  snap_auth_ready: boolean;
   expires_in_minutes: number;
   fee_mode?: string;
   fee_flat?: number;
@@ -285,6 +295,12 @@ export function PaymentGWPage() {
     sandbox_secret_key: "",
     prod_client_id: "",
     prod_secret_key: "",
+    sandbox_private_key: "",
+    prod_private_key: "",
+    merchant_id: "",
+    terminal_id: "",
+    postal_code: "",
+    qris_direct_enabled: false,
     expires_in_minutes: 60,
     fee_mode: "merchant",
     fee_flat: 0,
@@ -325,6 +341,12 @@ export function PaymentGWPage() {
       sandbox_secret_key: sbk || "",
       prod_client_id: prc || "",
       prod_secret_key: prk || "",
+      sandbox_private_key: "",
+      prod_private_key: "",
+      merchant_id: v.merchant_id || "",
+      terminal_id: v.terminal_id || "",
+      postal_code: v.postal_code || "",
+      qris_direct_enabled: Boolean(v.qris_direct_enabled),
       expires_in_minutes: v.expires_in_minutes || 60,
       fee_mode: v.fee_mode === "customer" ? "customer" : "merchant",
       fee_flat: v.fee_flat || 0,
@@ -407,6 +429,12 @@ export function PaymentGWPage() {
           sandbox_secret_key: dokuForm.sandbox_secret_key.trim() || undefined,
           prod_client_id: dokuForm.prod_client_id.trim(),
           prod_secret_key: dokuForm.prod_secret_key.trim() || undefined,
+          sandbox_private_key: dokuForm.sandbox_private_key.trim() || undefined,
+          prod_private_key: dokuForm.prod_private_key.trim() || undefined,
+          merchant_id: dokuForm.merchant_id.trim(),
+          terminal_id: dokuForm.terminal_id.trim(),
+          postal_code: dokuForm.postal_code.trim(),
+          qris_direct_enabled: dokuForm.qris_direct_enabled,
           expires_in_minutes: Math.min(1440, Math.max(1, dokuForm.expires_in_minutes || 60)),
           fee_mode: dokuForm.fee_mode === "customer" ? "customer" : "merchant",
           fee_flat: Math.max(0, Math.floor(Number(dokuForm.fee_flat) || 0)),
@@ -421,6 +449,8 @@ export function PaymentGWPage() {
           ...next,
           sandbox_secret_key: next.sandbox_secret_key || dokuForm.sandbox_secret_key,
           prod_secret_key: next.prod_secret_key || dokuForm.prod_secret_key,
+          sandbox_private_key: next.sandbox_private_key || dokuForm.sandbox_private_key,
+          prod_private_key: next.prod_private_key || dokuForm.prod_private_key,
         });
       }
       void qc.invalidateQueries({ queryKey: ["integration-doku"] });
@@ -812,6 +842,101 @@ export function PaymentGWPage() {
                 </div>
               </TabsContent>
             </Tabs>
+            <div className="grid gap-2 rounded-[var(--radius-lg)] border border-dashed border-[var(--border)] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-medium">Direct API (SNAP) · QRIS</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+                      dokuQ.data?.qr_enabled
+                        ? "bg-[var(--ok)]/15 text-[var(--ok)]"
+                        : "bg-[var(--warn,#b7791f)]/15 text-[var(--warn,#b7791f)]"
+                    }`}
+                  >
+                    {dokuQ.data?.qr_enabled ? "QRIS siap" : "QRIS belum siap"}
+                  </span>
+                  <label className="flex shrink-0 items-center gap-1.5 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={dokuForm.qris_direct_enabled}
+                      onChange={(e) => setDokuForm({ ...dokuForm, qris_direct_enabled: e.target.checked })}
+                    />
+                    Tampilkan QRIS di portal
+                  </label>
+                </div>
+              </div>
+              <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+                Isi kredensial Direct API agar bot WhatsApp <strong>/qris</strong> bisa mengirim gambar QR
+                langsung. Wajib: Merchant ID &amp; Terminal ID hasil aktivasi QRIS dari DOKU, serta RSA private
+                key yang public key-nya sudah di-upload ke dashboard DOKU. Nyalakan toggle bila QRIS ingin
+                tampil sebagai metode di portal pelanggan (langsung menampilkan QR saat diklik); bila mati,
+                DOKU tetap aktif lewat Checkout seperti biasa dan QRIS tidak tampil di portal.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Merchant ID</span>
+                  <input
+                    className="input"
+                    placeholder="mis. 12345678"
+                    value={dokuForm.merchant_id}
+                    onChange={(e) => setDokuForm({ ...dokuForm, merchant_id: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Terminal ID</span>
+                  <input
+                    className="input"
+                    placeholder="mis. A01"
+                    value={dokuForm.terminal_id}
+                    onChange={(e) => setDokuForm({ ...dokuForm, terminal_id: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Postal code</span>
+                  <input
+                    className="input"
+                    placeholder="mis. 28111"
+                    value={dokuForm.postal_code}
+                    onChange={(e) => setDokuForm({ ...dokuForm, postal_code: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+              </div>
+              {dokuForm.sandbox ? (
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">
+                    RSA private key (sandbox){dokuQ.data?.has_sandbox_private_key ? " · tersimpan" : ""}
+                  </span>
+                  <textarea
+                    className="input font-mono text-xs"
+                    rows={4}
+                    placeholder="-----BEGIN PRIVATE KEY-----"
+                    value={dokuForm.sandbox_private_key}
+                    onChange={(e) => setDokuForm({ ...dokuForm, sandbox_private_key: e.target.value })}
+                  />
+                </label>
+              ) : (
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[var(--muted)]">
+                    RSA private key (produksi){dokuQ.data?.has_prod_private_key ? " · tersimpan" : ""}
+                  </span>
+                  <textarea
+                    className="input font-mono text-xs"
+                    rows={4}
+                    placeholder="-----BEGIN PRIVATE KEY-----"
+                    value={dokuForm.prod_private_key}
+                    onChange={(e) => setDokuForm({ ...dokuForm, prod_private_key: e.target.value })}
+                  />
+                </label>
+              )}
+              <span className="text-[11px] text-[var(--muted)]">
+                {dokuQ.data?.snap_auth_ready
+                  ? "Autentikasi SNAP siap (client ID + private key valid)."
+                  : "Private key belum valid / belum diisi."}
+              </span>
+            </div>
             <label className="grid gap-1 text-sm">
               <span className="text-[var(--muted)]">Masa berlaku invoice (TTL)</span>
               <input

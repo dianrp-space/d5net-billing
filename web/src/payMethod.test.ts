@@ -12,9 +12,13 @@ import {
   isPayMethodId,
   markPendingTopup,
   notePaymentReturnFromLocation,
+  PAY_METHOD_DOKU,
   PAY_METHOD_DUITKU,
+  PAY_METHOD_QRIS,
   paymentMethodLabel,
+  payMethodRequest,
   payOptionsHasDuitkuSandbox,
+  payOptionsToMethods,
   portalPaymentReturnURL,
   setSavedPayMethod,
 } from "./payMethod";
@@ -135,5 +139,16 @@ describe("payMethod", () => {
       fetchIntent: async () => ({ status: "paid" }),
     });
     expect(confirmed).toBe(false);
+  });
+
+  it("maps DOKU Direct QRIS option to a QRIS method with channel", () => {
+    const methods = payOptionsToMethods([
+      { provider: "doku", label: "DOKU", description: "Checkout", kind: "redirect" },
+      { provider: "doku", label: "QRIS", description: "Scan QR", kind: "qr", channel: "qris" },
+    ]);
+    expect(methods.map((m) => m.id)).toEqual([PAY_METHOD_DOKU, PAY_METHOD_QRIS]);
+    expect(methods[1].channel).toBe("qris");
+    expect(payMethodRequest(methods[1])).toEqual({ provider: "doku", channel: "qris" });
+    expect(payMethodRequest(methods[0])).toEqual({ provider: "doku" });
   });
 });

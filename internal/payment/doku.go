@@ -145,6 +145,25 @@ func (p *DokuProvider) CreateIntent(ctx context.Context, req IntentRequest) (*In
 	if req.Amount <= 0 {
 		return nil, fmt.Errorf("nominal pembayaran harus > 0")
 	}
+	// Channel kosong = DOKU Checkout (hosted). Channel terisi = Direct API (SNAP).
+	if ch := strings.ToLower(strings.TrimSpace(req.Channel)); ch != "" {
+		channel, ok := LookupDokuChannel(ch)
+		if !ok {
+			return nil, fmt.Errorf("channel DOKU tidak dikenal: %s", ch)
+		}
+		switch channel.Kind {
+		case DokuKindQR:
+			return p.createQRIntent(ctx, req)
+		case DokuKindVA:
+			return p.createVAIntent(ctx, req, channel)
+		case DokuKindEwallet:
+			return p.createEwalletIntent(ctx, req, channel)
+		case DokuKindRetail:
+			return p.createRetailIntent(ctx, req, channel)
+		default:
+			return nil, fmt.Errorf("channel DOKU %s belum didukung", ch)
+		}
+	}
 	orderID := strings.TrimSpace(req.MerchantOrderID)
 	if orderID == "" {
 		orderID = fmt.Sprintf("inv-%s", req.InvoiceID)
