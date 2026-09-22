@@ -204,9 +204,15 @@ func (s *Store) UpsertIsolirLogoURL(ctx context.Context, tenantID xid.ID, url st
 }
 
 // DefaultIsolirHTML is the built-in captive landing (login CTA).
-func DefaultIsolirHTML(appName, logoURL, loginURL string) string {
+// primaryColor memakai warna primary tenant agar sama dengan preview di
+// Template Isolir; kosong/invalid jatuh ke default zaitun.
+func DefaultIsolirHTML(appName, logoURL, loginURL, primaryColor string) string {
 	if appName == "" {
 		appName = "Isolir"
+	}
+	primary := NormalizeHexColor(primaryColor)
+	if primary == "" {
+		primary = "#5A5A40"
 	}
 	logo := ""
 	if logoURL != "" {
@@ -218,9 +224,9 @@ func DefaultIsolirHTML(appName, logoURL, loginURL string) string {
 <style>
 body{margin:0;font-family:system-ui,sans-serif;background:#F7F6F2;color:#1a1a14;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem}
 .card{background:#fff;border:1px solid #e5e2d9;border-radius:12px;padding:2rem;max-width:420px;width:100%;box-shadow:0 8px 24px rgba(0,0,0,.06);text-align:center}
-h1{font-size:1.35rem;margin:0 0 .5rem;color:#5A5A40}
+h1{font-size:1.35rem;margin:0 0 .5rem;color:` + primary + `}
 p{color:#5c584c;line-height:1.5;margin:0 0 1.25rem}
-a.btn{display:inline-block;background:#5A5A40;color:#fff;text-decoration:none;padding:.7rem 1.25rem;border-radius:8px;font-weight:600}
+a.btn{display:inline-block;background:` + primary + `;color:#fff;text-decoration:none;padding:.7rem 1.25rem;border-radius:8px;font-weight:600}
 </style></head><body><div class="card">` + logo + `
 <h1>Layanan diisolir</h1>
 <p>Internet Anda dibatasi karena ada tagihan yang belum lunas. Silakan masuk untuk melihat tagihan dan membayar.</p>

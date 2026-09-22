@@ -282,7 +282,12 @@ func renderIsolirPage(ctx context.Context, d *Deps) ([]byte, error) {
 	loginURL := store.IsolirPortalURL(net.PortalBaseURL, ten.Slug)
 	body := custom
 	if strings.TrimSpace(body) == "" {
-		body = store.DefaultIsolirHTML(appName, logoURL, loginURL)
+		// Samakan warna dengan preview Template Isolir (primary tenant).
+		primary := ""
+		if gen, gerr := d.Store.GetGeneralSettings(ctx, ten.ID); gerr == nil {
+			primary = gen.PrimaryColor
+		}
+		body = store.DefaultIsolirHTML(appName, logoURL, loginURL, primary)
 	} else {
 		body = strings.ReplaceAll(body, "{{app_name}}", html.EscapeString(appName))
 		body = strings.ReplaceAll(body, "{{logo_url}}", html.EscapeString(logoURL))

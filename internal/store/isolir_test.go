@@ -1,6 +1,24 @@
 package store
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestDefaultIsolirHTMLUsesPrimaryColor(t *testing.T) {
+	out := DefaultIsolirHTML("Acme", "", "https://x/login", "#1a2b3c")
+	if !strings.Contains(out, "color:#1A2B3C") || !strings.Contains(out, "background:#1A2B3C") {
+		t.Fatal("expected tenant primary color in h1 and button")
+	}
+	def := DefaultIsolirHTML("Acme", "", "https://x/login", "")
+	if !strings.Contains(def, "color:#5A5A40") || !strings.Contains(def, "background:#5A5A40") {
+		t.Fatal("expected olive fallback for empty primary")
+	}
+	bad := DefaultIsolirHTML("Acme", "", "https://x/login", "bukan-warna")
+	if strings.Contains(bad, "bukan-warna") || !strings.Contains(bad, "#5A5A40") {
+		t.Fatal("invalid primary must fall back to olive")
+	}
+}
 
 func TestIsolirProfileName(t *testing.T) {
 	cfg := IsolirNetworkSettings{ProfileName: "isolir-tenant"}
