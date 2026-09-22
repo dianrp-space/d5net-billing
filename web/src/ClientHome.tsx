@@ -121,6 +121,67 @@ export function monthKeyLabel(key: string) {
   }
 }
 
+type UsageDay = { day: string; rx_bytes: number; tx_bytes: number; total_bytes: number };
+
+/** Grafik batang pemakaian harian sebulan + rincian lipat (terbaru dulu). */
+function DailyUsageChart({ month, days }: { month: string; days: UsageDay[] }) {
+  const [y, m] = String(month || "").split("-").map(Number);
+  const dim = Number.isFinite(y) && Number.isFinite(m) ? new Date(y, m, 0).getDate() : 30;
+  const byDay = new Map((days ?? []).map((d) => [d.day, d]));
+  const all: UsageDay[] = [];
+  for (let d = 1; d <= dim; d++) {
+    const key = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    all.push(byDay.get(key) ?? { day: key, rx_bytes: 0, tx_bytes: 0, total_bytes: 0 });
+  }
+  const max = Math.max(1, ...all.map((d) => d.total_bytes));
+  const nonzero = all.filter((d) => d.total_bytes > 0);
+  if (nonzero.length === 0) return null;
+  const labelIdx = new Set([0, 6, 13, 20, 27, dim - 1].filter((i) => i >= 0 && i < dim));
+  return (
+    <div className="grid gap-2">
+      <div className="flex h-28 items-end gap-[3px]" role="img" aria-label="Grafik pemakaian harian">
+        {all.map((d, i) => {
+          const dd = Number(d.day.slice(8, 10));
+          return (
+            <div key={d.day} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1 self-stretch">
+              <div
+                className="w-full rounded-t-sm"
+                style={{
+                  height: `${Math.max(d.total_bytes > 0 ? 4 : 0, (d.total_bytes / max) * 100)}%`,
+                  background: "var(--accent)",
+                  opacity: d.total_bytes > 0 ? 0.85 : 0,
+                }}
+                title={`${dd} ${monthKeyLabel(month)}: ${formatBytesID(d.total_bytes)} (↓ ${formatBytesID(d.rx_bytes)} · ↑ ${formatBytesID(d.tx_bytes)})`}
+              />
+              <span className="text-[9px] leading-none text-[var(--muted)] tabular-nums">
+                {labelIdx.has(i) ? dd : ""}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <details className="text-xs">
+        <summary className="cursor-pointer text-[var(--accent)]">Rincian harian</summary>
+        <ul className="mt-1 grid gap-1">
+          {[...nonzero].reverse().map((d) => (
+            <li key={d.day} className="flex items-center justify-between gap-2">
+              <span className="text-[var(--muted)] tabular-nums">
+                {Number(d.day.slice(8, 10))} {monthKeyLabel(month)}
+              </span>
+              <span className="tabular-nums">
+                {formatBytesID(d.total_bytes)}{" "}
+                <span className="text-[var(--muted)]">
+                  (↓ {formatBytesID(d.rx_bytes)} · ↑ {formatBytesID(d.tx_bytes)})
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
 const WALLET_TXN_LABEL: Record<string, string> = {
   topup: "Topup online",
   topup_admin: "Topup admin",
@@ -532,6 +593,7 @@ export function ClientHome({
     tx_bytes: number;
     total_bytes: number;
     rows: { customer_id: string; customer_code?: string; month: string; rx_bytes: number; tx_bytes: number; total_bytes: number }[];
+    days: { day: string; rx_bytes: number; tx_bytes: number; total_bytes: number }[];
   };
   const [usageMonth, setUsageMonth] = useState(() => currentMonthKey());
   const usageQ = useQuery({
@@ -1897,6 +1959,12 @@ export function ClientHome({
                         </li>
                       ))}
                     </ul>
+                  ) : null}
+                  <DailyUsageChart month={usageQ.data?.month || usageMonth} days={usageQ.data?.days ?? []} />
+                  {(usageQ.data?.days ?? []).length === 0 ? (
+                    <p className="text-[11px] text-[var(--muted)]">
+                      Rincian harian mulai tercatat setelah pembaruan ini (butuh worker poller aktif).
+                    </p>
                   ) : null}
                 </div>
               )}

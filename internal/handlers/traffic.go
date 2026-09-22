@@ -128,6 +128,7 @@ func registerTraffic(api huma.API, d *Deps) {
 			Tx    int64                `json:"tx_bytes"`
 			Total int64                `json:"total_bytes"`
 			Rows  []store.MonthlyUsage `json:"rows"`
+			Days  []store.DailyUsage   `json:"days"`
 		}
 	}, error) {
 		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
@@ -161,6 +162,7 @@ func registerTraffic(api huma.API, d *Deps) {
 				Tx    int64                `json:"tx_bytes"`
 				Total int64                `json:"total_bytes"`
 				Rows  []store.MonthlyUsage `json:"rows"`
+				Days  []store.DailyUsage   `json:"days"`
 			}
 		}{}
 		out.Body.Month = monthKey.Format("2006-01")
@@ -170,6 +172,12 @@ func registerTraffic(api huma.API, d *Deps) {
 			out.Body.Tx += r.TxBytes
 		}
 		out.Body.Total = out.Body.Rx + out.Body.Tx
+		if days, derr := d.Store.DailyUsageMonth(ctx, ten.ID, ids, out.Body.Month); derr == nil {
+			out.Body.Days = days
+		}
+		if out.Body.Days == nil {
+			out.Body.Days = []store.DailyUsage{}
+		}
 		return out, nil
 	})
 }

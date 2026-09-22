@@ -55,6 +55,7 @@ func (s *Store) AccumulateTrafficSample(ctx context.Context, tenantID, routerID,
 		tx = 0
 	}
 	month := TrafficMonthKey(at)
+	day := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)
 	return s.withTenant(ctx, tenantID, func(ctx context.Context, txConn pgx.Tx) error {
 		var lastRx, lastTx int64
 		err := txConn.QueryRow(ctx, `
@@ -77,6 +78,17 @@ func (s *Store) AccumulateTrafficSample(ctx context.Context, tenantID, routerID,
 					username = EXCLUDED.username,
 					updated_at = NOW()
 			`, tenantID, customerID, nullXID(subscriptionID), username, month, dRx, dTx); err != nil {
+				return err
+			}
+			// Rincian harian untuk grafik portal (delta yang sama, tanpa polling tambahan).
+			if _, err := txConn.Exec(ctx, `
+				INSERT INTO traffic_daily (tenant_id, customer_id, day, rx_bytes, tx_bytes, updated_at)
+				VALUES ($1,$2,$3,$4,$5,NOW())
+				ON CONFLICT (tenant_id, customer_id, day) DO UPDATE SET
+					rx_bytes = traffic_daily.rx_bytes + EXCLUDED.rx_bytes,
+					tx_bytes = traffic_daily.tx_bytes + EXCLUDED.tx_bytes,
+					updated_at = NOW()
+			`, tenantID, customerID, day, dRx, dTx); err != nil {
 				return err
 			}
 		}
@@ -154,6 +166,53 @@ func (s *Store) MonthlyUsageMany(ctx context.Context, tenantID xid.ID, customerI
 			return nil, err
 		}
 		u.Month = m.Format("2006-01")
+		u.TotalBytes = u.RxBytes + u.TxBytes
+		list = append(list, u)
+	}
+	return list, rows.Err()
+}
+
+// DailyUsage adalah total pemakaian satu hari (digabung semua akun bila multi).
+type DailyUsage struct {
+	Day        string `json:"day"`
+	RxBytes    int64  `json:"rx_bytes"`
+	TxBytes    int64  `json:"tx_bytes"`
+	TotalBytes int64  `json:"total_bytes"`
+}
+
+// DailyUsageMonth mengembalikan rincian harian untuk satu bulan (format "2006-01"),
+// diurut dari tanggal 1. Hari tanpa pemakaian tidak muncul (frontend mengisi nol).
+func (s *Store) DailyUsageMonth(ctx context.Context, tenantID xid.ID, customerIDs []xid.ID, month string) ([]DailyUsage, error) {
+	list := []DailyUsage{}
+	if len(customerIDs) == 0 {
+		return list, nil
+	}
+	parsed, err := time.Parse("2006-01", strings.TrimSpace(month))
+	if err != nil {
+		return list, nil
+	}
+	start := time.Date(parsed.Year(), parsed.Month(), 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	if err := s.SetTenantContext(ctx, tenantID); err != nil {
+		return list, err
+	}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT day, COALESCE(SUM(rx_bytes),0), COALESCE(SUM(tx_bytes),0)
+		FROM traffic_daily
+		WHERE tenant_id=$1 AND customer_id = ANY($2) AND day >= $3 AND day < $4
+		GROUP BY day ORDER BY day
+	`, tenantID, customerIDs, start, end)
+	if err != nil {
+		return list, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u DailyUsage
+		var d time.Time
+		if err := rows.Scan(&d, &u.RxBytes, &u.TxBytes); err != nil {
+			return list, err
+		}
+		u.Day = d.Format("2006-01-02")
 		u.TotalBytes = u.RxBytes + u.TxBytes
 		list = append(list, u)
 	}
