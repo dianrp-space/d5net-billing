@@ -127,6 +127,19 @@ input, select, textarea, button { font: inherit; }
   font-size: 0.875rem;
 }
 .btn-ghost:hover { background: var(--panel-muted); }
+/* Tombol mati harus jelas abu-abu (bukan aksen pudar) agar tidak dikira bisa diklik. */
+.btn:disabled,
+.btn:disabled:hover {
+  background: var(--border-strong);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.btn-ghost:disabled,
+.btn-ghost:disabled:hover {
+  background: var(--panel-muted);
+  color: var(--muted);
+  cursor: not-allowed;
+}
 .btn-icon {
   display: inline-flex;
   align-items: center;
