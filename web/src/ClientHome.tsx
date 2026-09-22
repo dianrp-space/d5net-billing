@@ -138,10 +138,18 @@ function DailyUsageChart({ month, days }: { month: string; days: UsageDay[] }) {
     all.push(byDay.get(key) ?? { day: key, rx_bytes: 0, tx_bytes: 0, total_bytes: 0 });
   }
   const pages = Math.max(1, Math.ceil(dim / USAGE_WEEK));
-  // Default halaman terakhir (hari-hari terbaru).
-  const [page, setPage] = useState(pages - 1);
+  // Default: minggu yang memuat hari ini bila melihat bulan berjalan,
+  // halaman terakhir bila melihat bulan lampau.
+  const now0 = new Date();
+  const thisMonthKey = `${now0.getFullYear()}-${String(now0.getMonth() + 1).padStart(2, "0")}`;
+  const defaultPage =
+    month === thisMonthKey
+      ? Math.min(pages - 1, Math.floor((now0.getDate() - 1) / USAGE_WEEK))
+      : pages - 1;
+  const [page, setPage] = useState(defaultPage);
   useEffect(() => {
-    setPage(Math.max(1, Math.ceil(dim / USAGE_WEEK)) - 1);
+    setPage(defaultPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, dim]);
   const safePage = Math.min(Math.max(0, page), pages - 1);
   const slice = all.slice(safePage * USAGE_WEEK, safePage * USAGE_WEEK + USAGE_WEEK);
