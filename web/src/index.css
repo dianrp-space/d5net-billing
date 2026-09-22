@@ -583,6 +583,7 @@ input, select, textarea, button { font: inherit; }
   color: var(--muted);
 }
 .app-content {
+  position: relative;
   flex: 1;
   overflow: auto;
   padding: 2rem;

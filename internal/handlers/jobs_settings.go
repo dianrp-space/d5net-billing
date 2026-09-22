@@ -115,7 +115,9 @@ func registerJobsSettings(api huma.API, d *Deps) {
 		OperationID: "run-jobs-now", Method: http.MethodPost, Path: "/api/settings/jobs/run",
 		Summary: "Run worker cycle now for this tenant", Tags: []string{"Settings"},
 		Security: []map[string][]string{{"bearer": {}}},
-	}, func(ctx context.Context, _ *struct{}) (*struct {
+	}, func(ctx context.Context, input *struct {
+		Body job.RunNowOptions
+	}) (*struct {
 		Body job.TenantCycleResult
 	}, error) {
 		tid, err := requireSettings(ctx, d)
@@ -125,9 +127,15 @@ func registerJobsSettings(api huma.API, d *Deps) {
 		if d.Jobs == nil {
 			return nil, httpx.BadRequest("worker tidak tersedia di proses API")
 		}
-		runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		// Polling router (dial per router) bisa lama bila router banyak;
+		// beri timeout lebih longgar saat opsi itu diminta.
+		timeout := 2 * time.Minute
+		if input.Body.PollRouters {
+			timeout = 5 * time.Minute
+		}
+		runCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		res, err := d.Jobs.RunTenantNow(runCtx, tid)
+		res, err := d.Jobs.RunTenantNow(runCtx, tid, input.Body)
 		if err != nil {
 			return nil, httpx.Internal(err)
 		}

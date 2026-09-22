@@ -50,7 +50,7 @@ type Deps struct {
 
 // JobRunner runs a tenant worker cycle on demand (API process; no ticker).
 type JobRunner interface {
-	RunTenantNow(ctx context.Context, tenantID xid.ID) (job.TenantCycleResult, error)
+	RunTenantNow(ctx context.Context, tenantID xid.ID, opts job.RunNowOptions) (job.TenantCycleResult, error)
 }
 
 func RegisterAll(api huma.API, d *Deps) {

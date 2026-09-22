@@ -92,6 +92,32 @@ func defaultPollerInterval() time.Duration {
 	return time.Duration(store.DefaultJobScheduleSettings().PollerIntervalSeconds) * time.Second
 }
 
+// PollTenantNow mem-poll SEMUA router aktif milik tenant sekaligus, mengabaikan
+// interval per-router. Dipakai tombol "Jalankan sekarang" agar sampling sesi /
+// metrik / traffic ikut terpicu manual. Interval rutin tidak diganggu: jadwal
+// berikutnya tetap dihitung dari lastPollAt normal.
+func (p *Poller) PollTenantNow(ctx context.Context, tenantID xid.ID) (polled, failed int) {
+	if p == nil {
+		return 0, 0
+	}
+	routers, err := p.store.ListRouters(ctx, tenantID)
+	if err != nil {
+		return 0, 0
+	}
+	for _, r := range routers {
+		if !r.IsActive {
+			continue
+		}
+		if err := p.PollRouter(ctx, tenantID, r.ID); err != nil {
+			failed++
+			continue
+		}
+		polled++
+		p.rememberPoll(r.ID, time.Now())
+	}
+	return polled, failed
+}
+
 func (p *Poller) routerPollDue(routerID xid.ID, interval time.Duration, now time.Time) bool {
 	p.lastPollMu.Lock()
 	defer p.lastPollMu.Unlock()

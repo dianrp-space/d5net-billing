@@ -90,7 +90,7 @@ func (w *Worker) runCycle(ctx context.Context) {
 			continue
 		}
 		w.rememberTenantCycle(t.ID, now)
-		res := w.runTenantJobs(ctx, t, cfg, now)
+		res := w.runTenantJobs(ctx, t, cfg, now, false)
 		if res.Invoices > 0 {
 			slog.Info("generated invoices", "tenant", t.Slug, "count", res.Invoices)
 		}
@@ -102,15 +102,28 @@ func (w *Worker) runCycle(ctx context.Context) {
 
 // TenantCycleResult is a short summary after one tenant job cycle.
 type TenantCycleResult struct {
-	Invoices int `json:"invoices"`
-	Isolir   int `json:"isolir"`
-	LateFees int `json:"late_fees"`
-	Notify   int `json:"notify"`
+	Invoices      int `json:"invoices"`
+	Isolir        int `json:"isolir"`
+	LateFees      int `json:"late_fees"`
+	Notify        int `json:"notify"`
+	RoutersPolled int `json:"routers_polled,omitempty"`
+	RoutersFailed int `json:"routers_failed,omitempty"`
+}
+
+// RunNowOptions mengontrol cakupan run manual ("Jalankan sekarang").
+type RunNowOptions struct {
+	// PollRouters ikut sampling router (sesi/metrik/traffic) walau interval
+	// poller belum jatuh tempo.
+	PollRouters bool `json:"poll_routers"`
+	// ForceScheduled jalankan reconcile mingguan + laporan bulanan walau hari/jam
+	// tidak cocok jadwal. ClaimJob tetap dipakai sehingga tidak dobel dalam
+	// sehari (reconcile) / sebulan (laporan).
+	ForceScheduled bool `json:"force_scheduled"`
 }
 
 // RunTenantNow runs billing / isolir / dunning (and due scheduled jobs) immediately,
 // ignoring the configured cycle interval.
-func (w *Worker) RunTenantNow(ctx context.Context, tenantID xid.ID) (TenantCycleResult, error) {
+func (w *Worker) RunTenantNow(ctx context.Context, tenantID xid.ID, opts RunNowOptions) (TenantCycleResult, error) {
 	var out TenantCycleResult
 	if w == nil {
 		return out, fmt.Errorf("worker tidak tersedia")
@@ -128,7 +141,10 @@ func (w *Worker) RunTenantNow(ctx context.Context, tenantID xid.ID) (TenantCycle
 	}
 	now := time.Now()
 	w.rememberTenantCycle(t.ID, now)
-	out = w.runTenantJobs(ctx, *t, cfg, now)
+	out = w.runTenantJobs(ctx, *t, cfg, now, opts.ForceScheduled)
+	if opts.PollRouters && w.poller != nil {
+		out.RoutersPolled, out.RoutersFailed = w.poller.PollTenantNow(ctx, t.ID)
+	}
 	batch := cfg.NotifyBatchSize
 	if batch < 1 {
 		batch = 100
@@ -139,7 +155,7 @@ func (w *Worker) RunTenantNow(ctx context.Context, tenantID xid.ID) (TenantCycle
 	return out, nil
 }
 
-func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.JobScheduleSettings, now time.Time) TenantCycleResult {
+func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.JobScheduleSettings, now time.Time, forceScheduled bool) TenantCycleResult {
 	var out TenantCycleResult
 	if cfg.BillingEnabled {
 		if invoices, err := w.billing.ProcessDueBilling(ctx, t.ID); err == nil {
@@ -173,10 +189,10 @@ func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.Jo
 	}
 	w.processNotifRetention(ctx, t.ID, cfg.NotifLogRetentionDays)
 	if cfg.WeeklyReconcileEnabled {
-		w.weeklyReconcile(ctx, t.ID, now, cfg.WeeklyReconcileWeekday, cfg.WeeklyReconcileHour)
+		w.weeklyReconcile(ctx, t.ID, now, cfg.WeeklyReconcileWeekday, cfg.WeeklyReconcileHour, forceScheduled)
 	}
 	if cfg.MonthlyReportEnabled {
-		w.monthlyReportEmail(ctx, t, now, cfg.MonthlyReportDay, cfg.MonthlyReportHour)
+		w.monthlyReportEmail(ctx, t, now, cfg.MonthlyReportDay, cfg.MonthlyReportHour, forceScheduled)
 	}
 	return out
 }
@@ -225,12 +241,14 @@ func (w *Worker) notifyInvoiceGenerated(ctx context.Context, tenantID xid.ID, in
 		inv.InvoiceNumber, inv.TotalAmount, inv.DueDate.Format("02/01/2006"))
 }
 
-func (w *Worker) weeklyReconcile(ctx context.Context, tenantID xid.ID, now time.Time, weekday, hour int) {
-	if int(now.Weekday()) != weekday {
-		return
-	}
-	if now.Hour() != hour {
-		return
+func (w *Worker) weeklyReconcile(ctx context.Context, tenantID xid.ID, now time.Time, weekday, hour int, force bool) {
+	if !force {
+		if int(now.Weekday()) != weekday {
+			return
+		}
+		if now.Hour() != hour {
+			return
+		}
 	}
 	jobKey := now.Format("2006-01-02")
 	ok, err := w.store.ClaimJob(ctx, tenantID, "weekly_reconcile", jobKey)
@@ -724,9 +742,11 @@ func (w *Worker) processNotifRetention(ctx context.Context, tenantID xid.ID, ret
 	}
 }
 
-func (w *Worker) monthlyReportEmail(ctx context.Context, t store.Tenant, now time.Time, day, hour int) {
-	if now.Day() != day || now.Hour() != hour {
-		return
+func (w *Worker) monthlyReportEmail(ctx context.Context, t store.Tenant, now time.Time, day, hour int, force bool) {
+	if !force {
+		if now.Day() != day || now.Hour() != hour {
+			return
+		}
 	}
 	ok, err := w.store.ClaimJob(ctx, t.ID, "monthly_report", now.Format("2006-01"))
 	if err != nil || !ok {

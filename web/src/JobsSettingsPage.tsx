@@ -46,6 +46,8 @@ type JobRunResult = {
   isolir: number;
   late_fees: number;
   notify: number;
+  routers_polled?: number;
+  routers_failed?: number;
 };
 
 const WEEKDAYS = [
@@ -142,6 +144,9 @@ export function JobsSettingsPage() {
   const [form, setForm] = useState<JobSchedule | null>(null);
   const [offsetsText, setOffsetsText] = useState("-7, -3, 0, 1, 3");
   const [isolirGraceDays, setIsolirGraceDays] = useState(0);
+  // Cakupan run manual ("Jalankan sekarang").
+  const [runPollRouters, setRunPollRouters] = useState(true);
+  const [runForceScheduled, setRunForceScheduled] = useState(false);
 
   useEffect(() => {
     if (!q.data?.schedule) return;
@@ -167,12 +172,20 @@ export function JobsSettingsPage() {
   });
 
   const runNow = useMutation({
-    mutationFn: () => api<JobRunResult>("/api/settings/jobs/run", { method: "POST" }),
+    mutationFn: (body: { poll_routers: boolean; force_scheduled: boolean }) =>
+      api<JobRunResult>("/api/settings/jobs/run", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ["jobs-runs"] });
-      void toastSuccess(
-        `Siklus selesai. Tagihan baru ${res.invoices} · Isolir ${res.isolir} · Denda ${res.late_fees} · Notifikasi ${res.notify}`,
-      );
+      const parts = [
+        `Tagihan baru ${res.invoices}`,
+        `Isolir ${res.isolir}`,
+        `Denda ${res.late_fees}`,
+        `Notifikasi ${res.notify}`,
+      ];
+      if (res.routers_polled || res.routers_failed) {
+        parts.push(`Router ${res.routers_polled ?? 0} ok${res.routers_failed ? `, ${res.routers_failed} gagal` : ""}`);
+      }
+      void toastSuccess(`Siklus selesai. ${parts.join(" · ")}`);
     },
     onError: (e: Error) => void toastError(e.message || "Gagal menjalankan worker"),
   });
@@ -216,14 +229,18 @@ export function JobsSettingsPage() {
   }
 
   async function onRunNow() {
+    const extras: string[] = [];
+    if (runPollRouters) extras.push("sampling router (sesi/metrik/traffic)");
+    if (runForceScheduled) extras.push("paksa reconcile + laporan walau di luar jadwal");
     const ok = await confirm({
       title: "Jalankan worker sekarang?",
       description:
-        "Tagihan jatuh tempo, auto isolir, pengingat, dan antrian notifikasi akan diproses segera — tidak menunggu interval.",
+        "Tagihan jatuh tempo, auto isolir, pengingat, dan antrian notifikasi akan diproses segera — tidak menunggu interval." +
+        (extras.length ? ` Termasuk: ${extras.join("; ")}.` : ""),
       confirmLabel: "Jalankan",
     });
     if (!ok) return;
-    runNow.mutate();
+    runNow.mutate({ poll_routers: runPollRouters, force_scheduled: runForceScheduled });
   }
 
   function resetDefaults() {
@@ -251,10 +268,37 @@ export function JobsSettingsPage() {
         </div>
       }
     >
-      <p className="mb-5 max-w-2xl text-sm text-[var(--muted)]">
+      <p className="mb-3 max-w-2xl text-sm text-[var(--muted)]">
         Atur interval worker (tagihan/isolir) dan poller router (login API MikroTik untuk metrik). Reconcile dan
-        laporan tetap sekali per jadwal (idempoten).
+        laporan tetap sekali per jadwal (idempoten) kecuali opsi paksa di bawah dicentang.
       </p>
+      <div className="mb-5 flex max-w-2xl flex-wrap gap-x-6 gap-y-2 rounded-[var(--radius-md,0.65rem)] border border-[var(--border)] bg-[var(--panel)] p-3">
+        <span className="w-full text-xs font-semibold tracking-wide text-[var(--muted)]">CAKUPAN RUN MANUAL</span>
+        <label className="flex cursor-pointer items-start gap-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={runPollRouters}
+            onCheckedChange={(v) => setRunPollRouters(v === true)}
+          />
+          <span>
+            <span className="block font-medium">Sertakan sampling router</span>
+            <span className="block text-xs text-[var(--muted)]">Sesi, CPU/memori, dan traffic ikut dibaca sekarang.</span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={runForceScheduled}
+            onCheckedChange={(v) => setRunForceScheduled(v === true)}
+          />
+          <span>
+            <span className="block font-medium">Paksa reconcile + laporan</span>
+            <span className="block text-xs text-[var(--muted)]">
+              Abaikan jadwal hari/jam (tetap maks. 1x sehari / 1x sebulan).
+            </span>
+          </span>
+        </label>
+      </div>
 
       {q.isLoading || !form ? (
         <p className="text-sm text-[var(--muted)]">Memuat pengaturan…</p>
