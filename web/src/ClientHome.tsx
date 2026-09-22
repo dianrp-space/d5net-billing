@@ -17,7 +17,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { formatBytesID, formatRp, IconButton, invoiceStatusLabel, paymentStatusLabel, Section, SecretInput, subscriptionStatusLabel, Table, ticketStatusHint, ticketStatusLabel, ticketStatusTone } from "./ui";
+import { formatBytesID, formatRp, FormDialog, IconButton, invoiceStatusLabel, paymentStatusLabel, Section, SecretInput, subscriptionStatusLabel, Table, ticketStatusHint, ticketStatusLabel, ticketStatusTone } from "./ui";
 import { IconBan, IconBanknote, IconChart, IconDownload, IconGauge, IconLogout, IconShield, IconTicket, IconUser } from "./icons";
 import { PortalPayHost } from "./PayMethodDialog";
 import {
@@ -352,6 +352,10 @@ export function ClientHome({
   const multi = accounts.length > 1;
   const [pwAccount, setPwAccount] = useState("");
   const [payInv, setPayInv] = useState<PayableInvoice | null>(null);
+  // Picker bayar: bila >1 tagihan terbuka, pelanggan pilih mana yang dibayar.
+  const [payPickOpen, setPayPickOpen] = useState(false);
+  const [payPickIds, setPayPickIds] = useState<string[]>([]);
+  const [payingWalletBulk, setPayingWalletBulk] = useState(false);
   const paymentReturnHandled = useRef(false);
   const [changePlanSub, setChangePlanSub] = useState<PortalSub | null>(null);
   const [changePlanInitialId, setChangePlanInitialId] = useState("");
@@ -691,6 +695,61 @@ export function ClientHome({
     }
     if (!isInvoiceUnpaid(inv)) return;
     setPayInv(inv);
+  }
+
+  // Entry bayar dari beranda: 1 tagihan → langsung; >1 → dialog pilih dulu
+  // agar tidak diam-diam hanya membayar satu tagihan dari total yang tampil.
+  function openPayPicker() {
+    if (unpaidInvoices.length <= 1) {
+      if (unpaidInvoices[0]) startPay(unpaidInvoices[0]);
+      return;
+    }
+    setPayPickIds(unpaidInvoices.map((i) => String(i.id || "")).filter(Boolean));
+    setPayPickOpen(true);
+  }
+
+  // Bayar beberapa tagihan terpilih sekaligus dari saldo (berurutan).
+  async function paySelectedWithWallet() {
+    const list = unpaidInvoices.filter((i) => i.id && payPickIds.includes(String(i.id)));
+    if (list.length === 0) {
+      void toastError("Pilih dulu tagihan yang mau dibayar.");
+      return;
+    }
+    if (!data.portal_token) {
+      void toastError("Sesi portal lama. Keluar lalu login ulang.");
+      return;
+    }
+    const total = list.reduce((s, i) => s + invoiceRemaining(i), 0);
+    if ((walletQ.data?.balance ?? 0) < total) {
+      void toastError(`Saldo tidak cukup (butuh ${formatRp(total)}). Silakan topup dulu.`);
+      return;
+    }
+    setPayingWalletBulk(true);
+    let ok = 0;
+    try {
+      for (const inv of list) {
+        const res = await api<{ paid: boolean; balance: number }>(
+          `/api/portal/invoices/${inv.id}/pay-with-wallet`,
+          { method: "POST", headers: portalHeaders },
+        );
+        if (res.paid) ok++;
+        else break;
+      }
+    } catch (e: unknown) {
+      void toastError(e instanceof Error ? e.message : "Gagal membayar dari saldo");
+    } finally {
+      setPayingWalletBulk(false);
+      void qc.invalidateQueries({ queryKey: ["portal-invoices", data.tenant_slug] });
+      void qc.invalidateQueries({ queryKey: ["portal-payments", data.tenant_slug] });
+      void qc.invalidateQueries({ queryKey: ["portal-subscriptions", data.tenant_slug] });
+      void qc.invalidateQueries({ queryKey: ["portal-wallet", data.tenant_slug] });
+    }
+    if (ok === list.length) {
+      void toastSuccess(`${ok} tagihan dibayar dari saldo`);
+      setPayPickOpen(false);
+    } else if (ok > 0) {
+      void toastError(`${ok} dari ${list.length} tagihan terbayar, sisanya tertunda.`);
+    }
   }
 
   // Bayar tagihan langsung dari saldo (mis. tagihan manual). Saldo harus cukup.
@@ -1164,7 +1223,11 @@ export function ClientHome({
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold">
-                        {isolirSubs.length > 0 ? "Layanan diisolir" : "Tagihan belum dibayar"}
+                        {isolirSubs.length > 0
+                          ? "Layanan diisolir"
+                          : unpaidInvoices.length > 1
+                            ? `${unpaidInvoices.length} tagihan belum dibayar`
+                            : "Tagihan belum dibayar"}
                       </p>
                       <p className="mt-1 text-sm text-[var(--muted)]">
                         {isolirSubs.length > 0
@@ -1189,7 +1252,31 @@ export function ClientHome({
                         </ul>
                       ) : null}
                       {unpaidTotal > 0 ? (
-                        <p className="mt-2 text-sm font-semibold">Tagihan terbuka {formatRp(unpaidTotal)}</p>
+                        unpaidInvoices.length > 1 ? (
+                          <>
+                            <p className="mt-2 text-sm font-semibold">
+                              {unpaidInvoices.length} tagihan terbuka · total {formatRp(unpaidTotal)}
+                            </p>
+                            <ul className="mt-1 grid gap-0.5 text-sm">
+                              {unpaidInvoices.map((i) => (
+                                <li key={String(i.id || i.invoice_number)} className="flex flex-wrap justify-between gap-2">
+                                  <span>
+                                    {i.invoice_number || "Tagihan"}
+                                    {i.due_date ? (
+                                      <span className="text-[var(--muted)]">
+                                        {" "}
+                                        · jatuh tempo {new Date(i.due_date).toLocaleDateString("id-ID")}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                  <span className="font-medium tabular-nums">{formatRp(invoiceRemaining(i))}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        ) : (
+                          <p className="mt-2 text-sm font-semibold">Tagihan terbuka {formatRp(unpaidTotal)}</p>
+                        )
                       ) : isolirSubs.length > 0 ? (
                         <p className="mt-2 text-sm text-[var(--muted)]">
                           Tidak ada tagihan terbuka. Hubungi admin jika internet masih terisolir.
@@ -1201,7 +1288,10 @@ export function ClientHome({
                             type="button"
                             className="btn"
                             disabled={payingWallet === firstUnpaid.id}
-                            onClick={() => void payWithWallet(firstUnpaid)}
+                            onClick={() => {
+                              if (unpaidInvoices.length > 1) openPayPicker();
+                              else void payWithWallet(firstUnpaid);
+                            }}
                           >
                             {payingWallet === firstUnpaid.id ? "Memproses…" : "Bayar dengan saldo"}
                           </button>
@@ -1210,7 +1300,10 @@ export function ClientHome({
                           <button
                             type="button"
                             className={canPayWithWallet(firstUnpaid) ? "btn-ghost" : "btn"}
-                            onClick={() => startPay(firstUnpaid)}
+                            onClick={() => {
+                              if (unpaidInvoices.length > 1) openPayPicker();
+                              else startPay(firstUnpaid);
+                            }}
                           >
                             Bayar sekarang
                           </button>
@@ -1894,6 +1987,109 @@ export function ClientHome({
           }
         }}
       />
+
+      <FormDialog
+        open={payPickOpen}
+        title="Pilih tagihan yang dibayar"
+        onClose={() => {
+          if (!payingWalletBulk) setPayPickOpen(false);
+        }}
+      >
+        <div className="grid gap-3">
+          <p className="text-sm text-[var(--muted)]">
+            Centang tagihan yang mau dibayar — boleh sebagian atau semuanya. Pembayaran gateway
+            diproses per tagihan, sedangkan saldo bisa melunasi beberapa sekaligus.
+          </p>
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              checked={unpaidInvoices.length > 0 && payPickIds.length === unpaidInvoices.length}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  setPayPickIds(unpaidInvoices.map((i) => String(i.id || "")).filter(Boolean));
+                } else {
+                  setPayPickIds([]);
+                }
+              }}
+            />
+            Pilih semua ({unpaidInvoices.length})
+          </label>
+          <div className="grid gap-2">
+            {unpaidInvoices.map((i) => {
+              const id = String(i.id || "");
+              const checked = payPickIds.includes(id);
+              return (
+                <label
+                  key={id || i.invoice_number}
+                  className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--border)] p-3"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => {
+                      if (e.target.checked) setPayPickIds((prev) => [...prev, id]);
+                      else setPayPickIds((prev) => prev.filter((x) => x !== id));
+                    }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold">{i.invoice_number || "Tagihan"}</span>
+                    <span className="block text-xs text-[var(--muted)]">
+                      {multi && (i.customer_code || i.customer_name)
+                        ? `${accountLabel(i.customer_code, i.customer_name)} · `
+                        : ""}
+                      {i.due_date ? `Jatuh tempo ${new Date(i.due_date).toLocaleDateString("id-ID")} · ` : ""}
+                      Sisa {formatRp(invoiceRemaining(i))}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-ghost shrink-0 whitespace-nowrap text-sm"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setPayPickOpen(false);
+                      startPay(i);
+                    }}
+                  >
+                    Bayar
+                  </button>
+                </label>
+              );
+            })}
+          </div>
+          {(() => {
+            const picked = unpaidInvoices.filter((i) => i.id && payPickIds.includes(String(i.id)));
+            const total = picked.reduce((s, i) => s + invoiceRemaining(i), 0);
+            const balance = walletQ.data?.balance ?? 0;
+            const canBulkWallet =
+              walletQ.data?.enabled && picked.length > 0 && total > 0 && balance >= total;
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-3">
+                <p className="text-sm">
+                  Terpilih <span className="font-semibold">{picked.length}</span> · total{" "}
+                  <span className="font-semibold tabular-nums">{formatRp(total)}</span>
+                </p>
+                {walletQ.data?.enabled ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!canBulkWallet || payingWalletBulk}
+                    title={
+                      picked.length === 0
+                        ? "Pilih dulu tagihannya"
+                        : balance < total
+                          ? `Saldo tidak cukup (saldo ${formatRp(balance)})`
+                          : `Bayar ${picked.length} tagihan dari saldo`
+                    }
+                    onClick={() => void paySelectedWithWallet()}
+                  >
+                    {payingWalletBulk ? "Memproses…" : `Bayar ${picked.length || ""} dengan saldo`.trim()}
+                  </button>
+                ) : null}
+              </div>
+            );
+          })()}
+        </div>
+      </FormDialog>
 
       <PortalPayHost
         invoice={payInv}
