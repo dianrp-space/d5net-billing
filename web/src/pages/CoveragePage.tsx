@@ -392,7 +392,7 @@ export function CoveragePage({ canEdit, onNavigate }: { canEdit: boolean; onNavi
   return (
     <Section title="Coverage">
       <p className="mb-4 max-w-3xl text-sm text-[var(--muted)]">
-        Lingkaran berwarna di peta adalah area coverage: hijau zaitun dari pusat POP, biru dari pusat ODP.
+        Lingkaran berwarna di peta adalah area coverage: magenta dari pusat POP, biru dari pusat ODP.
         Isi koordinat atau klik peta untuk cek apakah titik itu masuk jangkauan.
         {canEdit ? " Radius (km) diatur di tabel di bawah." : " Radius diatur oleh tim jaringan di Cluster/POP atau ODP."}
       </p>

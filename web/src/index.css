@@ -725,7 +725,7 @@ input, select, textarea, button { font: inherit; }
   background: #5a5a40;
 }
 .ftth-map-legend-swatch--pop {
-  background: #5a5a40;
+  background: #d946ef;
   border-radius: 3px 3px 1px 1px;
 }
 .ftth-map-legend-swatch--odp {
@@ -743,8 +743,8 @@ input, select, textarea, button { font: inherit; }
   box-shadow: none;
 }
 .ftth-map-legend-swatch--ring-pop {
-  border: 2px solid #5a5a40;
-  background: color-mix(in srgb, #5a5a40 28%, transparent);
+  border: 2px solid #d946ef;
+  background: color-mix(in srgb, #d946ef 28%, transparent);
 }
 .ftth-map-legend-swatch--ring-odp {
   border: 2px solid #2563eb;

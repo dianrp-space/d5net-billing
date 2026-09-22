@@ -27,16 +27,37 @@ const boxGlyph = `<rect x="18" y="20" width="28" height="24" rx="4"/><path d="M2
 const homeGlyph = `<path d="M20 32l12-10 12 10M24 31v14h16V31M30 45v-7h4v7"/>`;
 
 export const EXAMPLE_ICONS: ExampleIcon[] = [
-  { key: "pop-tower", label: "POP menara", kind: "pop", svg: pin("#5A5A40", `<path d="M32 18v16M28.6 20l3.4-3 3.4 3M27 36h10M29 24h6M30 29h4"/>`) },
+  { key: "pop-tower", label: "POP menara", kind: "pop", svg: pin("#d946ef", `<path d="M32 18v16M28.6 20l3.4-3 3.4 3M27 36h10M29 24h6M30 29h4"/>`) },
   { key: "odp-box", label: "ODP kotak", kind: "odp", svg: pin("#2563eb", `<rect x="25" y="17" width="14" height="12" rx="2"/><path d="M28 21h8M28 24h8M28 27h5"/>`) },
   { key: "customer-home", label: "Pelanggan rumah", kind: "customer", svg: pin("#15803d", `<path d="M25 26l7-6 7 6M27 25.5V33h10v-7.5M30 33v-4h4v4"/>`) },
-  { key: "pin-pop", label: "Badge POP", kind: "pop", svg: badge("#5A5A40", `<circle cx="32" cy="32" r="30" fill="__FILL__" stroke="#fff" stroke-width="4"/>`, towerGlyph) },
+  { key: "pin-pop", label: "Badge POP", kind: "pop", svg: badge("#d946ef", `<circle cx="32" cy="32" r="30" fill="__FILL__" stroke="#fff" stroke-width="4"/>`, towerGlyph) },
   { key: "pin-odp", label: "Badge ODP", kind: "odp", svg: badge("#2563eb", `<rect x="4" y="4" width="56" height="56" rx="14" fill="__FILL__" stroke="#fff" stroke-width="4"/>`, boxGlyph) },
   { key: "pin-customer", label: "Badge Pelanggan", kind: "customer", svg: badge("#15803d", `<circle cx="32" cy="32" r="30" fill="__FILL__" stroke="#fff" stroke-width="4"/>`, homeGlyph) },
 ];
 
-export function exampleIconFile(icon: ExampleIcon): File {
-  return new File([icon.svg], `${icon.key}.svg`, { type: "image/svg+xml", lastModified: Date.now() });
+/**
+ * Raster contoh ikon ke PNG via canvas sebelum diunggah. Server menolak SVG
+ * (Stored XSS), jadi contoh bawaan wajib lewat jalur ini.
+ * Ukuran 128px mengikuti MaxMapIconEdge di backend.
+ */
+export async function exampleIconPngFile(icon: ExampleIcon): Promise<File> {
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(icon.svg)}`;
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("gagal render contoh ikon"));
+    img.src = url;
+  });
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas tidak didukung browser ini");
+  ctx.drawImage(img, 0, 0, size, size);
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("gagal render contoh ikon");
+  return new File([blob], `${icon.key}.png`, { type: "image/png", lastModified: Date.now() });
 }
 
 export function exampleIconDataUrl(icon: ExampleIcon): string {

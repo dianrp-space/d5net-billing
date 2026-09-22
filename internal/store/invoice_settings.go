@@ -10,6 +10,15 @@ import (
 
 const invoiceSettingKey = "invoice.customization"
 
+// Warna default dokumen invoice (dipertahankan dari desain awal).
+const (
+	// DefaultInvoiceAccent adalah hijau zaitun untuk bar aksen, judul,
+	// header tabel, dan garis pemisah.
+	DefaultInvoiceAccent = "#5A5A40"
+	// DefaultInvoiceStamp adalah biru untuk watermark/stempel LUNAS.
+	DefaultInvoiceStamp = "#1F40B0"
+)
+
 // InvoiceSettings holds tenant-configurable content for the invoice document
 // (header/company identity, payment instructions and footer). Empty fields fall
 // back to sensible defaults derived from the tenant profile at render time.
@@ -27,6 +36,12 @@ type InvoiceSettings struct {
 	PaymentInstructions string `json:"payment_instructions"`
 	// FooterNote printed at the bottom (terms, thank-you note).
 	FooterNote string `json:"footer_note"`
+	// AccentColor ("#rrggbb") untuk bar aksen, judul INVOICE, header tabel,
+	// dan garis pemisah. Kosong = default hijau zaitun.
+	AccentColor string `json:"accent_color"`
+	// StampColor ("#rrggbb") untuk watermark/stempel LUNAS.
+	// Kosong = default biru.
+	StampColor string `json:"stamp_color"`
 }
 
 func trimInvoiceMultiline(s string) string {
@@ -46,6 +61,16 @@ func NormalizeInvoiceSettings(c InvoiceSettings) InvoiceSettings {
 	c.TaxID = strings.TrimSpace(c.TaxID)
 	c.PaymentInstructions = trimInvoiceMultiline(c.PaymentInstructions)
 	c.FooterNote = trimInvoiceMultiline(c.FooterNote)
+	if v := NormalizeHexColor(c.AccentColor); v != "" {
+		c.AccentColor = v
+	} else {
+		c.AccentColor = DefaultInvoiceAccent
+	}
+	if v := NormalizeHexColor(c.StampColor); v != "" {
+		c.StampColor = v
+	} else {
+		c.StampColor = DefaultInvoiceStamp
+	}
 	return c
 }
 

@@ -7,7 +7,7 @@ import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatRp, FormDialog, IconButton, Section, SecretInput, Table } from "./ui";
-import { EXAMPLE_ICONS, exampleIconDataUrl, exampleIconFile, type ExampleIcon } from "./exampleIcons";
+import { EXAMPLE_ICONS, exampleIconDataUrl, exampleIconPngFile, type ExampleIcon } from "./exampleIcons";
 import { DEFAULT_PRIMARY, parseHexColor, setTenantPrimaryColor } from "./theme";
 import { cn } from "./lib/utils";
 import { usePersistedTab } from "./navPersist";
@@ -493,7 +493,7 @@ export function GeneralSettingsPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <BrandAssetField
                 label="Logo"
-                hint="PNG atau SVG transparan. Tampil di sidebar, login, dan dokumen."
+                hint="PNG/JPG/WebP transparan. Tampil di sidebar, login, dan dokumen."
                 url={eff?.logo_url}
                 fromOwner={Boolean(from?.logo_url)}
                 onFile={(f) => void onUpload("logo", f)}
@@ -501,7 +501,7 @@ export function GeneralSettingsPage() {
               />
               <BrandAssetField
                 label="Favicon"
-                hint="Ikon tab browser. ICO, PNG, atau SVG."
+                hint="Ikon tab browser. PNG atau ICO."
                 url={eff?.favicon_url}
                 fromOwner={Boolean(from?.favicon_url)}
                 onFile={(f) => void onUpload("favicon", f)}
@@ -620,7 +620,26 @@ type InvoiceSettingsData = {
   tax_id: string;
   payment_instructions: string;
   footer_note: string;
+  accent_color: string;
+  stamp_color: string;
 };
+
+const DEFAULT_INVOICE_ACCENT = "#5A5A40";
+const DEFAULT_INVOICE_STAMP = "#1F40B0";
+
+function normInvoiceHex(value: string | undefined, fallback: string): string {
+  const m = String(value || "")
+    .trim()
+    .match(/^#?([0-9a-fA-F]{6})$/);
+  return m ? `#${m[1].toUpperCase()}` : fallback;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 const EMPTY_INVOICE_SETTINGS: InvoiceSettingsData = {
   company_name: "",
@@ -631,6 +650,8 @@ const EMPTY_INVOICE_SETTINGS: InvoiceSettingsData = {
   tax_id: "",
   payment_instructions: "",
   footer_note: "",
+  accent_color: "",
+  stamp_color: "",
 };
 
 export function InvoiceSettingsPage() {
@@ -677,8 +698,8 @@ export function InvoiceSettingsPage() {
       ) : (
         <div className="grid gap-6">
           <p className="text-sm text-[var(--muted)]">
-            Data ini tampil di dokumen invoice PDF (header perusahaan, cara pembayaran, dan catatan kaki). Bisa
-            diunduh admin dari menu Tagihan maupun pelanggan dari portal.
+            Data ini tampil di dokumen invoice PDF (header perusahaan, cara pembayaran, catatan kaki, dan warna
+            aksen + stempel LUNAS). Bisa diunduh admin dari menu Tagihan maupun pelanggan dari portal.
           </p>
 
           <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
@@ -725,6 +746,57 @@ export function InvoiceSettingsPage() {
             <label className="grid gap-1 text-sm">
               <span className="font-medium">NPWP / Tax ID</span>
               <input className="input" value={form.tax_id} onChange={set("tax_id")} placeholder="00.000.000.0-000.000" />
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Warna aksen</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  aria-label="Pilih warna aksen"
+                  className="h-9 w-12 shrink-0 cursor-pointer rounded border border-[var(--border)] bg-transparent p-0.5"
+                  value={normInvoiceHex(form.accent_color, DEFAULT_INVOICE_ACCENT)}
+                  onChange={(e) => setForm((f) => ({ ...f, accent_color: e.target.value }))}
+                />
+                <input
+                  className="input flex-1"
+                  value={form.accent_color}
+                  onChange={set("accent_color")}
+                  placeholder={DEFAULT_INVOICE_ACCENT}
+                  spellCheck={false}
+                />
+              </div>
+              <span className="text-xs text-[var(--muted)]">Bar atas, judul, header tabel, dan garis.</span>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">Warna stempel LUNAS</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  aria-label="Pilih warna stempel LUNAS"
+                  className="h-9 w-12 shrink-0 cursor-pointer rounded border border-[var(--border)] bg-transparent p-0.5"
+                  value={normInvoiceHex(form.stamp_color, DEFAULT_INVOICE_STAMP)}
+                  onChange={(e) => setForm((f) => ({ ...f, stamp_color: e.target.value }))}
+                />
+                <input
+                  className="input flex-1"
+                  value={form.stamp_color}
+                  onChange={set("stamp_color")}
+                  placeholder={DEFAULT_INVOICE_STAMP}
+                  spellCheck={false}
+                />
+              </div>
+              <span className="text-xs text-[var(--muted)]">
+                Watermark diagonal pada invoice lunas.{" "}
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => setForm((f) => ({ ...f, accent_color: "", stamp_color: "" }))}
+                >
+                  Kembalikan default
+                </button>
+              </span>
             </label>
 
             <label className="grid gap-1 text-sm sm:col-span-2">
@@ -803,6 +875,8 @@ function InvoiceFormPreview({
 }) {
   const [paidPreview, setPaidPreview] = useState(false);
   const company = form.company_name.trim() || defaultCompany || "Nama Perusahaan";
+  const accent = normInvoiceHex(form.accent_color, DEFAULT_INVOICE_ACCENT);
+  const stamp = normInvoiceHex(form.stamp_color, DEFAULT_INVOICE_STAMP);
   const addressLines = previewLines(form.address);
   const contact = [form.phone.trim() && `Telp: ${form.phone.trim()}`, form.email.trim()].filter(Boolean);
   const payLines = previewLines(form.payment_instructions);
@@ -827,13 +901,13 @@ function InvoiceFormPreview({
         Pratinjau status lunas (watermark)
       </label>
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-white text-[13px] leading-relaxed text-slate-800 shadow-sm">
-      <div className="h-1.5 bg-[#5a5a40]" aria-hidden />
+      <div className="h-1.5" style={{ background: accent }} aria-hidden />
       <div className="relative mx-auto max-w-[560px] p-6">
         {paidPreview ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden" aria-hidden>
             <span
-              className="select-none text-[96px] font-bold tracking-[0.28em] text-blue-800/15"
-              style={{ transform: "rotate(-35deg)" }}
+              className="select-none text-[96px] font-bold tracking-[0.28em]"
+              style={{ color: hexToRgba(stamp, 0.15), transform: "rotate(-35deg)" }}
             >
               LUNAS
             </span>
@@ -862,8 +936,8 @@ function InvoiceFormPreview({
             </div>
           </div>
           <div className="shrink-0">
-            <p className="text-right text-xl font-bold tracking-wide text-[#5a5a40]">INVOICE</p>
-            <div className="my-1 border-t border-[#5a5a40]" aria-hidden />
+            <p className="text-right text-xl font-bold tracking-wide" style={{ color: accent }}>INVOICE</p>
+            <div className="my-1 border-t" style={{ borderColor: accent }} aria-hidden />
             <div className="grid w-[248px] grid-cols-[74px_1fr] gap-x-1.5 gap-y-0.5 text-[11px]">
               {(
                 [
@@ -873,13 +947,18 @@ function InvoiceFormPreview({
                   [
                     "Status",
                     paidPreview ? "LUNAS" : "BELUM DIBAYAR",
-                    `font-semibold ${paidPreview ? "text-[#5a5a40]" : "text-slate-700"}`,
+                    paidPreview ? "font-semibold" : "font-semibold text-slate-700",
                   ],
                 ] as [string, string, string][]
               ).map(([label, value, cls]) => (
                 <Fragment key={label}>
                   <span className="text-slate-500">{label}</span>
-                  <span className={`break-words ${cls}`}>{value}</span>
+                  <span
+                    className={`break-words ${cls}`}
+                    style={label === "Status" && paidPreview ? { color: accent } : undefined}
+                  >
+                    {value}
+                  </span>
                 </Fragment>
               ))}
             </div>
@@ -889,7 +968,7 @@ function InvoiceFormPreview({
         <div className="my-4 border-t border-slate-200" />
 
         {/* Bill to */}
-        <p className="text-[10px] font-semibold tracking-wide text-[#5a5a40]">DITAGIHKAN KEPADA</p>
+        <p className="text-[10px] font-semibold tracking-wide" style={{ color: accent }}>DITAGIHKAN KEPADA</p>
         <p className="mt-1 font-semibold text-slate-900">Budi Santoso</p>
         <p className="text-[11px] text-slate-500">D5N-2026090001</p>
         <p className="text-[11px] text-slate-500">Jl. Kenanga No. 5</p>
@@ -898,7 +977,7 @@ function InvoiceFormPreview({
         {/* Items */}
         <table className="mt-4 w-full border-collapse text-[12px]" style={{ border: "1px solid #d8d5cc" }}>
           <thead>
-            <tr className="bg-[#5a5a40] text-[11px] text-white">
+            <tr className="text-[11px] text-white" style={{ background: accent }}>
               <th className="border border-[#d8d5cc] px-2 py-1.5 text-left font-semibold">Deskripsi</th>
               <th className="w-12 border border-[#d8d5cc] px-2 py-1.5 text-right font-semibold">Qty</th>
               <th className="w-24 border border-[#d8d5cc] px-2 py-1.5 text-right font-semibold">Harga</th>
@@ -927,7 +1006,7 @@ function InvoiceFormPreview({
             <span>Pajak</span>
             <span>{formatRp(PREVIEW_TAX)}</span>
           </div>
-          <div className="mt-1 flex justify-between border-t border-[#5a5a40] py-1 font-bold text-slate-900">
+          <div className="mt-1 flex justify-between border-t py-1 font-bold text-slate-900" style={{ borderColor: accent }}>
             <span>TOTAL</span>
             <span>{formatRp(PREVIEW_TOTAL)}</span>
           </div>
@@ -948,7 +1027,7 @@ function InvoiceFormPreview({
         {/* Payment instructions */}
         {payLines.length ? (
           <div className="mt-5">
-            <p className="text-[10px] font-semibold tracking-wide text-[#5a5a40]">CARA PEMBAYARAN</p>
+            <p className="text-[10px] font-semibold tracking-wide" style={{ color: accent }}>CARA PEMBAYARAN</p>
             {payLines.map((l, i) => (
               <p key={`pay-${i}`} className="text-[11px] text-slate-600">
                 {l}
@@ -1050,7 +1129,7 @@ function BrandAssetField({
         <input
           ref={inputRef}
           type="file"
-          accept="image/*,.ico,.svg"
+          accept="image/png,image/jpeg,image/webp,image/gif"
           className="sr-only"
           tabIndex={-1}
           onChange={(e) => {
@@ -1069,7 +1148,14 @@ function BrandAssetField({
               title={`Pakai contoh ${ex.label}`}
               aria-label={`Pakai contoh ${ex.label}`}
               className="rounded-md border border-[var(--border)] bg-[var(--panel-muted)]/50 p-1 hover:border-[var(--accent)]"
-              onClick={() => onFile(exampleIconFile(ex))}
+              onClick={() => {
+                // Contoh bawaan diraster ke PNG dulu (server menolak SVG).
+                void exampleIconPngFile(ex)
+                  .then((f) => onFile(f))
+                  .catch((e: unknown) =>
+                    void toastError(e instanceof Error ? e.message : "Gagal pakai contoh ikon"),
+                  );
+              }}
             >
               <img src={exampleIconDataUrl(ex)} alt="" className="size-6 object-contain" />
             </button>

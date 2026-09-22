@@ -45,9 +45,79 @@ const (
 	colDanger = "0.55 0.20 0.16"
 )
 
+// invPalette adalah warna dokumen yang diturunkan dari pengaturan tenant
+// (accent_color + stamp_color). Nilai kosong/invalid jatuh ke default lama
+// agar invoice lama dan test tidak berubah tampilan.
+type invPalette struct {
+	accent string
+	head   string
+	fill   string
+	stamp  string
+}
+
+func invoicePalette(cfg store.InvoiceSettings) invPalette {
+	if cfg.AccentColor == "" {
+		cfg.AccentColor = store.DefaultInvoiceAccent
+	}
+	if cfg.StampColor == "" {
+		cfg.StampColor = store.DefaultInvoiceStamp
+	}
+	return invPalette{
+		accent: pdfColor(cfg.AccentColor, colOlive),
+		head:   pdfColor(cfg.AccentColor, colHead),
+		fill:   pdfTint(cfg.AccentColor, 0.05, colFill),
+		stamp:  pdfColor(cfg.StampColor, colStamp),
+	}
+}
+
+// pdfColor mengubah "#rrggbb" menjadi triple PDF "r g b" (0..1, 2 desimal).
+// Gagal parse → fallback agar render tidak pernah rusak.
+func pdfColor(hex, fallback string) string {
+	hex = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(hex)), "#")
+	if len(hex) != 6 {
+		return fallback
+	}
+	var rgb [3]float64
+	for i := 0; i < 3; i++ {
+		var v int
+		for _, ch := range hex[i*2 : i*2+2] {
+			d := strings.IndexByte("0123456789abcdef", byte(ch))
+			if d < 0 {
+				return fallback
+			}
+			v = v*16 + d
+		}
+		rgb[i] = float64(v) / 255
+	}
+	return fmt.Sprintf("%.2f %.2f %.2f", rgb[0], rgb[1], rgb[2])
+}
+
+// pdfTint mencampur warna hex dengan putih (t = porsi warna, 0..1) untuk
+// varian terang seperti belang zebra tabel.
+func pdfTint(hex string, t float64, fallback string) string {
+	hex = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(hex)), "#")
+	if len(hex) != 6 || t < 0 || t > 1 {
+		return fallback
+	}
+	var rgb [3]float64
+	for i := 0; i < 3; i++ {
+		var v int
+		for _, ch := range hex[i*2 : i*2+2] {
+			d := strings.IndexByte("0123456789abcdef", byte(ch))
+			if d < 0 {
+				return fallback
+			}
+			v = v*16 + d
+		}
+		rgb[i] = 1 - (1-float64(v)/255)*t
+	}
+	return fmt.Sprintf("%.3f %.3f %.3f", rgb[0], rgb[1], rgb[2])
+}
+
 // RenderPDF produces an ISP-style A4 invoice document.
 func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions) []byte {
 	s := NormalizeRenderOptions(opts)
+	pal := invoicePalette(s.Settings)
 	c := &canvas{}
 
 	company := firstNonEmpty(s.Settings.CompanyName, s.FallbackCompany, "INVOICE")
@@ -72,7 +142,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 	}
 
 	// Top accent bar.
-	c.rectFill(0, pageH-6, pageW, 6, colOlive)
+	c.rectFill(0, pageH-6, pageW, 6, pal.accent)
 
 	y := pageH - 28
 	textX := tableL
@@ -112,9 +182,9 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 
 	// Right meta: title + aligned label/value rows (not a pile of right-aligned strings).
 	rightY := pageH - 28
-	c.textRight(tableR, rightY, 16, fontBold, "INVOICE", colOlive)
+	c.textRight(tableR, rightY, 16, fontBold, "INVOICE", pal.accent)
 	rightY -= 10
-	c.line(metaX, rightY, tableR, rightY, colOlive, 1.2)
+	c.line(metaX, rightY, tableR, rightY, pal.accent, 1.2)
 	rightY -= 16
 	valX := metaX + labelW + 6
 	valW := tableR - valX
@@ -125,7 +195,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 		if emphasis {
 			font = fontBold
 			if invoiceIsPaid(inv) {
-				color = colOlive
+				color = pal.accent
 			} else if strings.EqualFold(invoiceStatusLabel(inv), "Terlambat") {
 				color = colDanger
 			}
@@ -151,7 +221,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 	y -= 20
 
 	// Bill to
-	c.text(tableL, y, 8, fontBold, "DITAGIHKAN KEPADA", colOlive)
+	c.text(tableL, y, 8, fontBold, "DITAGIHKAN KEPADA", pal.accent)
 	y -= 14
 	c.text(tableL, y, 12, fontBold, firstNonEmpty(inv.CustomerName, "Pelanggan"), colInk)
 	y -= 13
@@ -205,7 +275,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 	}
 	tableBottom := tableTop - tableH
 
-	c.rectFill(tableL, tableTop-headerH, contentW, headerH, colHead)
+	c.rectFill(tableL, tableTop-headerH, contentW, headerH, pal.head)
 	hy := tableTop - 14
 	c.textFitLeft(tableL+padX, hy, xQty-tableL-padX*2, 8, fontBold, "Deskripsi", colWhite)
 	c.textFitRight(xHarga-padX, hy, xHarga-xQty-padX*2, 8, fontBold, "Qty", colWhite)
@@ -215,7 +285,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 	ry := tableTop - headerH
 	for i, r := range rows {
 		if i%2 == 1 {
-			c.rectFill(tableL, ry-r.h, contentW, r.h, colFill)
+			c.rectFill(tableL, ry-r.h, contentW, r.h, pal.fill)
 		}
 		textY := ry - 13
 		for j, ln := range r.desc {
@@ -226,7 +296,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 		c.textFitRight(tableR-padX, textY, tableR-xJumlah-padX*2, cellFs, fontBody, r.amt, colInk)
 		ry -= r.h
 	}
-	c.line(tableL, tableTop, tableR, tableTop, colOlive, 0.8)
+	c.line(tableL, tableTop, tableR, tableTop, pal.accent, 0.8)
 	c.line(tableL, tableBottom, tableR, tableBottom, colLine, 0.7)
 	c.line(xQty, tableBottom, xQty, tableTop, colLine, 0.5)
 	c.line(xHarga, tableBottom, xHarga, tableTop, colLine, 0.5)
@@ -254,12 +324,12 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 	if lateFee > 0 {
 		drawTotal("Denda keterlambatan", rupiah(lateFee), false)
 	}
-	c.line(totL, y+6, tableR, y+6, colOlive, 1)
+	c.line(totL, y+6, tableR, y+6, pal.accent, 1)
 	y -= 4
 	drawTotal("TOTAL TAGIHAN", rupiah(inv.TotalAmount), true)
 	if s.AdminFee > 0 {
 		drawTotal("Biaya admin pembayaran online", rupiah(s.AdminFee), false)
-		c.line(totL, y+6, tableR, y+6, colOlive, 0.8)
+		c.line(totL, y+6, tableR, y+6, pal.accent, 0.8)
 		y -= 4
 		payOnline := inv.TotalAmount + s.AdminFee
 		remaining := inv.TotalAmount - inv.PaidAmount
@@ -293,7 +363,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 	// Payment + footer
 	y -= 8
 	if pay := s.Settings.PaymentInstructions; pay != "" {
-		c.text(tableL, y, 8, fontBold, "CARA PEMBAYARAN", colOlive)
+		c.text(tableL, y, 8, fontBold, "CARA PEMBAYARAN", pal.accent)
 		y -= 13
 		for _, ln := range wrapToWidth(pay, 9, contentW, false) {
 			c.text(tableL, y, 9, fontBody, ln, colInk)
@@ -318,7 +388,7 @@ func RenderPDF(inv *store.Invoice, items []store.InvoiceItem, opts RenderOptions
 	c.mediaBottom = mediaBottom
 
 	if invoiceIsPaid(inv) {
-		c.paidWatermark(pageW/2, (pageH+mediaBottom)/2, pageH-mediaBottom)
+		c.paidWatermark(pageW/2, (pageH+mediaBottom)/2, pageH-mediaBottom, pal.stamp)
 	}
 
 	return c.build()
@@ -666,8 +736,11 @@ func (c *canvas) drawJPEG(x, y, w, h float64) {
 	fmt.Fprintf(&c.buf, "q %.2f 0 0 %.2f %.2f %.2f cm /Im1 Do Q\n", w, h, x, y)
 }
 
-func (c *canvas) paidWatermark(cx, cy, contentH float64) {
+func (c *canvas) paidWatermark(cx, cy, contentH float64, stampColor string) {
 	c.watermark = true
+	if stampColor == "" {
+		stampColor = colStamp
+	}
 	size := 64.0
 	if contentH > 0 && contentH < 520 {
 		size = contentH * 0.11
@@ -685,7 +758,7 @@ func (c *canvas) paidWatermark(cx, cy, contentH float64) {
 	off := size * 2.05
 	fmt.Fprintf(&c.buf,
 		"q /GS1 gs 0 Tr %s rg 1 0 0 1 %.1f %.1f cm %.5f %.5f %.5f %.5f 0 0 cm BT /F2 %.1f Tf %.1f 0 Td (LUNAS) Tj ET Q\n",
-		colStamp, cx, cy, cos, sin, -sin, cos, size, -off,
+		stampColor, cx, cy, cos, sin, -sin, cos, size, -off,
 	)
 }
 

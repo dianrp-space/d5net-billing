@@ -210,6 +210,36 @@ func TestRenderPDFWithAdminFee(t *testing.T) {
 	}
 }
 
+func TestRenderPDFCustomColors(t *testing.T) {
+	inv := &store.Invoice{
+		InvoiceNumber: "INV-COLOR",
+		CustomerName:  "Budi",
+		TotalAmount:   10000,
+		PaidAmount:    10000,
+		Status:        "paid",
+		DueDate:       time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC),
+	}
+	out := RenderPDF(inv, []store.InvoiceItem{
+		{Description: "Paket 30Mbps", Quantity: 1, UnitPrice: 10000, Amount: 10000},
+	}, RenderOptions{
+		Settings: store.NormalizeInvoiceSettings(store.InvoiceSettings{
+			CompanyName: "PT Warna",
+			AccentColor: "#ff0000",
+			StampColor:  "#00ff00",
+		}),
+		FallbackCompany: "ISP",
+	})
+	if !bytes.Contains(out, []byte("1.00 0.00 0.00")) {
+		t.Fatal("expected custom accent red in pdf")
+	}
+	if !bytes.Contains(out, []byte("0.00 1.00 0.00")) {
+		t.Fatal("expected custom stamp green in pdf")
+	}
+	if bytes.Contains(out, []byte("0.12 0.25 0.69")) {
+		t.Fatal("default stamp blue must not appear when custom stamp set")
+	}
+}
+
 func TestRupiahGrouping(t *testing.T) {
 	cases := map[int64]string{
 		0:       "Rp 0",
