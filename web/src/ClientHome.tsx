@@ -147,6 +147,9 @@ function DailyUsageChart({ month, days }: { month: string; days: UsageDay[] }) {
   const slice = all.slice(safePage * USAGE_WEEK, safePage * USAGE_WEEK + USAGE_WEEK);
   const nonzero = all.filter((d) => d.total_bytes > 0);
   if (nonzero.length === 0) return null;
+  // Hari ini (zona browser) masih berjalan — akumulasinya bertambah tiap sampling.
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
   const W = 340;
   const H = 130;
@@ -198,9 +201,12 @@ function DailyUsageChart({ month, days }: { month: string; days: UsageDay[] }) {
         <path d={line((d) => d.tx_bytes)} fill="none" stroke={USAGE_COLOR_UP} strokeWidth={2} strokeLinejoin="round" />
         {slice.map((d, i) => (
           <g key={d.day}>
-            <title>{`${Number(d.day.slice(8, 10))} ${monthKeyLabel(month)}: ${formatBytesID(d.total_bytes)} (↓ ${formatBytesID(d.rx_bytes)} · ↑ ${formatBytesID(d.tx_bytes)})`}</title>
+            <title>{`${Number(d.day.slice(8, 10))} ${monthKeyLabel(month)}: ${formatBytesID(d.total_bytes)} (↓ ${formatBytesID(d.rx_bytes)} · ↑ ${formatBytesID(d.tx_bytes)})${d.day === todayKey ? " — hari ini, masih berjalan" : ""}`}</title>
             <circle cx={x(i)} cy={yOf(d.rx_bytes)} r={3} fill={USAGE_COLOR_DOWN} />
             <circle cx={x(i)} cy={yOf(d.tx_bytes)} r={3} fill={USAGE_COLOR_UP} />
+            {d.day === todayKey ? (
+              <circle cx={x(i)} cy={yOf(d.total_bytes)} r={6} fill="none" stroke="currentColor" strokeOpacity={0.5} />
+            ) : null}
             <text x={x(i)} y={H - 5} textAnchor="middle" fontSize={9} fill="currentColor" opacity={0.6}>
               {Number(d.day.slice(8, 10))}
             </text>
@@ -214,6 +220,7 @@ function DailyUsageChart({ month, days }: { month: string; days: UsageDay[] }) {
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block size-2 rounded-full" style={{ background: USAGE_COLOR_UP }} />↑ Upload
         </span>
+        <span>Total akumulasi per hari (bukan realtime). Hari ini masih berjalan.</span>
       </div>
     </div>
   );
