@@ -58,11 +58,11 @@ bulanan.
 | `cmd/migrate` | CLI migrasi (`drp-migrate`) |
 | `cmd/drpctl` | CLI admin (`drpctl`): `create-tenant`, dsb. |
 | `internal/` | Domain: `handlers`, `store`, `billing`, `payment`, `notify`, `job`, `provision`, `monitor`, `auth`, `config`, `sqlcgen`, dll. |
-| `migrations/` | 43 migrasi SQL (goose) |
+| `migrations/` | 46 migrasi SQL (goose) |
 | `queries/` | Query SQL sumber untuk sqlc |
 | `web/` | Frontend React (Vite) |
 | `deploy/` | Template systemd, Nginx, skrip `update.sh`/`rollback.sh`/`upgrade.sh` |
-| `docs/` | Catatan teknis (mis. `routeros.md`) |
+| `docs/` | Catatan teknis (`routeros.md`), audit & checklist keamanan (`SECURITY-AUDIT.md`) |
 
 ---
 
@@ -473,6 +473,16 @@ dikirim sekali (`ClaimJob`).
   `NotifLogRetentionDays` dihapus otomatis (sekali sehari). Antrean `pending` tidak pernah
   dihapus.
 
+### Run manual (Jalankan sekarang)
+
+Tombol **Jalankan sekarang** di menu Cronjob menjalankan siklus worker segera tanpa menunggu
+interval, dengan cakupan yang bisa dipilih:
+
+- **Sertakan sampling router** — poll semua router aktif (sesi, CPU/memori, traffic);
+  interval rutin tidak diganggu (tidak dobel).
+- **Paksa reconcile + laporan** — jalankan reconcile mingguan / laporan bulanan walau di luar
+  jadwal hari/jam; `ClaimJob` tetap mencegah eksekusi ganda (maks. 1x sehari / 1x sebulan).
+
 ### Ops / alert
 
 Kejadian operasional (isolir, drift rekonsiliasi router) dikirim ke **Telegram ops** tenant
@@ -484,6 +494,8 @@ dan dicatat sebagai alert (`alerts`) yang bisa dilihat di lonceng notifikasi adm
 
 - **Pelanggan & penagihan:** pelanggan, paket/plan, langganan (subscription), invoice,
   diskon paket, pembayaran manual & gateway.
+- **Invoice per tenant:** teks perusahaan, cara bayar, catatan kaki, serta **warna aksen**
+  dan **warna stempel LUNAS** yang bisa diatur dari Format Invoice (PDF + pratinjau ikut).
 - **Wallet:** saldo pelanggan, top-up, auto-bayar tagihan dari saldo.
 - **Isolir otomatis:** suspend/resume otomatis di MikroTik saat jatuh tempo / lunas; profil
   isolir + IP pool + portal redirect.
@@ -493,10 +505,15 @@ dan dicatat sebagai alert (`alerts`) yang bisa dilihat di lonceng notifikasi adm
 - **Payment Gateway:** manual, Duitku, DOKU (checkout + QRIS direct).
 - **Messaging:** WhatsApp (GOWA multi-nomor failover), Telegram, Email SMTP; bot WA
   pelanggan (`/tagihan`, `/link`, `/qris`).
-- **Notifikasi:** template per event, broadcast massal, dunning, laporan bulanan, retensi.
-- **Monitoring:** poller sesi/CPU router + **SSE** live (`/events/stream`); alert & lonceng.
-- **Peta & coverage:** FTTH map, ODP, rute kabel, coverage area.
+- **Notifikasi:** template per event, broadcast massal, dunning, laporan bulanan, retensi,
+  run manual dengan cakupan (sampling router, paksa terjadwal).
+- **Monitoring:** poller sesi/CPU router + **SSE** live (`/events/stream`); live traffic
+  pelanggan (rx = download, grafik 3 menit); alert & lonceng.
+- **Peta & coverage:** FTTH map, ODP, rute kabel, coverage area (marker POP magenta).
 - **Operasional:** tiket, voucher, leads (kanban), SLA report, audit log.
+- **Keamanan:** rate-limit login, logout + revoke sesi (termasuk deteksi pakai-ulang refresh
+  token), tolak kunci default saat start, verifikasi signature webhook, tolak upload SVG,
+  security headers — lihat [`docs/SECURITY-AUDIT.md`](docs/SECURITY-AUDIT.md).
 - **Lainnya:** impor pelanggan MySQL legacy, backup/restore JSON + DB, branding upload,
   multi-tema (dark/light), widget Chatwoot.
 
