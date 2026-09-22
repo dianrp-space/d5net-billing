@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "../api";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
-import { IconBanknote, IconDownload, IconImage, IconLock, IconPencil, IconRadar, IconTrash, IconUnplug, IconUpload } from "../icons";
+import { IconBanknote, IconDownload, IconImage, IconLock, IconPencil, IconTraffic, IconTrash, IconUnplug, IconUpload } from "../icons";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
 import { Button, FormDialog, IconButton, Section, Table, formatBpsID, formatRp } from "../ui";
@@ -735,7 +735,7 @@ export function CustomersPage({
               </IconButton>
             ) : null}
             <IconButton label="Live traffic" onClick={() => setLiveCustomer(c)}>
-              <IconRadar />
+              <IconTraffic />
             </IconButton>
             <IconButton label="Dokumentasi / galeri" onClick={() => onOpenGallery(c.id)}>
               <IconImage />
@@ -989,24 +989,6 @@ export function CustomersPage({
             >
               {topupWallet.isPending ? "Menyimpan…" : "Tambah saldo"}
             </Button>
-          </div>
-          <div>
-            <p className="mb-2 text-sm font-medium">Riwayat saldo</p>
-            <Table
-              columns={["Tanggal", "Jenis", "Keterangan", "Nominal"]}
-              hideRowNumber
-              rows={(walletQ.data?.transactions ?? []).map((t) => [
-                new Date(t.created_at).toLocaleString("id-ID"),
-                t.type,
-                t.description || t.reference || "—",
-                <span
-                  key={t.id}
-                  style={{ color: t.amount < 0 ? "var(--danger)" : "var(--ok, #2b9a66)" }}
-                >
-                  {formatRp(t.amount)}
-                </span>,
-              ])}
-            />
           </div>
         </div>
       </FormDialog>

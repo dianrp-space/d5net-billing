@@ -156,6 +156,18 @@ export function IconChart(props: IconProps) {
   );
 }
 
+/** Live traffic — panah upload/download bandwidth. */
+export function IconTraffic(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M7 4v13" />
+      <path d="M4 14l3 3 3-3" />
+      <path d="M17 20V7" />
+      <path d="M14 10l3-3 3 3" />
+    </svg>
+  );
+}
+
 export function IconRouter(props: IconProps) {
   return (
     <svg {...base(props)}>
