@@ -156,6 +156,18 @@ func (s *Store) RevokeRefreshToken(ctx context.Context, tokenHash string) error 
 	return err
 }
 
+// RevokeUserRefreshTokens mencabut SEMUA sesi refresh milik user. Dipakai saat
+// logout dari semua perangkat, ganti password, penonaktifan akun, dan saat
+// terdeteksi pemakaian ulang refresh token yang sudah dirotasi (indikasi
+// token curian). Aman dipanggil walau user tidak punya sesi aktif.
+func (s *Store) RevokeUserRefreshTokens(ctx context.Context, userID xid.ID) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE refresh_tokens SET revoked_at = NOW()
+		WHERE user_id = $1 AND revoked_at IS NULL
+	`, userID)
+	return err
+}
+
 // UserCanAccessTenant melaporkan apakah user aktif dan masih terdaftar di
 // tenant yang diminta. Dipakai middleware agar access token milik user yang
 // dinonaktifkan atau dihapus dari tenant langsung ditolak (token JWT tetap

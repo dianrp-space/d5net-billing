@@ -47,5 +47,39 @@ func Load() (*Config, error) {
 	if err := env.Parse(cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	if err := cfg.validateSecrets(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// weakSecrets adalah nilai contoh/default yang tidak boleh dipakai production.
+// Jangan tambahkan secret asli ke daftar ini.
+var weakSecrets = map[string]bool{
+	"change-me": true,
+	"change-me-to-random-64-char-string-in-production": true,
+	"01234567890123456789012345678901":                true,
+	"00000000000000000000000000000000":                true,
+}
+
+// validateSecrets menolak start bila kunci signing/enkripsi lemah. Tanpa ini,
+// instalasi yang lupa mengganti contoh .env akan menandatangani JWT dengan
+// kunci yang bisa ditebak siapa saja (pemalsuan token = bobol total).
+func (c *Config) validateSecrets() error {
+	s := strings.TrimSpace(c.JWTSecret)
+	if len(s) < 32 {
+		return fmt.Errorf("JWT_SECRET wajib minimal 32 karakter acak (hasilkan via: openssl rand -hex 32)")
+	}
+	if weakSecrets[strings.ToLower(s)] || weakSecrets[s] {
+		return fmt.Errorf("JWT_SECRET masih memakai nilai contoh/default — ganti dengan string acak")
+	}
+	k := strings.TrimSpace(c.EncryptionKey)
+	if len(k) != 32 {
+		// NewEncryptor juga menolak, tapi gagal di sini dengan pesan yang jelas.
+		return fmt.Errorf("ENCRYPTION_KEY wajib tepat 32 karakter (hasilkan via: openssl rand -hex 16)")
+	}
+	if weakSecrets[k] {
+		return fmt.Errorf("ENCRYPTION_KEY masih memakai nilai contoh/default — ganti dengan string acak")
+	}
+	return nil
 }

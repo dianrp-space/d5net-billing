@@ -19,6 +19,9 @@ type AuditRow = {
 const ACTION_LABELS: Record<string, string> = {
   "auth.login": "Login admin",
   "auth.login_failed": "Gagal login",
+  "auth.logout": "Logout",
+  "auth.refresh_reuse": "Refresh token dipakai ulang (sesi dicabut)",
+  "auth.password_change": "Ganti password",
   "portal.login": "Login pelanggan",
   "invoice.pay": "Bayar tagihan",
   "invoice.issue_manual": "Terbitkan manual",

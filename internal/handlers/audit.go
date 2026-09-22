@@ -28,6 +28,9 @@ func auditEvent(ctx context.Context, d *Deps, action, entityType string, entityI
 const (
 	AuditAuthLogin         = "auth.login"
 	AuditAuthLoginFailed   = "auth.login_failed"
+	AuditAuthLogout        = "auth.logout"
+	AuditAuthRefreshReuse  = "auth.refresh_reuse"
+	AuditAuthPasswordChange = "auth.password_change"
 	AuditPortalLogin       = "portal.login"
 	AuditInvoicePay        = "invoice.pay"
 	AuditInvoiceIssue      = "invoice.issue_manual"

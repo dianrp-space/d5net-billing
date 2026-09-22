@@ -33,7 +33,7 @@ var rasterExts = map[string]bool{
 
 // SaveImageAsWebP writes an uploaded image under dir as {kind}.webp.
 // Inputs are resized (max MaxEdge) and always re-encoded to WebP for smaller files.
-// SVG is kept as {kind}.svg (not rasterized). Older sibling files with other extensions are removed.
+// SVG/HEIC are rejected. Older sibling files with other extensions are removed.
 func SaveImageAsWebP(dir, kind string, src io.Reader, filename string, declaredSize int64) (publicName string, err error) {
 	return saveImageAsWebPWithEdge(dir, kind, src, filename, declaredSize, MaxEdge)
 }
@@ -63,16 +63,13 @@ func saveImageAsWebPWithEdge(dir, kind string, src io.Reader, filename string, d
 	if ext == ".heic" || ext == ".heif" {
 		return "", fmt.Errorf("format HEIC/HEIF tidak didukung — simpan sebagai JPG/PNG dulu")
 	}
+	// SVG ditolak: file SVG boleh membawa <script>/event-handler/onload yang
+	// dieksekusi saat dibuka langsung, alias Stored XSS satu origin dengan
+	// aplikasi (token di localStorage ikut terancam). Pakai PNG/JPG/WebP yang
+	// selalu di-decode + re-encode di bawah sehingga byte aktif tidak lolos.
+	// P0-5 audit keamanan 2026-09-22.
 	if ext == ".svg" || isSVG(data) {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("gagal buat folder upload")
-		}
-		name := kind + ".svg"
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
-			return "", err
-		}
-		cleanupSiblings(dir, kind, ".svg")
-		return name, nil
+		return "", fmt.Errorf("format SVG tidak didukung demi keamanan — pakai PNG/JPG/WebP")
 	}
 
 	if !rasterExts[ext] && !isWebP(data) {

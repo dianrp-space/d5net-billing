@@ -106,15 +106,16 @@ func TestSaveImageAsWebP_ResizesLarge(t *testing.T) {
 	}
 }
 
-func TestSaveImageAsWebP_KeepsSVG(t *testing.T) {
+func TestSaveImageAsWebP_RejectsSVG(t *testing.T) {
 	dir := t.TempDir()
-	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>`)
-	name, err := SaveImageAsWebP(dir, "logo", bytes.NewReader(svg), "mark.svg", int64(len(svg)))
-	if err != nil {
-		t.Fatal(err)
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>alert(1)</script></svg>`)
+	// Ditolak baik via ekstensi .svg ...
+	if _, err := SaveImageAsWebP(dir, "logo", bytes.NewReader(svg), "mark.svg", int64(len(svg))); err == nil {
+		t.Fatal("expected svg-by-extension error")
 	}
-	if name != "logo.svg" {
-		t.Fatalf("got %q", name)
+	// ... maupun via isi SVG yang menyamar sebagai .png.
+	if _, err := SaveImageAsWebP(dir, "logo", bytes.NewReader(svg), "mark.png", int64(len(svg))); err == nil {
+		t.Fatal("expected svg-by-content error")
 	}
 }
 

@@ -206,8 +206,13 @@ export function UserMenu({
           <DropdownMenuItem
             danger
             onSelect={() => {
-              clearToken();
-              onLogout();
+              // Revoke refresh cookie di server (best-effort), lalu buang token lokal.
+              void api("/api/auth/logout", { method: "POST" }, { skipAuthRefresh: true })
+                .catch(() => undefined)
+                .finally(() => {
+                  clearToken();
+                  onLogout();
+                });
             }}
           >
             <IconLogout className="size-4 opacity-80" />

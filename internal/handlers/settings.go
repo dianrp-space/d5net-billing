@@ -290,7 +290,15 @@ func registerTenantBrandingAPI(api huma.API, d *Deps) {
 // MountStaticAndUploads serves uploaded assets and registers multipart upload endpoints on chi.
 func MountStaticAndUploads(r chi.Router, d *Deps) {
 	_ = os.MkdirAll(d.Config.UploadDir, 0o755)
-	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir(d.Config.UploadDir))))
+	// Header pertahanan berlapis untuk file statis (P0-5 audit 2026-09-22):
+	// nosniff cegah MIME-sniffing, CSP sandbox melumpuhkan <script> bila file
+	// (mis. .svg lama yang masih ada di disk) dibuka langsung di browser.
+	uploads := http.FileServer(http.Dir(d.Config.UploadDir))
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "sandbox")
+		uploads.ServeHTTP(w, req)
+	})))
 	r.Post("/api/settings/branding/logo", uploadHandler(d, "logo"))
 	r.Post("/api/settings/branding/favicon", uploadHandler(d, "favicon"))
 	r.Post("/api/settings/branding/map-pop", uploadHandler(d, "map-pop"))
@@ -1092,6 +1100,13 @@ func registerRolesUsers(api huma.API, d *Deps) {
 				return nil, httpx.Internal(err)
 			}
 			_ = d.Store.SetUserPassword(ctx, input.ID, hash)
+			// Password di-reset admin → cabut semua sesi user tersebut.
+			_ = d.Store.RevokeUserRefreshTokens(ctx, input.ID)
+			auditEvent(ctx, d, AuditAuthPasswordChange, "user", &input.ID, nil)
+		}
+		if !input.Body.IsActive {
+			// Akun dinonaktifkan → sesi aktif langsung mati.
+			_ = d.Store.RevokeUserRefreshTokens(ctx, input.ID)
 		}
 		return &struct{}{}, nil
 	})
@@ -1112,6 +1127,8 @@ func registerRolesUsers(api huma.API, d *Deps) {
 			}
 			return nil, httpx.Internal(err)
 		}
+		// User dihapus dari tenant → sesi aktif langsung mati.
+		_ = d.Store.RevokeUserRefreshTokens(ctx, input.ID)
 		auditEvent(ctx, d, AuditUserDelete, "user", &input.ID, nil)
 		return &struct{}{}, nil
 	})

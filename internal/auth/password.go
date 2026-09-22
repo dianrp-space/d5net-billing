@@ -19,7 +19,17 @@ const (
 	argonSaltLen = 16
 )
 
+// MaxPasswordLength membatasi input sebelum Argon2 dijalankan. Tanpa batas,
+// password raksasa bisa dipakai untuk CPU-DoS (Argon2 sengaja mahal).
+const MaxPasswordLength = 128
+
+// ErrPasswordTooLong dikembalikan saat password melebihi MaxPasswordLength.
+var ErrPasswordTooLong = errors.New("password too long")
+
 func HashPassword(password string) (string, error) {
+	if len(password) > MaxPasswordLength {
+		return "", ErrPasswordTooLong
+	}
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
@@ -31,6 +41,10 @@ func HashPassword(password string) (string, error) {
 }
 
 func VerifyPassword(password, encodedHash string) (bool, error) {
+	// Tolak duluan tanpa menjalankan Argon2 (hemat CPU + anti DoS).
+	if len(password) > MaxPasswordLength {
+		return false, ErrPasswordTooLong
+	}
 	parts := strings.Split(encodedHash, "$")
 	if len(parts) != 6 {
 		return false, errors.New("invalid hash format")

@@ -246,6 +246,16 @@ func registerAuth(api huma.API, d *Deps) {
 			return nil, httpx.Internal(err)
 		}
 		if !ok {
+			// Deteksi pemakaian ulang: signature valid + belum kedaluwarsa tapi
+			// sudah tidak ada di DB = token yang sudah dirotasi dipakai lagi.
+			// Indikasi token curian → cabut SEMUA sesi user agar penyerang
+			// ikut terdepak, lalu tolak request ini.
+			if uid, uerr := xid.Parse(claims.UserID); uerr == nil && !xid.IsNil(uid) {
+				if claims.ExpiresAt != nil && time.Now().Before(claims.ExpiresAt.Time) {
+					_ = d.Store.RevokeUserRefreshTokens(ctx, uid)
+					auditEvent(ctx, d, AuditAuthRefreshReuse, "user", &uid, nil)
+				}
+			}
 			return nil, httpx.Unauthorized("invalid refresh token")
 		}
 		uid, err := xid.Parse(claims.UserID)
@@ -313,6 +323,46 @@ func registerAuth(api huma.API, d *Deps) {
 			Name: "refresh_token", Value: refresh, Path: "/api/auth",
 			HttpOnly: true, Secure: d.Config.AppEnv == "production",
 			SameSite: http.SameSiteStrictMode, Expires: refreshExp,
+		}
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "logout", Method: http.MethodPost, Path: "/api/auth/logout",
+		Summary: "Logout (revoke refresh cookie, idempotent)", Tags: []string{"Auth"},
+	}, func(ctx context.Context, input *struct {
+		RefreshToken string `cookie:"refresh_token"`
+	}) (*struct {
+		SetCookie http.Cookie `header:"Set-Cookie"`
+		Body      struct {
+			OK bool `json:"ok"`
+		}
+	}, error) {
+		// Idempotent: tanpa cookie pun tetap balas ok + hapus cookie di browser.
+		if raw := strings.TrimSpace(input.RefreshToken); raw != "" {
+			if claims, err := d.Tokens.ParseToken(raw); err == nil && claims.Type == "refresh" {
+				if uid, uerr := xid.Parse(claims.UserID); uerr == nil && !xid.IsNil(uid) {
+					_ = d.Store.RevokeRefreshToken(ctx, hashToken(raw))
+					auditEvent(ctx, d, AuditAuthLogout, "user", &uid, nil)
+				} else {
+					_ = d.Store.RevokeRefreshToken(ctx, hashToken(raw))
+				}
+			} else {
+				// Token tak ter-parse (mis. secret dirotasi): tetap coba revoke by hash.
+				_ = d.Store.RevokeRefreshToken(ctx, hashToken(raw))
+			}
+		}
+		out := &struct {
+			SetCookie http.Cookie `header:"Set-Cookie"`
+			Body      struct {
+				OK bool `json:"ok"`
+			}
+		}{}
+		out.Body.OK = true
+		out.SetCookie = http.Cookie{
+			Name: "refresh_token", Value: "", Path: "/api/auth",
+			HttpOnly: true, Secure: d.Config.AppEnv == "production",
+			SameSite: http.SameSiteStrictMode, MaxAge: -1, Expires: time.Unix(0, 0).UTC(),
 		}
 		return out, nil
 	})
@@ -437,6 +487,11 @@ func registerAuth(api huma.API, d *Deps) {
 		}
 		if err := d.Store.UpdateMyProfile(ctx, uid, fullName, newHash); err != nil {
 			return nil, httpx.Internal(err)
+		}
+		if newHash != nil {
+			// Password diganti → semua sesi lain tidak lagi dipercaya.
+			_ = d.Store.RevokeUserRefreshTokens(ctx, uid)
+			auditEvent(ctx, d, AuditAuthPasswordChange, "user", &uid, nil)
 		}
 		avatar := user.AvatarURL
 		if input.Body.ClearAvatar {
@@ -6272,14 +6327,13 @@ func processPaymentWebhook(ctx context.Context, d *Deps, providerName string, in
 		}
 	}
 	if verr != nil {
-		softFail := d.Config != nil && d.Config.AppEnv == "development"
-		if softFail {
-			slog.Warn("webhook signature soft-fail in development", "provider", providerName, "err", verr)
-		} else {
-			slog.Warn("payment webhook rejected: invalid signature",
-				"provider", providerName, "external_id", parsed.ExternalID, "err", verr)
-			return nil, httpx.Unauthorized("invalid webhook signature")
-		}
+		// Signature invalid selalu ditolak di semua env. Tanpa ini, callback
+		// palsu bisa menandai invoice lunas (P0-4 audit keamanan 2026-09-22).
+		// Untuk uji webhook lokal, gunakan payload + signature asli dari
+		// dashboard Duitku/DOKU, bukan bypass.
+		slog.Warn("payment webhook rejected: invalid signature",
+			"provider", providerName, "external_id", parsed.ExternalID, "err", verr)
+		return nil, httpx.Unauthorized("invalid webhook signature")
 	} else {
 		event = verified
 	}

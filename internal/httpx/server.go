@@ -62,8 +62,10 @@ type Server struct {
 func NewServer(origins []string, extra ...func(http.Handler) http.Handler) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
+	r.Use(SecurityHeadersMiddleware)
 	r.Use(middleware.RealIP)
 	r.Use(ClientIPMiddleware)
+	r.Use(RateLimitAuthMiddleware)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(cors.Handler(cors.Options{
