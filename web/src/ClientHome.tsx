@@ -2043,14 +2043,14 @@ export function ClientHome({
                   </span>
                   <button
                     type="button"
-                    className="btn-ghost shrink-0 whitespace-nowrap text-sm"
+                    className="btn shrink-0 whitespace-nowrap text-sm"
                     onClick={(e) => {
                       e.preventDefault();
                       setPayPickOpen(false);
                       startPay(i);
                     }}
                   >
-                    Bayar
+                    Bayar Online
                   </button>
                 </label>
               );
@@ -2060,6 +2060,7 @@ export function ClientHome({
             const picked = unpaidInvoices.filter((i) => i.id && payPickIds.includes(String(i.id)));
             const total = picked.reduce((s, i) => s + invoiceRemaining(i), 0);
             const balance = walletQ.data?.balance ?? 0;
+            const short = picked.length > 0 && total > 0 && balance < total;
             const canBulkWallet =
               walletQ.data?.enabled && picked.length > 0 && total > 0 && balance >= total;
             return (
@@ -2069,21 +2070,29 @@ export function ClientHome({
                   <span className="font-semibold tabular-nums">{formatRp(total)}</span>
                 </p>
                 {walletQ.data?.enabled ? (
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={!canBulkWallet || payingWalletBulk}
-                    title={
-                      picked.length === 0
-                        ? "Pilih dulu tagihannya"
-                        : balance < total
-                          ? `Saldo tidak cukup (saldo ${formatRp(balance)})`
-                          : `Bayar ${picked.length} tagihan dari saldo`
-                    }
-                    onClick={() => void paySelectedWithWallet()}
-                  >
-                    {payingWalletBulk ? "Memproses…" : `Bayar ${picked.length || ""} dengan saldo`.trim()}
-                  </button>
+                  <div className="grid justify-items-end gap-1">
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={!canBulkWallet || payingWalletBulk}
+                      title={
+                        picked.length === 0
+                          ? "Pilih dulu tagihannya"
+                          : balance < total
+                            ? `Saldo tidak cukup (saldo ${formatRp(balance)})`
+                            : `Bayar ${picked.length} tagihan dari saldo`
+                      }
+                      onClick={() => void paySelectedWithWallet()}
+                    >
+                      {payingWalletBulk ? "Memproses…" : `Bayar ${picked.length || ""} dengan saldo`.trim()}
+                    </button>
+                    {short ? (
+                      <p className="text-xs text-[var(--danger)]">
+                        Saldo tidak cukup (saldo {formatRp(balance)}, butuh {formatRp(total)}). Silakan
+                        topup dulu atau bayar online per tagihan.
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             );
