@@ -123,7 +123,11 @@ export function monthKeyLabel(key: string) {
 
 type UsageDay = { day: string; rx_bytes: number; tx_bytes: number; total_bytes: number };
 
-/** Grafik batang pemakaian harian sebulan + rincian lipat (terbaru dulu). */
+const USAGE_WEEK = 7;
+const USAGE_COLOR_DOWN = "#2563eb";
+const USAGE_COLOR_UP = "#f59e0b";
+
+/** Grafik garis pemakaian harian, 7 hari per halaman dengan tombol geser. */
 function DailyUsageChart({ month, days }: { month: string; days: UsageDay[] }) {
   const [y, m] = String(month || "").split("-").map(Number);
   const dim = Number.isFinite(y) && Number.isFinite(m) ? new Date(y, m, 0).getDate() : 30;
@@ -133,51 +137,84 @@ function DailyUsageChart({ month, days }: { month: string; days: UsageDay[] }) {
     const key = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     all.push(byDay.get(key) ?? { day: key, rx_bytes: 0, tx_bytes: 0, total_bytes: 0 });
   }
-  const max = Math.max(1, ...all.map((d) => d.total_bytes));
+  const pages = Math.max(1, Math.ceil(dim / USAGE_WEEK));
+  // Default halaman terakhir (hari-hari terbaru).
+  const [page, setPage] = useState(pages - 1);
+  useEffect(() => {
+    setPage(Math.max(1, Math.ceil(dim / USAGE_WEEK)) - 1);
+  }, [month, dim]);
+  const safePage = Math.min(Math.max(0, page), pages - 1);
+  const slice = all.slice(safePage * USAGE_WEEK, safePage * USAGE_WEEK + USAGE_WEEK);
   const nonzero = all.filter((d) => d.total_bytes > 0);
   if (nonzero.length === 0) return null;
-  const labelIdx = new Set([0, 6, 13, 20, 27, dim - 1].filter((i) => i >= 0 && i < dim));
+
+  const W = 340;
+  const H = 130;
+  const PAD = 8;
+  const TOP = 18;
+  const BOT = 18;
+  const max = Math.max(1, ...slice.map((d) => Math.max(d.rx_bytes, d.tx_bytes)));
+  const n = slice.length;
+  const x = (i: number) => (n <= 1 ? W / 2 : PAD + (i / (n - 1)) * (W - PAD * 2));
+  const yOf = (v: number) => H - BOT - (Math.max(0, v) / max) * (H - TOP - BOT);
+  const line = (pick: (d: UsageDay) => number) =>
+    slice.map((d, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${yOf(pick(d)).toFixed(1)}`).join(" ");
+  const area = (pick: (d: UsageDay) => number) =>
+    `${line(pick)} L${x(n - 1).toFixed(1)},${(H - BOT).toFixed(1)} L${x(0).toFixed(1)},${(H - BOT).toFixed(1)} Z`;
+  const first = slice[0];
+  const last = slice[n - 1];
+  const rangeLabel = `${Number(first.day.slice(8, 10))}–${Number(last.day.slice(8, 10))} ${monthKeyLabel(month)}`;
   return (
     <div className="grid gap-2">
-      <div className="flex h-28 items-end gap-[3px]" role="img" aria-label="Grafik pemakaian harian">
-        {all.map((d, i) => {
-          const dd = Number(d.day.slice(8, 10));
-          return (
-            <div key={d.day} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1 self-stretch">
-              <div
-                className="w-full rounded-t-sm"
-                style={{
-                  height: `${Math.max(d.total_bytes > 0 ? 4 : 0, (d.total_bytes / max) * 100)}%`,
-                  background: "var(--accent)",
-                  opacity: d.total_bytes > 0 ? 0.85 : 0,
-                }}
-                title={`${dd} ${monthKeyLabel(month)}: ${formatBytesID(d.total_bytes)} (↓ ${formatBytesID(d.rx_bytes)} · ↑ ${formatBytesID(d.tx_bytes)})`}
-              />
-              <span className="text-[9px] leading-none text-[var(--muted)] tabular-nums">
-                {labelIdx.has(i) ? dd : ""}
-              </span>
-            </div>
-          );
-        })}
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          className="btn-ghost"
+          aria-label="7 hari sebelumnya"
+          disabled={safePage <= 0}
+          onClick={() => setPage(safePage - 1)}
+        >
+          ‹
+        </button>
+        <p className="text-xs font-medium tabular-nums">{rangeLabel}</p>
+        <button
+          type="button"
+          className="btn-ghost"
+          aria-label="7 hari berikutnya"
+          disabled={safePage >= pages - 1}
+          onClick={() => setPage(safePage + 1)}
+        >
+          ›
+        </button>
       </div>
-      <details className="text-xs">
-        <summary className="cursor-pointer text-[var(--accent)]">Rincian harian</summary>
-        <ul className="mt-1 grid gap-1">
-          {[...nonzero].reverse().map((d) => (
-            <li key={d.day} className="flex items-center justify-between gap-2">
-              <span className="text-[var(--muted)] tabular-nums">
-                {Number(d.day.slice(8, 10))} {monthKeyLabel(month)}
-              </span>
-              <span className="tabular-nums">
-                {formatBytesID(d.total_bytes)}{" "}
-                <span className="text-[var(--muted)]">
-                  (↓ {formatBytesID(d.rx_bytes)} · ↑ {formatBytesID(d.tx_bytes)})
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </details>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-[130px] w-full" role="img" aria-label="Grafik pemakaian harian">
+        <line x1={PAD} y1={H - BOT} x2={W - PAD} y2={H - BOT} stroke="currentColor" strokeOpacity={0.15} />
+        <text x={W - PAD} y={TOP - 6} textAnchor="end" fontSize={9} fill="currentColor" opacity={0.6}>
+          puncak {formatBytesID(max)}
+        </text>
+        <path d={area((d) => d.rx_bytes)} fill={USAGE_COLOR_DOWN} fillOpacity={0.14} stroke="none" />
+        <path d={line((d) => d.rx_bytes)} fill="none" stroke={USAGE_COLOR_DOWN} strokeWidth={2} strokeLinejoin="round" />
+        <path d={area((d) => d.tx_bytes)} fill={USAGE_COLOR_UP} fillOpacity={0.14} stroke="none" />
+        <path d={line((d) => d.tx_bytes)} fill="none" stroke={USAGE_COLOR_UP} strokeWidth={2} strokeLinejoin="round" />
+        {slice.map((d, i) => (
+          <g key={d.day}>
+            <title>{`${Number(d.day.slice(8, 10))} ${monthKeyLabel(month)}: ${formatBytesID(d.total_bytes)} (↓ ${formatBytesID(d.rx_bytes)} · ↑ ${formatBytesID(d.tx_bytes)})`}</title>
+            <circle cx={x(i)} cy={yOf(d.rx_bytes)} r={3} fill={USAGE_COLOR_DOWN} />
+            <circle cx={x(i)} cy={yOf(d.tx_bytes)} r={3} fill={USAGE_COLOR_UP} />
+            <text x={x(i)} y={H - 5} textAnchor="middle" fontSize={9} fill="currentColor" opacity={0.6}>
+              {Number(d.day.slice(8, 10))}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--muted)]">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block size-2 rounded-full" style={{ background: USAGE_COLOR_DOWN }} />↓ Download
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block size-2 rounded-full" style={{ background: USAGE_COLOR_UP }} />↑ Upload
+        </span>
+      </div>
     </div>
   );
 }
