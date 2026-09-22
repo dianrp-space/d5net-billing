@@ -23,6 +23,60 @@ const CUSTOMER_STATUS_LABEL: Record<string, string> = {
   dismantled: "cabut",
 };
 
+type LivePoint = { t: number; rx: number; tx: number };
+// 60 sampel x polling 3 detik = jendela grafik 3 menit.
+const LIVE_HISTORY_MAX = 60;
+const LIVE_COLOR_DOWN = "#2563eb";
+const LIVE_COLOR_UP = "#f59e0b";
+
+function LiveTrafficChart({ points }: { points: LivePoint[] }) {
+  const W = 320;
+  const H = 110;
+  const PAD = 6;
+  const TOP = 16;
+  if (points.length < 2) {
+    return <p className="mt-2 text-[11px] text-[var(--muted)]">Mengumpulkan data grafik…</p>;
+  }
+  const max = Math.max(1, ...points.map((p) => Math.max(p.rx, p.tx)));
+  // Jangkar kanan: grafik terisi dari kanan saat buffer belum penuh.
+  const off = LIVE_HISTORY_MAX - points.length;
+  const x = (i: number) => PAD + ((off + i) / (LIVE_HISTORY_MAX - 1)) * (W - PAD * 2);
+  const y = (v: number) => H - PAD - (Math.max(0, v) / max) * (H - PAD - TOP);
+  const line = (pick: (p: LivePoint) => number) =>
+    points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(pick(p)).toFixed(1)}`).join(" ");
+  const area = (pick: (p: LivePoint) => number) =>
+    `${line(pick)} L${x(points.length - 1).toFixed(1)},${(H - PAD).toFixed(1)} L${x(0).toFixed(1)},${(H - PAD).toFixed(1)} Z`;
+  const peakRx = Math.max(...points.map((p) => p.rx));
+  const peakTx = Math.max(...points.map((p) => p.tx));
+  return (
+    <div className="mt-2">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-[110px] w-full" role="img" aria-label="Grafik live traffic">
+        <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="currentColor" strokeOpacity={0.15} />
+        <text x={W - PAD} y={TOP - 5} textAnchor="end" fontSize={9} fill="currentColor" opacity={0.6}>
+          puncak {formatBpsID(max)}
+        </text>
+        <path d={area((p) => p.rx)} fill={LIVE_COLOR_DOWN} fillOpacity={0.16} stroke="none" />
+        <path d={line((p) => p.rx)} fill="none" stroke={LIVE_COLOR_DOWN} strokeWidth={2} strokeLinejoin="round" />
+        <path d={area((p) => p.tx)} fill={LIVE_COLOR_UP} fillOpacity={0.16} stroke="none" />
+        <path d={line((p) => p.tx)} fill="none" stroke={LIVE_COLOR_UP} strokeWidth={2} strokeLinejoin="round" />
+        <circle cx={x(points.length - 1)} cy={y(points[points.length - 1].rx)} r={3} fill={LIVE_COLOR_DOWN} />
+        <circle cx={x(points.length - 1)} cy={y(points[points.length - 1].tx)} r={3} fill={LIVE_COLOR_UP} />
+      </svg>
+      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--muted)]">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block size-2 rounded-full" style={{ background: LIVE_COLOR_DOWN }} />↓ Download
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block size-2 rounded-full" style={{ background: LIVE_COLOR_UP }} />↑ Upload
+        </span>
+        <span className="tabular-nums">
+          Puncak 3 mnt: ↓ {formatBpsID(peakRx)} · ↑ {formatBpsID(peakTx)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function CustomersPage({
   onOpenSecrets,
   onOpenGallery,
@@ -126,6 +180,28 @@ export function CustomersPage({
     refetchInterval: 3000,
     retry: false,
   });
+  // Ring buffer riwayat live per langganan untuk grafik (3 menit terakhir).
+  const [liveHistory, setLiveHistory] = useState<Record<string, LivePoint[]>>({});
+  useEffect(() => {
+    setLiveHistory({});
+  }, [liveCustomer?.id]);
+  useEffect(() => {
+    const rows = liveQ.data?.data ?? [];
+    if (rows.length === 0) return;
+    const now = Date.now();
+    setLiveHistory((prev) => {
+      const next: Record<string, LivePoint[]> = { ...prev };
+      for (const r of rows) {
+        if (!r.online || r.error) continue;
+        const arr = [
+          ...(next[r.subscription_id] ?? []),
+          { t: now, rx: Math.max(0, r.rx_bps), tx: Math.max(0, r.tx_bps) },
+        ];
+        next[r.subscription_id] = arr.slice(-LIVE_HISTORY_MAX);
+      }
+      return next;
+    });
+  }, [liveQ.data]);
   const walletQ = useQuery({
     queryKey: ["customer-wallet", walletCustomer?.id],
     queryFn: () => api<CustomerWallet>(`/api/customers/${walletCustomer!.id}/wallet`),
@@ -967,16 +1043,19 @@ export function CustomersPage({
                 {r.error ? (
                   <p className="mt-1 text-xs text-[var(--danger)]">{r.error}</p>
                 ) : r.online ? (
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <div className="rounded-lg bg-[var(--panel-muted,rgba(0,0,0,0.03))] p-2">
-                      <p className="text-[11px] text-[var(--muted)]">↓ Download</p>
-                      <p className="text-base font-bold tabular-nums">{formatBpsID(r.rx_bps)}</p>
+                  <>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <div className="rounded-lg bg-[var(--panel-muted,rgba(0,0,0,0.03))] p-2">
+                        <p className="text-[11px] text-[var(--muted)]">↓ Download</p>
+                        <p className="text-base font-bold tabular-nums">{formatBpsID(r.rx_bps)}</p>
+                      </div>
+                      <div className="rounded-lg bg-[var(--panel-muted,rgba(0,0,0,0.03))] p-2">
+                        <p className="text-[11px] text-[var(--muted)]">↑ Upload</p>
+                        <p className="text-base font-bold tabular-nums">{formatBpsID(r.tx_bps)}</p>
+                      </div>
                     </div>
-                    <div className="rounded-lg bg-[var(--panel-muted,rgba(0,0,0,0.03))] p-2">
-                      <p className="text-[11px] text-[var(--muted)]">↑ Upload</p>
-                      <p className="text-base font-bold tabular-nums">{formatBpsID(r.tx_bps)}</p>
-                    </div>
-                  </div>
+                    <LiveTrafficChart points={liveHistory[r.subscription_id] ?? []} />
+                  </>
                 ) : null}
               </div>
             ))

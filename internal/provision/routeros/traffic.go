@@ -10,6 +10,8 @@ import (
 )
 
 // PPPLive adalah status trafik live satu sesi PPPoE.
+// RxBps/TxBps dalam perspektif PELANGGAN: Rx = download (masuk ke pelanggan),
+// Tx = upload (keluar dari pelanggan).
 type PPPLive struct {
 	Online    bool   `json:"online"`
 	Username  string `json:"username"`
@@ -21,6 +23,7 @@ type PPPLive struct {
 }
 
 // PPPCounter adalah counter kumulatif interface PPPoE (untuk akumulasi bulanan).
+// Sama seperti PPPLive: Rx = download pelanggan, Tx = upload pelanggan.
 type PPPCounter struct {
 	Username string `json:"username"`
 	Iface    string `json:"iface"`
@@ -78,8 +81,14 @@ func (c *Client) PPPLiveTraffic(ctx context.Context, tenantID, routerID xid.ID, 
 	}
 	if len(mon.Re) > 0 {
 		mm := mon.Re[0].Map
-		out.RxBps = parseIntLoose(mm["rx-bits-per-second"])
-		out.TxBps = parseIntLoose(mm["tx-bits-per-second"])
+		routerRx := parseIntLoose(mm["rx-bits-per-second"])
+		routerTx := parseIntLoose(mm["tx-bits-per-second"])
+		// /interface/monitor-traffic melapor dari sudut pandang ROUTER pada
+		// interface <pppoe-USER>: rx = yang diterima router = upload user,
+		// tx = yang dikirim router = download user. Balik agar API selalu
+		// berbicara dalam perspektif pelanggan (Rx = download).
+		out.RxBps = routerTx
+		out.TxBps = routerRx
 		if out.RxBps < 0 {
 			out.RxBps = 0
 		}
@@ -118,7 +127,9 @@ func (c *Client) PPPCounters(ctx context.Context, tenantID, routerID xid.ID) (ma
 		if tx < 0 {
 			tx = 0
 		}
-		out[u] = PPPCounter{Username: u, Iface: iface, RxBytes: rx, TxBytes: tx}
+		// Sama seperti PPPLiveTraffic: counter interface <pppoe-USER> bersudut
+		// pandang router, jadi tukar agar Rx = download pelanggan.
+		out[u] = PPPCounter{Username: u, Iface: iface, RxBytes: tx, TxBytes: rx}
 	}
 	return out, nil
 }
