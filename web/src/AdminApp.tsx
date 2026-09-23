@@ -140,6 +140,9 @@ const MessagingGWPage = lazy(() =>
 const BackupRestorePage = lazy(() =>
   import("./BackupRestorePage").then((m) => ({ default: m.BackupRestorePage })),
 );
+const ProfilePage = lazy(() =>
+  import("./ProfilePage").then((m) => ({ default: m.ProfilePage })),
+);
 
 type NavItem = { id: Page; label: string; icon: ReactNode };
 type NavGroup = { label: string; items: NavItem[] };
@@ -314,6 +317,8 @@ export function AdminApp({
       onNavigate("customers");
       return;
     }
+    // Halaman Profil milik sendiri — selalu boleh dibuka tanpa permission khusus.
+    if (page === "profile") return;
     const permPage = page === "customers" ? "customers" : page;
     if (!canAccessPage(meQ.data.permissions, permPage)) {
       const next = firstAllowedPage(meQ.data.permissions, "dashboard");
@@ -495,12 +500,17 @@ export function AdminApp({
             <HeaderSearch
               allowedPages={perms}
               onNavigate={(next, rest) => {
-                if (isAdminPage(next) && canAccessPage(perms, next)) handleNavigate(next, rest);
+                if (isAdminPage(next) && (next === "profile" || canAccessPage(perms, next)))
+                  handleNavigate(next, rest);
               }}
             />
             <AlertsBell onNavigatePage={(p) => onNavigate(p)} />
             <ThemeToggle />
-            <UserMenu user={meQ.data} onLogout={onLogout} />
+            <UserMenu
+              user={meQ.data}
+              onLogout={onLogout}
+              onOpenProfile={() => handleNavigate("profile")}
+            />
           </div>
         </header>
 
@@ -509,7 +519,7 @@ export function AdminApp({
           {meQ.isError && (
             <p className="text-sm text-[var(--danger)]">Gagal memuat izin role. Coba refresh atau login ulang.</p>
           )}
-          {meQ.data && canAccessPage(perms, page) && (
+          {meQ.data && (page === "profile" || canAccessPage(perms, page)) && (
             <PageErrorBoundary resetKey={page}>
               <Suspense fallback={<PageFallback />}>
               {page === "dashboard" && (
@@ -578,6 +588,7 @@ export function AdminApp({
               {page === "payment-gw" && <PaymentGWPage />}
               {page === "messaging-gw" && <MessagingGWPage />}
               {page === "backup" && <BackupRestorePage />}
+              {page === "profile" && <ProfilePage />}
             </Suspense>
             </PageErrorBoundary>
           )}

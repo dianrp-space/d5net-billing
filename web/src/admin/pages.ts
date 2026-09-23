@@ -30,7 +30,8 @@ export type AdminPage =
   | "webhooks"
   | "payment-gw"
   | "messaging-gw"
-  | "backup";
+  | "backup"
+  | "profile";
 
 export const ADMIN_PAGES: AdminPage[] = [
   "dashboard",
@@ -65,6 +66,7 @@ export const ADMIN_PAGES: AdminPage[] = [
   "payment-gw",
   "messaging-gw",
   "backup",
+  "profile",
 ];
 
 export function normalizeAdminPage(value: string): string {
@@ -110,4 +112,5 @@ export const pageTitles: Record<AdminPage, string> = {
   "payment-gw": "Payment Gateway",
   "messaging-gw": "Messaging Gateway",
   backup: "Backup / Restore",
+  profile: "Profil",
 };

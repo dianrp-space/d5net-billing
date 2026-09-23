@@ -52,12 +52,13 @@ const menuHits: { page: AdminPage; title: string; keywords: string }[] = [
   { page: "payment-gw", title: "Payment Gateway", keywords: "payment gateway qris duitku doku pop integrasi" },
   { page: "messaging-gw", title: "Messaging Gateway", keywords: "whatsapp telegram email smtp notifikasi messaging gowa gateway basic auth device nomor integrasi" },
   { page: "backup", title: "Backup / Restore", keywords: "backup restore database pg_dump export import settings" },
+  { page: "profile", title: "Profil", keywords: "profil profile akun saya nama password avatar foto" },
 ];
 
 function matchMenus(q: string, allowedPages?: string[] | null): SearchHit[] {
   const n = q.toLowerCase();
   return menuHits
-    .filter((m) => canAccessPage(allowedPages, m.page))
+    .filter((m) => m.page === "profile" || canAccessPage(allowedPages, m.page))
     .filter((m) => m.title.toLowerCase().includes(n) || m.keywords.includes(n))
     .slice(0, 5)
     .map((m) => ({
