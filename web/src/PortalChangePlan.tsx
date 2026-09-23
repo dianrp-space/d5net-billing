@@ -35,6 +35,10 @@ type PlanChangeQuote = {
   new_plan_name: string;
   old_price: number;
   new_price: number;
+  old_download_mbps?: number;
+  old_upload_mbps?: number;
+  new_download_mbps?: number;
+  new_upload_mbps?: number;
   remaining_days: number;
   period_days: number;
   old_credit: number;
@@ -165,6 +169,7 @@ export function PortalChangePlanDialog({
         quote: PlanChangeQuote;
         invoice?: PayableInvoice & { total_amount: number; invoice_number: string; status: string };
         status: string;
+        pending_payment?: boolean;
       }>(`/api/portal/subscriptions/${sub!.id}/change-plan`, {
         method: "POST",
         headers,
@@ -174,6 +179,10 @@ export function PortalChangePlanDialog({
       const q = res.quote;
       if (q.direction === "downgrade") {
         void toastSuccess("Paket diturunkan. Sisa tagihan tidak di-refund; kecepatan baru langsung berlaku.");
+      } else if (res.pending_payment && res.invoice) {
+        void toastSuccess(
+          `Upgrade dicatat. Lunasi tagihan selisih ${formatRp(res.invoice.total_amount)} dulu, kecepatan baru aktif setelah lunas.`,
+        );
       } else if (q.requires_charge && res.invoice) {
         void toastSuccess(`Paket diupgrade. Tagihan selisih ${formatRp(res.invoice.total_amount)}.`);
       } else {
@@ -181,12 +190,18 @@ export function PortalChangePlanDialog({
       }
       onChanged(res.invoice);
     },
-    onError: (e: Error) => void toastError(e.message || "Gagal ganti paket"),
+    onError: (e: Error) => void toastError(e.message || "Gagal Upgrade / Downgrade"),
   });
 
   const plans = Array.isArray(plansQ.data?.data) ? plansQ.data.data : [];
   const quote = previewQ.data;
   const isDowngrade = quote?.direction === "downgrade";
+  const directionLabel =
+    quote?.direction === "upgrade"
+      ? "Upgrade"
+      : quote?.direction === "downgrade"
+        ? "Downgrade"
+        : "Upgrade / Downgrade";
   const canSubmit =
     Boolean(planId) &&
     Boolean(quote) &&
@@ -195,7 +210,7 @@ export function PortalChangePlanDialog({
     (!isDowngrade || acceptNoRefund);
 
   return (
-    <FormDialog open={Boolean(sub)} title="Ganti paket" onClose={onClose} wide>
+    <FormDialog open={Boolean(sub)} title={directionLabel} onClose={onClose} wide>
       {sub ? (
         <form
           className="grid gap-3"
@@ -244,7 +259,11 @@ export function PortalChangePlanDialog({
           {quote ? (
             <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)]/50 p-3 text-sm">
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">
-                {quote.direction === "upgrade" ? "Upgrade" : quote.direction === "downgrade" ? "Downgrade" : "Sama harga"}
+                {quote.direction === "upgrade"
+                  ? "Upgrade (speed naik)"
+                  : quote.direction === "downgrade"
+                    ? "Downgrade (speed turun)"
+                    : "Sama speed"}
                 {" · "}sisa {quote.remaining_days}/{quote.period_days} hari
               </p>
               <div className="flex justify-between gap-2">
@@ -261,6 +280,9 @@ export function PortalChangePlanDialog({
               </div>
               <p className="mt-2 text-xs text-[var(--muted)]">
                 Tanggal tagihan berikutnya tidak berubah. Siklus berikutnya memakai harga paket baru.
+                {quote.direction === "upgrade" && quote.requires_charge
+                  ? " Upgrade aktif + router diupdate setelah tagihan selisih lunas."
+                  : ""}
               </p>
             </div>
           ) : null}
@@ -280,7 +302,7 @@ export function PortalChangePlanDialog({
           ) : null}
           <div className="flex flex-wrap gap-2">
             <button className="btn" disabled={!canSubmit}>
-              {apply.isPending ? "Memproses…" : "Konfirmasi ganti paket"}
+              {apply.isPending ? "Memproses…" : `Konfirmasi ${directionLabel}`}
             </button>
             <button type="button" className="btn-ghost" onClick={onClose}>
               Batal

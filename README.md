@@ -446,11 +446,22 @@ ada template aktif, dipakai default bawaan. Variabel `{{customer_name}}`, `{{pla
 | Event | Label | Channel default | Pemicu |
 |-------|-------|----------------|--------|
 | `invoice_issued` | Tagihan baru (manual) | whatsapp | Admin menerbitkan tagihan manual |
+| `invoice_generated` | Tagihan langganan baru (otomatis) | whatsapp | Tagihan langganan terbit (aktivasi pertama, tagihan rutin, selisih Upgrade) |
 | `invoice_reminder` | Pengingat tagihan (dunning) | whatsapp | Offset hari di menu Cronjob |
 | `payment_confirmation` | Konfirmasi pembayaran | whatsapp | Pembayaran diterima (incl. auto-pay wallet) |
 | `wallet_topup` | Topup saldo berhasil | whatsapp | Saldo pelanggan bertambah |
 | `wallet_insufficient` | Saldo kurang saat tagihan terbit | whatsapp | Tagihan terbit tapi saldo tidak cukup |
 | `broadcast` | Broadcast manual | whatsapp, telegram, email | Tab Broadcast (pesan massal) |
+
+### Jam kirim notifikasi
+
+Di menu **Cronjob/Jobs** bisa diatur jam kirim (format `HH:MM`, default `08:00`):
+
+- **Jam kirim notif tagihan terbit** (`invoice_issued_time`) — notif WA tagihan baru
+  (`invoice_issued`/`invoice_generated`) yang terbit sebelum jam ini diantrekan sampai jam
+  tersebut; yang terbit sesudahnya dikirim langsung.
+- **Jam kirim pengingat** (`dunning_time`) — reminder dunning hanya dikirim setelah jam
+  ini pada hari yang cocok offset (siklus worker sebelumnya dilewati).
 
 ### Broadcast
 
@@ -462,7 +473,19 @@ dapat dipantau progresnya (total / pending / sent / failed) secara live.
 
 Worker mengirim `invoice_reminder` berdasarkan **offset hari** (`DunningOffsets`, mis.
 `-3, 0, 3, 7`) yang diatur di menu **Cronjob/Jobs**. Setiap kombinasi invoice+offset hanya
-dikirim sekali (`ClaimJob`).
+dikirim sekali (`ClaimJob`). Pengiriman menunggu **jam kirim pengingat** (`dunning_time`,
+default `08:00`) pada hari tersebut.
+
+### Upgrade / Downgrade paket
+
+Arah ganti paket ditentukan oleh **speed** (download dulu, lalu upload): speed naik =
+**Upgrade**, speed turun = **Downgrade** — bukan berdasarkan harga. Selisih prorata sisa
+hari tetap dihitung dari harga dan ditagih bila positif.
+
+**Upgrade berbayar ditahan sampai lunas:** bila Upgrade menimbulkan tagihan selisih,
+paket di billing tetap paket lama dan profil di router **tidak** diganti sampai tagihan
+selisih itu lunas. Setelah lunas (manual, gateway, maupun saldo), paket diganti dan router
+di-sync otomatis. Downgrade langsung berlaku (selisih negatif tidak di-refund).
 
 ### Laporan bulanan & retensi
 
@@ -493,7 +516,8 @@ dan dicatat sebagai alert (`alerts`) yang bisa dilihat di lonceng notifikasi adm
 ## Fitur (ringkasan)
 
 - **Pelanggan & penagihan:** pelanggan, paket/plan, langganan (subscription), invoice,
-  diskon paket, pembayaran manual & gateway.
+  diskon paket, pembayaran manual & gateway. Upgrade/Downgrade paket berbasis speed;
+  Upgrade berbayar aktif di router setelah tagihan selisih lunas.
 - **Invoice per tenant:** teks perusahaan, cara bayar, catatan kaki, serta **warna aksen**
   dan **warna stempel LUNAS** yang bisa diatur dari Format Invoice (PDF + pratinjau ikut).
 - **Wallet:** saldo pelanggan, top-up, auto-bayar tagihan dari saldo.

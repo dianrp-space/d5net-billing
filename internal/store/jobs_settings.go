@@ -8,22 +8,31 @@ import (
 	"github.com/dianrp-space/d5net-billing/internal/xid"
 )
 
+var errNotifyNum = errors.New("invalid number")
+
 const jobsSettingKey = "jobs.schedule"
 
 // JobScheduleSettings configures which worker tasks run for a tenant and when.
 type JobScheduleSettings struct {
-	BillingEnabled         bool  `json:"billing_enabled"`
-	IsolirEnabled          bool  `json:"isolir_enabled"`
-	DunningEnabled         bool  `json:"dunning_enabled"`
-	DunningOffsets         []int `json:"dunning_offsets,omitempty"`
-	OdpOutageEnabled       bool  `json:"odp_outage_enabled,omitempty"`
-	WeeklyReconcileEnabled bool  `json:"weekly_reconcile_enabled"`
-	WeeklyReconcileWeekday int   `json:"weekly_reconcile_weekday"` // 0=Sunday … 6=Saturday
-	WeeklyReconcileHour    int   `json:"weekly_reconcile_hour"`    // 0–23 local
-	MonthlyReportEnabled   bool  `json:"monthly_report_enabled"`
-	MonthlyReportDay       int   `json:"monthly_report_day"`  // 1–28
-	MonthlyReportHour      int   `json:"monthly_report_hour"` // 0–23 local
-	NotifyBatchSize        int   `json:"notify_batch_size"`
+	BillingEnabled         bool   `json:"billing_enabled"`
+	IsolirEnabled          bool   `json:"isolir_enabled"`
+	DunningEnabled         bool   `json:"dunning_enabled"`
+	DunningOffsets         []int  `json:"dunning_offsets,omitempty"`
+	// DunningTime is the earliest local time (HH:MM) reminder notifications are
+	// sent on a matching dunning day. Worker cycles before this time skip.
+	DunningTime string `json:"dunning_time,omitempty"`
+	// InvoiceIssuedTime is the local time (HH:MM) "tagihan terbit" notifications
+	// are sent. Invoices created before this time queue the notif for this time
+	// today; invoices created after send immediately.
+	InvoiceIssuedTime        string `json:"invoice_issued_time,omitempty"`
+	OdpOutageEnabled         bool   `json:"odp_outage_enabled,omitempty"`
+	WeeklyReconcileEnabled   bool   `json:"weekly_reconcile_enabled"`
+	WeeklyReconcileWeekday   int    `json:"weekly_reconcile_weekday"` // 0=Sunday … 6=Saturday
+	WeeklyReconcileHour      int    `json:"weekly_reconcile_hour"`    // 0–23 local
+	MonthlyReportEnabled     bool   `json:"monthly_report_enabled"`
+	MonthlyReportDay         int    `json:"monthly_report_day"`  // 1–28
+	MonthlyReportHour        int    `json:"monthly_report_hour"` // 0–23 local
+	NotifyBatchSize          int    `json:"notify_batch_size"`
 	// NotifLogRetentionDays adalah retensi log notifikasi (riwayat) dalam hari.
 	// 0 = nonaktif (jangan hapus otomatis). Worker menghapus otomatis tiap hari
 	// hanya untuk log final (sent/failed); antrean pending tidak pernah dihapus.
@@ -40,6 +49,8 @@ func DefaultJobScheduleSettings() JobScheduleSettings {
 		IsolirEnabled:          true,
 		DunningEnabled:         true,
 		DunningOffsets:         []int{-7, -3, 0, 1, 3},
+		DunningTime:            "08:00",
+		InvoiceIssuedTime:      "08:00",
 		OdpOutageEnabled:       false,
 		WeeklyReconcileEnabled: true,
 		WeeklyReconcileWeekday: 0,
@@ -75,6 +86,8 @@ func NormalizeJobScheduleSettings(cfg JobScheduleSettings) JobScheduleSettings {
 	if len(cfg.DunningOffsets) == 0 {
 		cfg.DunningOffsets = def.DunningOffsets
 	}
+	cfg.DunningTime = NormalizeNotifyTime(cfg.DunningTime, def.DunningTime)
+	cfg.InvoiceIssuedTime = NormalizeNotifyTime(cfg.InvoiceIssuedTime, def.InvoiceIssuedTime)
 	if cfg.WeeklyReconcileWeekday < 0 || cfg.WeeklyReconcileWeekday > 6 {
 		cfg.WeeklyReconcileWeekday = def.WeeklyReconcileWeekday
 	}
@@ -144,6 +157,103 @@ func NormalizeJobScheduleSettings(cfg JobScheduleSettings) JobScheduleSettings {
 	cfg.DunningOffsets = offsets
 	cfg.OdpOutageEnabled = false
 	return cfg
+}
+
+// NormalizeNotifyTime validates an "HH:MM" (24h) notify time, falling back to
+// fallback (then "08:00") when invalid.
+func NormalizeNotifyTime(raw, fallback string) string {
+	if h, m, ok := ParseNotifyTime(raw); ok {
+		return formatNotifyTime(h, m)
+	}
+	if h, m, ok := ParseNotifyTime(fallback); ok {
+		return formatNotifyTime(h, m)
+	}
+	return "08:00"
+}
+
+// ParseNotifyTime parses "HH:MM" (also accepts "H:MM", "HH.MM", "HHMM").
+func ParseNotifyTime(raw string) (hour, minute int, ok bool) {
+	s := ""
+	for _, r := range raw {
+		if r >= '0' && r <= '9' {
+			s += string(r)
+		} else if r == ':' || r == '.' {
+			s += ":"
+		}
+	}
+	parts := splitNotifyTime(s)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	h, herr := atoiNotify(parts[0])
+	m, merr := atoiNotify(parts[1])
+	if herr != nil || merr != nil {
+		return 0, 0, false
+	}
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0, 0, false
+	}
+	return h, m, true
+}
+
+func formatNotifyTime(h, m int) string {
+	return twoDigits(h) + ":" + twoDigits(m)
+}
+
+func splitNotifyTime(s string) []string {
+	var parts []string
+	cur := ""
+	for _, r := range s {
+		if r == ':' {
+			parts = append(parts, cur)
+			cur = ""
+			continue
+		}
+		cur += string(r)
+	}
+	parts = append(parts, cur)
+	return parts
+}
+
+func atoiNotify(s string) (int, error) {
+	if s == "" {
+		return 0, errNotifyNum
+	}
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, errNotifyNum
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n, nil
+}
+
+func twoDigits(n int) string {
+	if n < 10 {
+		return "0" + string(rune('0'+n))
+	}
+	return string(rune('0'+n/10)) + string(rune('0'+n%10))
+}
+
+// ScheduledAtForNotifyTime returns today at HH:MM (local) when now is still
+// before that time, so the caller can delay queueing until then. Returns nil
+// when notifications may be sent immediately.
+func ScheduledAtForNotifyTime(now time.Time, hhmm string) *time.Time {
+	h, m, ok := ParseNotifyTime(hhmm)
+	if !ok {
+		return nil
+	}
+	at := time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location())
+	if now.Before(at) {
+		return &at
+	}
+	return nil
+}
+
+// PastNotifyTime reports whether local now has reached today's HH:MM.
+func PastNotifyTime(now time.Time, hhmm string) bool {
+	return ScheduledAtForNotifyTime(now, hhmm) == nil
 }
 
 type JobRun struct {

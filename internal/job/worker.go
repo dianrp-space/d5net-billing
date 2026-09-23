@@ -185,7 +185,7 @@ func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.Jo
 		w.repairIsolirSecrets(ctx, t.ID, overdue, tried)
 	}
 	if cfg.DunningEnabled {
-		w.processDunning(ctx, t.ID, cfg.DunningOffsets)
+		w.processDunning(ctx, t.ID, cfg)
 	}
 	w.processNotifRetention(ctx, t.ID, cfg.NotifLogRetentionDays)
 	if cfg.WeeklyReconcileEnabled {
@@ -679,9 +679,16 @@ func (w *Worker) fillResumeIPAM(ctx context.Context, sub *store.Subscription, sp
 	}
 }
 
-func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, offsets []int) {
+func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, cfg store.JobScheduleSettings) {
+	offsets := cfg.DunningOffsets
 	if len(offsets) == 0 {
 		offsets = store.DefaultJobScheduleSettings().DunningOffsets
+	}
+	// Reminder hanya dikirim setelah jam kirim harian tercapai. Siklus worker
+	// sebelum jam tersebut dilewati; klaim idempoten belum diambil sehingga
+	// reminder tetap terkirim sekali setelah waktunya tiba.
+	if !store.PastNotifyTime(time.Now(), store.NormalizeNotifyTime(cfg.DunningTime, "08:00")) {
+		return
 	}
 	invoices, err := w.store.ListDunningInvoices(ctx, tenantID)
 	if err != nil {

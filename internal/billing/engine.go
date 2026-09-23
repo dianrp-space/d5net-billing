@@ -320,6 +320,8 @@ func formatLateFeePercent(pct float64) string {
 
 // PlanChangeQuote is the mid-cycle charge when switching plans before next_bill_at.
 // Formula: delta = prorata(new) − prorata(old) for remaining days in the current cycle.
+// Direction (upgrade/downgrade/same) is determined by speed (download, then upload),
+// NOT by price: Upgrade = speed naik, Downgrade = speed turun.
 type PlanChangeQuote struct {
 	OldPlanID      xid.ID `json:"old_plan_id"`
 	OldPlanName    string `json:"old_plan_name"`
@@ -327,6 +329,10 @@ type PlanChangeQuote struct {
 	NewPlanID      xid.ID `json:"new_plan_id"`
 	NewPlanName    string `json:"new_plan_name"`
 	NewPrice       int64  `json:"new_price"`
+	OldDownload    int    `json:"old_download_mbps"`
+	OldUpload      int    `json:"old_upload_mbps"`
+	NewDownload    int    `json:"new_download_mbps"`
+	NewUpload      int    `json:"new_upload_mbps"`
 	RemainingDays  int    `json:"remaining_days"`
 	PeriodDays     int    `json:"period_days"`
 	OldCredit      int64  `json:"old_credit"`
@@ -337,6 +343,35 @@ type PlanChangeQuote struct {
 	Direction      string `json:"direction"` // upgrade | downgrade | same
 	NextBillAt     string `json:"next_bill_at,omitempty"`
 	RequiresCharge bool   `json:"requires_charge"`
+}
+
+// PlanChangeDirection returns upgrade when speed rises, downgrade when speed
+// falls, same otherwise. Download is primary, upload is tie-breaker.
+func PlanChangeDirection(oldDownload, oldUpload, newDownload, newUpload int) string {
+	switch {
+	case newDownload > oldDownload:
+		return "upgrade"
+	case newDownload < oldDownload:
+		return "downgrade"
+	case newUpload > oldUpload:
+		return "upgrade"
+	case newUpload < oldUpload:
+		return "downgrade"
+	default:
+		return "same"
+	}
+}
+
+// PlanChangeLabel is the user-facing verb for a direction.
+func PlanChangeLabel(direction string) string {
+	switch direction {
+	case "upgrade":
+		return "Upgrade"
+	case "downgrade":
+		return "Downgrade"
+	default:
+		return "Ganti paket"
+	}
 }
 
 func RemainingDaysUntil(now, until time.Time, cycleDays int) int {
@@ -400,13 +435,7 @@ func (e *Engine) QuotePlanChange(ctx context.Context, tenantID, subscriptionID, 
 		oldCredit, newCharge, delta = 0, 0, 0
 	}
 
-	dir := "same"
-	switch {
-	case newPrice > oldPrice:
-		dir = "upgrade"
-	case newPrice < oldPrice:
-		dir = "downgrade"
-	}
+	dir := PlanChangeDirection(oldPlan.DownloadMbps, oldPlan.UploadMbps, newPlan.DownloadMbps, newPlan.UploadMbps)
 
 	tax := int64(0)
 	total := int64(0)
@@ -428,6 +457,10 @@ func (e *Engine) QuotePlanChange(ctx context.Context, tenantID, subscriptionID, 
 		NewPlanID:      newPlan.ID,
 		NewPlanName:    newPlan.Name,
 		NewPrice:       newPrice,
+		OldDownload:    oldPlan.DownloadMbps,
+		OldUpload:      oldPlan.UploadMbps,
+		NewDownload:    newPlan.DownloadMbps,
+		NewUpload:      newPlan.UploadMbps,
 		RemainingDays:  remaining,
 		PeriodDays:     cycleDays,
 		OldCredit:      oldCredit,
@@ -444,6 +477,11 @@ func (e *Engine) QuotePlanChange(ctx context.Context, tenantID, subscriptionID, 
 
 // ApplyPlanChange updates the subscription plan and optionally issues a mid-cycle delta invoice.
 // next_bill_at is preserved (same billing anchor). Returns quote and invoice (nil if no charge).
+//
+// Upgrade (speed naik) with a delta charge is DEFERRED: the invoice must be
+// paid in full first; only then is the subscription plan switched and the
+// router profile updated (see handlers.applyPendingUpgradeIfPaid, called after
+// payment). Downgrade / same-speed changes apply immediately.
 func (e *Engine) ApplyPlanChange(ctx context.Context, tenantID, subscriptionID, newPlanID xid.ID) (*PlanChangeQuote, *store.Invoice, error) {
 	now := time.Now()
 	q, sub, _, newPlan, err := e.QuotePlanChange(ctx, tenantID, subscriptionID, newPlanID, now)
@@ -456,13 +494,75 @@ func (e *Engine) ApplyPlanChange(ctx context.Context, tenantID, subscriptionID, 
 	switch sub.Status {
 	case "active", "suspended", "overdue":
 	default:
-		return nil, nil, fmt.Errorf("ganti paket hanya untuk langganan active/suspended/overdue (status: %s)", sub.Status)
+		return nil, nil, fmt.Errorf("Upgrade/Downgrade hanya untuk langganan active/suspended/overdue (status: %s)", sub.Status)
+	}
+
+	// Block any new change while a previous Upgrade waits for payment.
+	if pending, perr := e.store.GetSubscriptionPendingPlan(ctx, tenantID, subscriptionID); perr == nil && pending != nil {
+		paid, _ := e.store.PendingPlanInvoicePaid(ctx, tenantID, pending)
+		if !paid {
+			return q, nil, fmt.Errorf("masih ada tagihan Upgrade yang belum lunas — lunasi dulu baru ganti paket lagi")
+		}
+		// Stale marker whose invoice is already paid: clear it and continue.
+		_ = e.store.ClearSubscriptionPendingPlan(ctx, tenantID, subscriptionID)
 	}
 
 	svc := newPlan.ServiceType
 	if svc == "" {
 		svc = sub.ServiceType
 	}
+
+	// Deferred upgrade: issue the delta invoice first, switch plan + router later.
+	if q.Direction == "upgrade" && q.RequiresCharge && q.DeltaSubtotal > 0 {
+		custCode := ""
+		if cust, cerr := e.store.GetCustomer(ctx, tenantID, sub.CustomerID); cerr == nil && cust != nil {
+			custCode = cust.CustomerCode
+		}
+		invNum, err := e.store.NextInvoiceNumber(ctx, tenantID, custCode)
+		if err != nil {
+			return nil, nil, err
+		}
+		dueDay := e.store.InvoiceDueDay(ctx, tenantID)
+		if cust, cerr := e.store.GetCustomer(ctx, tenantID, sub.CustomerID); cerr == nil && cust != nil {
+			dueDay = e.store.ResolvePlanDueDay(ctx, tenantID, newPlan.ID, cust.ClusterID, newPlan.DueDay)
+		}
+		due := NextDueDate(now, dueDay)
+		sid := subscriptionID
+		inv := &store.Invoice{
+			TenantID:       tenantID,
+			CustomerID:     sub.CustomerID,
+			SubscriptionID: &sid,
+			Isolir:         true,
+			InvoiceNumber:  invNum,
+			Subtotal:       q.DeltaSubtotal,
+			TaxAmount:      q.TaxAmount,
+			TotalAmount:    q.TotalAmount,
+			Status:         "issued",
+			DueDate:        due,
+		}
+		desc := fmt.Sprintf(
+			"%s %s → %s (selisih prorata %d/%d hari)",
+			PlanChangeLabel(q.Direction), q.OldPlanName, q.NewPlanName, q.RemainingDays, q.PeriodDays,
+		)
+		items := []store.InvoiceItem{{
+			Description: desc,
+			Quantity:    1,
+			UnitPrice:   q.DeltaSubtotal,
+			Amount:      q.DeltaSubtotal,
+		}}
+		if err := e.store.CreateInvoice(ctx, inv, items); err != nil {
+			return nil, nil, err
+		}
+		_ = e.store.SetSubscriptionPendingPlan(ctx, tenantID, subscriptionID, &store.PendingPlanChange{
+			OldPlanID:   sub.PlanID,
+			NewPlanID:   newPlanID,
+			InvoiceID:   inv.ID,
+			Direction:   q.Direction,
+			ServiceType: svc,
+		})
+		return q, inv, nil
+	}
+
 	sub.PlanID = newPlanID
 	sub.ServiceType = svc
 	if err := e.store.UpdateSubscription(ctx, tenantID, sub, false); err != nil {
@@ -498,8 +598,8 @@ func (e *Engine) ApplyPlanChange(ctx context.Context, tenantID, subscriptionID, 
 			DueDate:        due,
 		}
 		desc := fmt.Sprintf(
-			"Ganti paket %s → %s (selisih prorata %d/%d hari)",
-			q.OldPlanName, q.NewPlanName, q.RemainingDays, q.PeriodDays,
+			"%s %s → %s (selisih prorata %d/%d hari)",
+			PlanChangeLabel(q.Direction), q.OldPlanName, q.NewPlanName, q.RemainingDays, q.PeriodDays,
 		)
 		items := []store.InvoiceItem{{
 			Description: desc,

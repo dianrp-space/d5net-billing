@@ -429,6 +429,16 @@ func resumeAfterInvoicePaid(ctx context.Context, d *Deps, tenantID xid.ID, inv *
 			ids[sub.ID] = struct{}{}
 		}
 	}
+	// Upgrade tertunda: invoice selisih lunas → baru ganti paket + update router.
+	// Refresh invoice dari DB agar status lunas (paid_amount) terbaru dipakai.
+	fresh := inv
+	if got, _, gerr := d.Store.GetInvoice(ctx, tenantID, inv.ID); gerr == nil && got != nil {
+		fresh = got
+	}
+	for sid := range ids {
+		_ = fresh
+		applyPendingUpgradeIfPaid(ctx, d, tenantID, sid)
+	}
 	for sid := range ids {
 		stillDue, err := d.Store.SubscriptionHasPastDueUnpaid(ctx, tenantID, sid)
 		if err != nil || stillDue {

@@ -13,6 +13,8 @@ type JobSchedule = {
   isolir_enabled: boolean;
   dunning_enabled: boolean;
   dunning_offsets: number[];
+  dunning_time?: string;
+  invoice_issued_time?: string;
   weekly_reconcile_enabled: boolean;
   weekly_reconcile_weekday: number;
   weekly_reconcile_hour: number;
@@ -87,6 +89,15 @@ function clampIsolirGrace(n: number | undefined) {
 
 function offsetsToText(offsets: number[] | undefined) {
   return (offsets ?? []).join(", ");
+}
+
+function normalizeTimeInput(v: unknown, fallback = "08:00") {
+  const s = String(v ?? "").trim();
+  const m = s.match(/^(\d{1,2})[:.](\d{1,2})/);
+  if (!m) return fallback;
+  const h = Math.max(0, Math.min(23, Number(m[1])));
+  const min = Math.max(0, Math.min(59, Number(m[2])));
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }
 
 function parseOffsets(raw: string): number[] {
@@ -209,6 +220,8 @@ export function JobsSettingsPage() {
     return {
       ...src,
       dunning_offsets: parseOffsets(offsetsText),
+      dunning_time: normalizeTimeInput(src.dunning_time),
+      invoice_issued_time: normalizeTimeInput(src.invoice_issued_time),
       weekly_reconcile_weekday: Number(src.weekly_reconcile_weekday),
       weekly_reconcile_hour: Number(src.weekly_reconcile_hour),
       monthly_report_day: Number(src.monthly_report_day),
@@ -377,7 +390,18 @@ export function JobsSettingsPage() {
                 onCheckedChange={(v) => patch("billing_enabled", v)}
                 title="Generate tagihan"
                 hint={catalogHint(catalog, "billing", "Invoice untuk langganan yang jatuh tempo.")}
-              />
+              >
+                <Label className="mb-1.5 block">Jam kirim notif tagihan terbit</Label>
+                <Input
+                  type="time"
+                  value={normalizeTimeInput(form.invoice_issued_time)}
+                  onChange={(e) => patch("invoice_issued_time", e.target.value)}
+                  disabled={!form.billing_enabled}
+                />
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  Notif WA tagihan baru dikirim jam ini; tagihan yang terbit sebelumnya menunggu sampai jam ini.
+                </p>
+              </JobRow>
               <JobRow
                 checked={form.isolir_enabled}
                 onCheckedChange={(v) => patch("isolir_enabled", v)}
@@ -408,7 +432,17 @@ export function JobsSettingsPage() {
                 title="Pengingat tagihan"
                 hint={catalogHint(catalog, "dunning", "Reminder WhatsApp/email pada offset hari relatif jatuh tempo.")}
               >
-                <Label className="mb-1.5 block">Offset hari</Label>
+                <Label className="mb-1.5 block">Jam kirim pengingat</Label>
+                <Input
+                  type="time"
+                  value={normalizeTimeInput(form.dunning_time)}
+                  onChange={(e) => patch("dunning_time", e.target.value)}
+                  disabled={!form.dunning_enabled}
+                />
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  Reminder hanya dikirim setelah jam ini pada hari yang cocok offset.
+                </p>
+                <Label className="mb-1.5 mt-3 block">Offset hari</Label>
                 <Input
                   value={offsetsText}
                   onChange={(e) => setOffsetsText(e.target.value)}

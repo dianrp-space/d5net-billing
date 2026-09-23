@@ -671,11 +671,13 @@ func (s *Service) SendInvoiceIssued(ctx context.Context, tenantID xid.ID, phone,
 	if err != nil {
 		return err
 	}
-	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "invoice_issued"})
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "invoice_issued", ScheduledAt: s.invoiceIssuedScheduledAt(ctx, tenantID)})
 }
 
 // SendInvoiceGenerated notifies the customer when a subscription invoice is
 // generated automatically (first invoice on activation and routine billing).
+// The message is delayed until the tenant's configured tagihan-terbit time
+// when created before that time today.
 func (s *Service) SendInvoiceGenerated(ctx context.Context, tenantID xid.ID, phone, customerName, planName, itemName, invoiceNum string, amount int64, dueDate string) error {
 	phone = strings.TrimSpace(phone)
 	if phone == "" {
@@ -693,7 +695,17 @@ func (s *Service) SendInvoiceGenerated(ctx context.Context, tenantID xid.ID, pho
 	if err != nil {
 		return err
 	}
-	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "invoice_generated"})
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "invoice_generated", ScheduledAt: s.invoiceIssuedScheduledAt(ctx, tenantID)})
+}
+
+// invoiceIssuedScheduledAt returns today at the tenant's configured
+// tagihan-terbit time when still in the future, else nil (send immediately).
+func (s *Service) invoiceIssuedScheduledAt(ctx context.Context, tenantID xid.ID) *time.Time {
+	hhmm := "08:00"
+	if cfg, err := s.store.GetJobScheduleSettings(ctx, tenantID); err == nil {
+		hhmm = store.NormalizeNotifyTime(cfg.InvoiceIssuedTime, hhmm)
+	}
+	return store.ScheduledAtForNotifyTime(time.Now(), hhmm)
 }
 
 func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, phone, customerName, planName, itemName, invoiceNum string, amount int64, dueDate string) error {

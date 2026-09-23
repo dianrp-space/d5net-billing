@@ -159,6 +159,10 @@ export function SubscriptionsPage({
     new_plan_id: string;
     new_plan_name: string;
     new_price: number;
+    old_download_mbps?: number;
+    old_upload_mbps?: number;
+    new_download_mbps?: number;
+    new_upload_mbps?: number;
     remaining_days: number;
     period_days: number;
     old_credit: number;
@@ -172,6 +176,12 @@ export function SubscriptionsPage({
   };
   const [changePlanQuote, setChangePlanQuote] = useState<PlanChangeQuote | null>(null);
   const [changePlanErr, setChangePlanErr] = useState("");
+  const changePlanDirectionLabel =
+    changePlanQuote?.direction === "upgrade"
+      ? "Upgrade"
+      : changePlanQuote?.direction === "downgrade"
+        ? "Downgrade"
+        : "Upgrade / Downgrade";
 
   const dialogOpen = createOpen || Boolean(editId);
 
@@ -660,6 +670,7 @@ export function SubscriptionsPage({
         quote: PlanChangeQuote;
         invoice?: { invoice_number: string; total_amount: number };
         status: string;
+        pending_payment?: boolean;
       }>(`/api/subscriptions/${changePlanTarget!.id}/change-plan`, {
         method: "POST",
         body: JSON.stringify({ plan_id: changePlanId }),
@@ -671,16 +682,21 @@ export function SubscriptionsPage({
       void qc.invalidateQueries({ queryKey: ["subs"] });
       void qc.invalidateQueries({ queryKey: ["invoices"] });
       const q = res.quote;
-      if (q.requires_charge && res.invoice) {
+      const dirLabel = q.direction === "upgrade" ? "Upgrade" : q.direction === "downgrade" ? "Downgrade" : "Ganti paket";
+      if (res.pending_payment && res.invoice) {
         void toastSuccess(
-          `Paket diganti (${q.direction}) · tagihan ${formatRp(res.invoice.total_amount)}`,
+          `Upgrade dicatat · lunasi tagihan ${formatRp(res.invoice.total_amount)} dulu, paket + router baru aktif setelah lunas`,
+        );
+      } else if (q.requires_charge && res.invoice) {
+        void toastSuccess(
+          `${dirLabel} berhasil · tagihan ${formatRp(res.invoice.total_amount)}`,
         );
       } else if (q.direction === "downgrade") {
         void toastSuccess(
-          `Paket diganti (downgrade). Selisih ${formatRp(Math.abs(q.delta_subtotal))} tidak ditagih; harga baru berlaku di siklus berikutnya.`,
+          `Downgrade berhasil. Selisih ${formatRp(Math.abs(q.delta_subtotal))} tidak ditagih; harga baru berlaku di siklus berikutnya.`,
         );
       } else {
-        void toastSuccess("Paket diganti");
+        void toastSuccess(`${dirLabel} berhasil`);
       }
     },
     onError: (e: Error) => void toastError(e.message),
@@ -806,7 +822,7 @@ export function SubscriptionsPage({
           <p className="mb-3 text-sm text-[var(--muted)]">
             {customerCabut
               ? "Pelanggan ini sudah cabut. Secret lama tetap terlihat di sini; tidak bisa ditambah atau diaktifkan lagi."
-              : "Secret khusus pelanggan ini. Aktifkan dengan tanggal/prorata; ikon kotak Ganti paket untuk hitung selisih harga sisa hari."}
+              : "Secret khusus pelanggan ini. Aktifkan dengan tanggal/prorata; ikon kotak Upgrade / Downgrade untuk hitung selisih harga sisa hari."}
           </p>
           <Table
             columns={["Username", "Password", "Paket", "ODP / Port", "Status", "Aksi"]}
@@ -841,7 +857,7 @@ export function SubscriptionsPage({
               </Button>
             ) : null}
             {(s.status === "active" || s.status === "suspended" || s.status === "overdue") && !customerCabut ? (
-              <IconButton label="Ganti paket" onClick={() => openChangePlan(s)}>
+              <IconButton label="Upgrade / Downgrade paket" onClick={() => openChangePlan(s)}>
                 <IconBox />
               </IconButton>
             ) : null}
@@ -966,8 +982,8 @@ export function SubscriptionsPage({
           />
           {editId && editStatus && editStatus !== "pending" ? (
             <p className="text-xs text-[var(--muted)] sm:col-span-2">
-              Ganti paket untuk langganan aktif lewat tombol <strong>Ganti paket</strong> di tabel
-              (agar hitung selisih harga).
+              Upgrade (speed naik) / Downgrade (speed turun) untuk langganan aktif lewat tombol{" "}
+              <strong>Upgrade / Downgrade</strong> di tabel (agar hitung selisih harga).
             </p>
           ) : null}
           <SearchableSelect
@@ -1345,7 +1361,7 @@ export function SubscriptionsPage({
 
       <FormDialog
         open={Boolean(changePlanTarget)}
-        title="Ganti paket"
+        title={changePlanDirectionLabel}
         onClose={() => {
           setChangePlanTarget(null);
           setChangePlanId("");
@@ -1394,10 +1410,10 @@ export function SubscriptionsPage({
             <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 text-sm">
               <div className="mb-2 text-xs uppercase tracking-wide text-[var(--muted)]">
                 {changePlanQuote.direction === "upgrade"
-                  ? "Upgrade"
+                  ? "Upgrade (speed naik)"
                   : changePlanQuote.direction === "downgrade"
-                    ? "Downgrade"
-                    : "Sama harga"}{" "}
+                    ? "Downgrade (speed turun)"
+                    : "Sama speed"}{" "}
                 · sisa {changePlanQuote.remaining_days}/{changePlanQuote.period_days} hari
               </div>
               <div className="flex justify-between gap-2">
@@ -1443,6 +1459,9 @@ export function SubscriptionsPage({
                 {changePlanQuote.direction === "downgrade"
                   ? " Downgrade: selisih negatif tidak diganti uang; langsung pakai paket baru."
                   : ""}
+                {changePlanQuote.direction === "upgrade" && changePlanQuote.requires_charge
+                  ? " Upgrade: lunasi tagihan selisih dulu, paket + router baru aktif setelah lunas."
+                  : ""}
               </p>
             </div>
           ) : null}
@@ -1456,7 +1475,7 @@ export function SubscriptionsPage({
                 Boolean(changePlanErr)
               }
             >
-              {applyChangePlan.isPending ? "Memproses…" : "Konfirmasi ganti paket"}
+              {applyChangePlan.isPending ? "Memproses…" : `Konfirmasi ${changePlanDirectionLabel}`}
             </button>
             <button
               type="button"

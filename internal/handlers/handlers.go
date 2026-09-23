@@ -2939,9 +2939,10 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		}
 	}) (*struct {
 		Body struct {
-			Quote   billing.PlanChangeQuote `json:"quote"`
-			Invoice *store.Invoice          `json:"invoice,omitempty"`
-			Status  string                  `json:"status"`
+			Quote          billing.PlanChangeQuote `json:"quote"`
+			Invoice        *store.Invoice          `json:"invoice,omitempty"`
+			Status         string                  `json:"status"`
+			PendingPayment bool                    `json:"pending_payment"`
 		}
 	}, error) {
 		tid, err := tenantIDFromCtx(ctx)
@@ -2970,18 +2971,21 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
+		pending := q.Direction == "upgrade" && q.RequiresCharge && inv != nil
 
 		return &struct {
 			Body struct {
-				Quote   billing.PlanChangeQuote `json:"quote"`
-				Invoice *store.Invoice          `json:"invoice,omitempty"`
-				Status  string                  `json:"status"`
+				Quote          billing.PlanChangeQuote `json:"quote"`
+				Invoice        *store.Invoice          `json:"invoice,omitempty"`
+				Status         string                  `json:"status"`
+				PendingPayment bool                    `json:"pending_payment"`
 			}
 		}{Body: struct {
-			Quote   billing.PlanChangeQuote `json:"quote"`
-			Invoice *store.Invoice          `json:"invoice,omitempty"`
-			Status  string                  `json:"status"`
-		}{Quote: *q, Invoice: inv, Status: outSub.Status}}, nil
+			Quote          billing.PlanChangeQuote `json:"quote"`
+			Invoice        *store.Invoice          `json:"invoice,omitempty"`
+			Status         string                  `json:"status"`
+			PendingPayment bool                    `json:"pending_payment"`
+		}{Quote: *q, Invoice: inv, Status: outSub.Status, PendingPayment: pending}}, nil
 	})
 }
 
@@ -5086,6 +5090,24 @@ func applyPlanChangeToRouter(ctx context.Context, d *Deps, tid xid.ID, sub *stor
 	if err != nil {
 		return nil, nil, nil, httpx.Internal(err)
 	}
+	// Upgrade deferred: tagihan selisih harus lunas dulu. Paket di billing
+	// tetap paket lama dan router JANGAN diupdate sampai invoice lunas
+	// (diterapkan di applyPendingUpgradeIfPaid setelah pembayaran).
+	if q.Direction == "upgrade" && q.RequiresCharge && inv != nil {
+		outSub.CustomerName = cust.FullName
+		outSub.CustomerCode = cust.CustomerCode
+		// PlanName dari GetSubscription = paket lama (belum diganti). Biarkan.
+		slog.Info("change-plan: upgrade deferred until invoice paid",
+			"subscription_id", sub.ID, "invoice_id", inv.ID)
+		// Beritahu pelanggan (WA) tentang tagihan selisih — antre sesuai jam
+		// kirim "tagihan terbit" di pengaturan Cronjob.
+		if d.Notify != nil {
+			item := "Upgrade " + q.OldPlanName + " → " + q.NewPlanName
+			_ = d.Notify.SendInvoiceGenerated(ctx, tid, cust.Phone, cust.FullName,
+				q.NewPlanName, item, inv.InvoiceNumber, inv.TotalAmount, inv.DueDate.Format("02/01/2006"))
+		}
+		return q, inv, outSub, nil
+	}
 	newPlan, err := d.Store.GetPlan(ctx, tid, newPlanID)
 	if err != nil {
 		return nil, nil, nil, httpx.Internal(err)
@@ -5097,6 +5119,60 @@ func applyPlanChangeToRouter(ctx context.Context, d *Deps, tid xid.ID, sub *stor
 		slog.Warn("change-plan: sync router failed", "err", err, "subscription_id", sub.ID)
 	}
 	return q, inv, outSub, nil
+}
+
+// applyPendingUpgradeIfPaid switches the subscription to the pending new plan
+// and syncs the router, but ONLY when the upgrade delta invoice is fully paid.
+// Returns true when a pending upgrade was applied.
+func applyPendingUpgradeIfPaid(ctx context.Context, d *Deps, tenantID, subscriptionID xid.ID) bool {
+	pending, err := d.Store.GetSubscriptionPendingPlan(ctx, tenantID, subscriptionID)
+	if err != nil || pending == nil {
+		return false
+	}
+	paid, err := d.Store.PendingPlanInvoicePaid(ctx, tenantID, pending)
+	if err != nil || !paid {
+		return false
+	}
+	sub, err := d.Store.GetSubscription(ctx, tenantID, subscriptionID)
+	if err != nil {
+		return false
+	}
+	// Already on the new plan (e.g. applied twice): just clear the marker.
+	if sub.PlanID == pending.NewPlanID {
+		_ = d.Store.ClearSubscriptionPendingPlan(ctx, tenantID, subscriptionID)
+		return true
+	}
+	newPlan, err := d.Store.GetPlan(ctx, tenantID, pending.NewPlanID)
+	if err != nil {
+		slog.Warn("pending-upgrade: new plan not found", "sub_id", subscriptionID, "err", err)
+		return false
+	}
+	oldUsername := sub.Username
+	oldRouterID := sub.RouterID
+	svc := pending.ServiceType
+	if svc == "" {
+		svc = newPlan.ServiceType
+	}
+	if svc == "" {
+		svc = sub.ServiceType
+	}
+	sub.PlanID = pending.NewPlanID
+	sub.ServiceType = svc
+	if err := d.Store.UpdateSubscription(ctx, tenantID, sub, false); err != nil {
+		slog.Warn("pending-upgrade: update subscription failed", "sub_id", subscriptionID, "err", err)
+		return false
+	}
+	_ = d.Store.ClearSubscriptionPendingPlan(ctx, tenantID, subscriptionID)
+	outSub, err := d.Store.GetSubscription(ctx, tenantID, subscriptionID)
+	if err != nil {
+		outSub = sub
+	}
+	if err := syncSubscriptionToRouter(ctx, d, outSub, newPlan, oldUsername, oldRouterID); err != nil {
+		slog.Warn("pending-upgrade: sync router failed", "err", err, "subscription_id", subscriptionID)
+		// Plan already switched in billing; router retry happens via resume/repair.
+	}
+	slog.Info("pending-upgrade applied after payment", "subscription_id", subscriptionID, "plan", newPlan.Name)
+	return true
 }
 
 func collectPortalInvoices(ctx context.Context, d *Deps, tenantID xid.ID, byID map[xid.ID]*store.Customer) []store.Invoice {
@@ -5939,9 +6015,10 @@ func registerPortal(api huma.API, d *Deps) {
 		}
 	}) (*struct {
 		Body struct {
-			Quote   billing.PlanChangeQuote `json:"quote"`
-			Invoice *store.Invoice          `json:"invoice,omitempty"`
-			Status  string                  `json:"status"`
+			Quote          billing.PlanChangeQuote `json:"quote"`
+			Invoice        *store.Invoice          `json:"invoice,omitempty"`
+			Status         string                  `json:"status"`
+			PendingPayment bool                    `json:"pending_payment"`
 		}
 	}, error) {
 		ten, cust, sub, err := portalSubscriptionForSession(ctx, d, input.Authorization, input.ID)
@@ -5958,6 +6035,7 @@ func registerPortal(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
+		pending := q.Direction == "upgrade" && q.RequiresCharge && inv != nil
 		who := strings.TrimSpace(cust.FullName)
 		if who == "" {
 			who = cust.CustomerCode
@@ -5974,6 +6052,9 @@ func registerPortal(api huma.API, d *Deps) {
 		if q.RequiresCharge {
 			lines = append(lines, fmt.Sprintf("Tagihan sekarang: %d", q.TotalAmount))
 		}
+		if pending {
+			lines = append(lines, "Menunggu pembayaran — router belum diupdate")
+		}
 		cluster, router, _ := d.Store.CustomerNetworkLabels(ctx, ten.ID, cust.ID)
 		lines = append(lines, notify.OpsNetworkLines(cluster, router)...)
 		if d.Notify != nil {
@@ -5981,15 +6062,17 @@ func registerPortal(api huma.API, d *Deps) {
 		}
 		return &struct {
 			Body struct {
-				Quote   billing.PlanChangeQuote `json:"quote"`
-				Invoice *store.Invoice          `json:"invoice,omitempty"`
-				Status  string                  `json:"status"`
+				Quote          billing.PlanChangeQuote `json:"quote"`
+				Invoice        *store.Invoice          `json:"invoice,omitempty"`
+				Status         string                  `json:"status"`
+				PendingPayment bool                    `json:"pending_payment"`
 			}
 		}{Body: struct {
-			Quote   billing.PlanChangeQuote `json:"quote"`
-			Invoice *store.Invoice          `json:"invoice,omitempty"`
-			Status  string                  `json:"status"`
-		}{Quote: *q, Invoice: inv, Status: outSub.Status}}, nil
+			Quote          billing.PlanChangeQuote `json:"quote"`
+			Invoice        *store.Invoice          `json:"invoice,omitempty"`
+			Status         string                  `json:"status"`
+			PendingPayment bool                    `json:"pending_payment"`
+		}{Quote: *q, Invoice: inv, Status: outSub.Status, PendingPayment: pending}}, nil
 	})
 }
 
