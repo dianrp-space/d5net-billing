@@ -5,7 +5,7 @@ import { formatDate } from "../tenantTime";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
-import { formatRp, FormDialog, Input, SearchableSelect, Section, Table, Button, invoiceStatusLabel } from "../ui";
+import { formatRp, FormDialog, Input, SearchableSelect, Section, Table, Button, InvoiceStatusPill } from "../ui";
 import { Label } from "@/components/ui/label";
 import { InvoiceActions } from "../AdminExtra";
 
@@ -419,7 +419,7 @@ export function InvoicesPage() {
           i.due_date ? formatDate(i.due_date) : "—",
           formatRp(i.total_amount),
           formatRp(i.paid_amount ?? 0),
-          invoiceStatusLabel(i.status),
+          <InvoiceStatusPill key={`st-${i.id}`} status={i.status} />,
           <InvoiceActions
             key={i.id}
             id={i.id}

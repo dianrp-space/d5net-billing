@@ -192,6 +192,27 @@ export function invoiceStatusLabel(status?: string | null) {
   return INVOICE_STATUS_ID[key] || status || "—";
 }
 
+/** Pill status tagihan dengan background: hijau = sudah bayar, merah = jatuh
+ * tempo/batal, kuning = belum bayar/sebagian, netral = draf/lainnya. */
+export function InvoiceStatusPill({ status }: { status?: string | null }) {
+  const key = String(status || "").trim().toLowerCase();
+  const tone =
+    key === "paid" || key === "success"
+      ? "bg-[rgba(43,154,102,0.15)] text-[var(--ok)]"
+      : key === "overdue" || key === "void" || key === "cancelled" || key === "canceled"
+        ? "bg-[rgba(220,38,38,0.12)] text-[var(--danger)]"
+        : key === "issued" || key === "unpaid" || key === "pending" || key === "partial"
+          ? "bg-[rgba(245,158,11,0.15)] text-[var(--warn)]"
+          : "bg-[var(--panel-muted)] text-[var(--muted)]";
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${tone}`}
+    >
+      {invoiceStatusLabel(status)}
+    </span>
+  );
+}
+
 export function paymentStatusLabel(status?: string | null) {
   const key = String(status || "").trim().toLowerCase();
   return PAYMENT_STATUS_ID[key] || status || "—";

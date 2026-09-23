@@ -17,7 +17,7 @@ import type { AdminPage } from "../admin/pages";
 import { AlertsPanel } from "../AdminExtra";
 import { useAppDialog } from "../confirm";
 import { useChartColors } from "../theme";
-import { Card, formatRp, invoiceStatusLabel, Table, Button } from "../ui";
+import { Card, formatRp, InvoiceStatusPill, Table, Button } from "../ui";
 import { toastError } from "../swal";
 
 export function DashboardPage({
@@ -267,7 +267,7 @@ export function DashboardPage({
             i.invoice_number,
             i.customer_name,
             formatRp(i.total_amount),
-            <StatusPill key={i.invoice_number} status={i.status} />,
+            <InvoiceStatusPill key={i.invoice_number} status={i.status} />,
           ])}
         />
       </div>
@@ -370,16 +370,3 @@ function QuickActions({ onNavigate }: { onNavigate: (p: AdminPage) => void }) {
   );
 }
 
-function StatusPill({ status }: { status: string }) {
-  const tone =
-    status === "paid" || status === "success"
-      ? "bg-[rgba(43,154,102,0.1)] text-[var(--ok)]"
-      : status === "overdue" || status === "canceled" || status === "cancelled" || status === "void"
-        ? "bg-[rgba(220,38,38,0.1)] text-[var(--danger)]"
-        : "bg-[rgba(245,158,11,0.12)] text-[var(--warn)]";
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-1 text-[10px] font-bold ${tone}`}>
-      {invoiceStatusLabel(status)}
-    </span>
-  );
-}
