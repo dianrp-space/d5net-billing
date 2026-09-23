@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import { formatDateTimeShort } from "../tenantTime";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
 import { Section, Table } from "../ui";
 
@@ -75,9 +76,7 @@ function metaSummary(meta?: Record<string, unknown> | null): string {
 }
 
 function formatDateTime(s?: string | null): string {
-  if (!s) return "—";
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" });
+  return formatDateTimeShort(s);
 }
 
 export function AuditLogPage() {

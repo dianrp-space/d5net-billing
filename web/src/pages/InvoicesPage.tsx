@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "../api";
+import { formatDate } from "../tenantTime";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
 import { useAppDialog } from "../confirm";
 import { toastError, toastSuccess } from "../swal";
@@ -415,7 +416,7 @@ export function InvoicesPage() {
           />,
           i.invoice_number,
           i.customer_name,
-          i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
+          i.due_date ? formatDate(i.due_date) : "—",
           formatRp(i.total_amount),
           formatRp(i.paid_amount ?? 0),
           invoiceStatusLabel(i.status),

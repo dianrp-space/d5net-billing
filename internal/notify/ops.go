@@ -92,8 +92,8 @@ func (s *Service) QueueTenantTelegramOnce(ctx context.Context, tenantID xid.ID, 
 	return s.QueueTenantTelegram(ctx, tenantID, body)
 }
 
-func OpsDayKey(id xid.ID) string {
-	return fmt.Sprintf("%s-%s", id.String(), time.Now().Format("2006-01-02"))
+func OpsDayKey(id xid.ID, now time.Time) string {
+	return fmt.Sprintf("%s-%s", id.String(), now.Format("2006-01-02"))
 }
 
 func OpsWeekKey(id xid.ID, now time.Time) string {

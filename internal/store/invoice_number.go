@@ -94,7 +94,7 @@ func (s *Store) NextInvoiceNumber(ctx context.Context, tenantID xid.ID, customer
 		return "", err
 	}
 	for i := 0; i < 12; i++ {
-		num := FormatInvoiceNumber(customerCode, time.Now())
+		num := FormatInvoiceNumber(customerCode, s.TenantNow(ctx, tenantID))
 		var exists bool
 		if err := s.Pool.QueryRow(ctx, `
 			SELECT EXISTS(SELECT 1 FROM invoices WHERE tenant_id=$1 AND invoice_number=$2)

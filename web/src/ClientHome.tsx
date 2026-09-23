@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Home, PanelLeft, PanelLeftClose } from "lucide-react";
 import { api, apiDownload, clearClientSession, getClientSession, setClientSession } from "./api";
 import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
+import { formatDate, formatDateTime, setTenantTimeZone } from "./tenantTime";
 import type { ClientPortalData, PortalCustomer } from "./TenantLogin";
 import { ClientIdCard } from "./ClientIdCard";
 import { ClientBell } from "./ClientBell";
@@ -91,11 +92,7 @@ type PortalTicketMessage = {
 
 function formatPortalWhen(iso?: string) {
   if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
-  } catch {
-    return iso;
-  }
+  return formatDateTime(iso, { dateStyle: "medium", timeStyle: "short" });
 }
 
 /** Kunci bulan "YYYY-MM" untuk pemakaian (default: bulan berjalan). */
@@ -114,7 +111,8 @@ export function monthKeyLabel(key: string) {
   const d = new Date(`${key}-01T00:00:00`);
   if (Number.isNaN(d.getTime())) return key;
   try {
-    const s = d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+    const s = formatDate(d, { month: "long", year: "numeric" });
+    if (s === "—") return key;
     return s.charAt(0).toUpperCase() + s.slice(1);
   } catch {
     return key;
@@ -436,10 +434,12 @@ export function ClientHome({
         name?: string;
         logo_url?: string | null;
         favicon_url?: string | null;
+        timezone?: string;
         portal_tagline?: string;
       }>("/api/public/branding"),
     retry: false,
   });
+  setTenantTimeZone(branding.data?.timezone);
 
   const appName = (branding.data?.name || branding.data?.app_name || data.tenant_name || data.tenant_slug || "Portal").trim();
   const portalTagline = (branding.data?.portal_tagline || "Portal pelanggan").trim() || "Portal pelanggan";
@@ -1025,7 +1025,7 @@ export function ClientHome({
     const unpaid = isInvoiceUnpaid(i);
     const paidSomething = i.status === "paid" || (i.paid_amount ?? 0) > 0;
     const itemLabel = (i.items_summary || "").trim() || "—";
-    const paidWhen = i.paid_at ? new Date(i.paid_at).toLocaleString("id-ID") : "—";
+    const paidWhen = formatDateTime(i.paid_at);
     const adminFee = Math.max(0, Math.floor(Number(i.admin_fee) || 0));
     const amountLabel =
       adminFee > 0
@@ -1066,7 +1066,7 @@ export function ClientHome({
           i.invoice_number,
           itemLabel,
           amountLabel,
-          i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
+          formatDate(i.due_date),
           paidWhen,
           invoiceStatusLabel(i.status),
           action,
@@ -1075,7 +1075,7 @@ export function ClientHome({
           i.invoice_number,
           itemLabel,
           amountLabel,
-          i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—",
+          formatDate(i.due_date),
           paidWhen,
           invoiceStatusLabel(i.status),
           action,
@@ -1105,7 +1105,7 @@ export function ClientHome({
           accountLabel(p.customer_code, p.customer_name),
           p.invoice_number || "—",
           (p.items_summary || "").trim() || "—",
-          p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—",
+          formatDateTime(p.paid_at || p.created_at),
           formatRp(p.amount),
           paymentMethodLabel(p.method, p.sandbox),
           paymentStatusLabel(p.status),
@@ -1114,7 +1114,7 @@ export function ClientHome({
       : [
           p.invoice_number || "—",
           (p.items_summary || "").trim() || "—",
-          p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—",
+          formatDateTime(p.paid_at || p.created_at),
           formatRp(p.amount),
           paymentMethodLabel(p.method, p.sandbox),
           paymentStatusLabel(p.status),
@@ -1124,7 +1124,7 @@ export function ClientHome({
 
   const walletTxns = walletQ.data?.transactions ?? [];
   const walletRows = walletTxns.map((t) => {
-    const when = t.created_at ? new Date(t.created_at).toLocaleString("id-ID") : "—";
+    const when = formatDateTime(t.created_at);
     const amount = (
       <span style={{ color: t.amount < 0 ? "var(--danger)" : "var(--ok, #2b9a66)" }}>
         {formatWalletAmount(t.amount)}
@@ -1379,7 +1379,7 @@ export function ClientHome({
                                     {i.due_date ? (
                                       <span className="text-[var(--muted)]">
                                         {" "}
-                                        · jatuh tempo {new Date(i.due_date).toLocaleDateString("id-ID")}
+                                        · jatuh tempo {formatDate(i.due_date)}
                                       </span>
                                     ) : null}
                                   </span>
@@ -1559,8 +1559,8 @@ export function ClientHome({
                           </p>
                         ) : null}
                         <p className="text-xs text-[var(--muted)]">
-                          Jatuh tempo {i.due_date ? new Date(i.due_date).toLocaleDateString("id-ID") : "—"}
-                          {i.paid_at ? ` · Dibayar ${new Date(i.paid_at).toLocaleString("id-ID")}` : ""}
+                          Jatuh tempo {i.due_date ? formatDate(i.due_date) : "—"}
+                          {i.paid_at ? ` · Dibayar ${formatDateTime(i.paid_at)}` : ""}
                         </p>
                         <div className="flex flex-wrap items-center gap-1.5">
                           {unpaid ? (
@@ -1630,7 +1630,7 @@ export function ClientHome({
                             <p className="text-xs text-[var(--muted)]">
                               {paymentMethodLabel(p.method, p.sandbox)}
                               {" · "}
-                              {p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—"}
+                              {p.paid_at || p.created_at ? formatDateTime(p.paid_at || p.created_at!) : "—"}
                             </p>
                             {isCancellablePayment(p.status) && (p.invoice_id || "").trim() ? (
                               <button
@@ -1681,7 +1681,7 @@ export function ClientHome({
                               </p>
                             </div>
                             <p className="text-xs text-[var(--muted)]">
-                              {walletTxnLabel(t.type)} · {t.created_at ? new Date(t.created_at).toLocaleString("id-ID") : "—"}
+                              {walletTxnLabel(t.type)} · {formatDateTime(t.created_at)}
                             </p>
                           </article>
                         ))
@@ -1715,7 +1715,7 @@ export function ClientHome({
                           <p className="text-xs text-[var(--muted)]">
                             {paymentMethodLabel(p.method, p.sandbox)}
                             {" · "}
-                            {p.paid_at || p.created_at ? new Date(p.paid_at || p.created_at!).toLocaleString("id-ID") : "—"}
+                            {p.paid_at || p.created_at ? formatDateTime(p.paid_at || p.created_at!) : "—"}
                           </p>
                           {isCancellablePayment(p.status) && (p.invoice_id || "").trim() ? (
                             <button
@@ -2157,7 +2157,7 @@ export function ClientHome({
                       {multi && (i.customer_code || i.customer_name)
                         ? `${accountLabel(i.customer_code, i.customer_name)} · `
                         : ""}
-                      {i.due_date ? `Jatuh tempo ${new Date(i.due_date).toLocaleDateString("id-ID")} · ` : ""}
+                      {i.due_date ? `Jatuh tempo ${formatDate(i.due_date)} · ` : ""}
                       Sisa {formatRp(invoiceRemaining(i))}
                     </span>
                   </span>

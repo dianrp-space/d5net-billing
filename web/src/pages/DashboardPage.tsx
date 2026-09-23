@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import echarts from "../echarts";
 import { api, apiDownload } from "../api";
+import { formatDate } from "../tenantTime";
 import {
   IconBox,
   IconDownload,
@@ -85,7 +86,7 @@ export function DashboardPage({
   });
   const s = stats.data ?? {};
   const series = Array.isArray(chart.data) ? chart.data : [];
-  const today = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+  const today = formatDate(new Date(), { day: "numeric", month: "short", year: "numeric" });
   const greetName = (userName || "").trim();
   const chartColors = useChartColors();
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LayoutGrid, List } from "lucide-react";
 import { api, apiUpload } from "./api";
+import { formatDateTime } from "./tenantTime";
 import { ProgressFileUpload } from "./ProgressFileUpload";
 import {
   AttributionSelects,
@@ -185,12 +186,7 @@ function attributionLabel(l: LeadRow) {
 }
 
 function formatWhen(iso?: string | null) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("id-ID");
-  } catch {
-    return iso;
-  }
+  return formatDateTime(iso);
 }
 
 function statusLabel(status: string) {

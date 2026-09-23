@@ -135,7 +135,7 @@ func registerTraffic(api huma.API, d *Deps) {
 		if err != nil {
 			return nil, err
 		}
-		month := time.Now()
+		month := d.Store.TenantNow(ctx, ten.ID)
 		if m := strings.TrimSpace(input.Month); m != "" {
 			if !trafficMonthRE.MatchString(m) {
 				return nil, httpx.BadRequest("format bulan harus YYYY-MM")

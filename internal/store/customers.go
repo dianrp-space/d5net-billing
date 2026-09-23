@@ -370,7 +370,7 @@ func (s *Store) ListCustomersByPhone(ctx context.Context, tenantID xid.ID, phone
 }
 
 func (s *Store) NextCustomerCode(ctx context.Context, tenantID xid.ID) (string, error) {
-	now := time.Now()
+	now := s.TenantNow(ctx, tenantID)
 	for i := 0; i < 100; i++ {
 		var count int64
 		err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM customers WHERE tenant_id = $1`, tenantID).Scan(&count)

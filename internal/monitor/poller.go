@@ -153,7 +153,7 @@ func (p *Poller) PollRouter(ctx context.Context, tenantID xid.ID, routerID xid.I
 		msg := err.Error()
 		_ = p.store.UpdateRouterStatus(ctx, tenantID, routerID, nil, &msg)
 		if p.notify != nil {
-			_ = p.notify.QueueTenantTelegramOnce(ctx, tenantID, "router_down", notify.OpsDayKey(routerID),
+			_ = p.notify.QueueTenantTelegramOnce(ctx, tenantID, "router_down", notify.OpsDayKey(routerID, p.store.TenantNow(ctx, tenantID)),
 				notify.OpsMsg("router", r.Name, "Tidak merespons poll", msg))
 		}
 		if dup, derr := p.store.HasRecentAlert(ctx, tenantID, "router_down", &routerID, 24*time.Hour); derr == nil && !dup {

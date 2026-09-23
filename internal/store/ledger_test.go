@@ -27,14 +27,15 @@ func TestNormalBalance(t *testing.T) {
 }
 
 func TestNormalizeRange(t *testing.T) {
+	now := time.Date(2026, 4, 5, 8, 0, 0, 0, time.UTC)
 	from := time.Date(2026, 3, 10, 15, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 4, 5, 8, 0, 0, 0, time.UTC)
-	start, end := normalizeRange(from, to)
+	start, end := normalizeRange(now, from, to)
 	if dateOnly(start) != "2026-03-10" || dateOnly(end) != "2026-04-05" {
 		t.Fatalf("normalizeRange = %s..%s", dateOnly(start), dateOnly(end))
 	}
 	// Rentang terbalik ditukar.
-	start, end = normalizeRange(to, from)
+	start, end = normalizeRange(now, to, from)
 	if !start.Before(end) {
 		t.Fatalf("rentang terbalik tidak ditukar: %s..%s", dateOnly(start), dateOnly(end))
 	}

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { IconBell } from "./icons";
 import { IconButton } from "./ui";
 import { formatRp } from "./ui";
+import { formatDate } from "./tenantTime";
 import { invoiceRemaining, isInvoiceUnpaid, isIsolirStatus } from "./payMethod";
 import {
   DropdownMenu,
@@ -63,10 +64,7 @@ function loadRead(): string[] {
 }
 
 function fmtDate(iso?: string): string {
-  if (!iso) return "—";
-  const t = new Date(iso);
-  if (!Number.isFinite(t.getTime())) return "—";
-  return t.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+  return formatDate(iso, { day: "numeric", month: "short", year: "numeric" });
 }
 
 function timeAgoID(iso: string): string {

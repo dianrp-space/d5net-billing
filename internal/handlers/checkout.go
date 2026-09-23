@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/dianrp-space/d5net-billing/internal/httpx"
 	"github.com/dianrp-space/d5net-billing/internal/payment"
@@ -182,7 +181,7 @@ func checkoutInvoice(ctx context.Context, d *Deps, tid xid.ID, inv *store.Invoic
 	// Nomor invoice dipakai langsung sebagai ref merchantOrderId ke payment gateway.
 	req.MerchantOrderID = strings.TrimSpace(inv.InvoiceNumber)
 	if req.MerchantOrderID == "" {
-		req.MerchantOrderID = store.FormatInvoiceNumber("", time.Now())
+		req.MerchantOrderID = store.FormatInvoiceNumber("", d.Store.TenantNow(ctx, tid))
 	}
 	if req.CustomerName == "" {
 		req.CustomerName = strings.TrimSpace(inv.CustomerName)

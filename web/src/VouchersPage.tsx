@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiDownload } from "./api";
+import { formatDateTime } from "./tenantTime";
 import { useAppDialog } from "./confirm";
 import { Badge } from "./components/ui/badge";
 import { IconDownload, IconEye, IconRefresh, IconTrash } from "./icons";
@@ -56,12 +57,7 @@ type PlanOpt = { id: string; name: string; code: string; price: number; service_
 type RouterOpt = { id: string; name: string; is_active: boolean; provisioner?: string };
 
 function formatWhen(iso?: string | null) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("id-ID");
-  } catch {
-    return iso;
-  }
+  return formatDateTime(iso);
 }
 
 function syncBadge(status?: string) {

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import echarts from "./echarts";
 import { api, apiDownload, getToken } from "./api";
+import { formatDate, formatDateTime } from "./tenantTime";
 import { useAppDialog } from "./confirm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IconBanknote, IconBan, IconCheck, IconDownload, IconPencil, IconTicket, IconTrash, IconUndo, IconZap } from "./icons";
@@ -737,7 +738,7 @@ export function AccountingPage() {
             <Table
               columns={["Tanggal", "Kode", "Pelanggan", "Invoice", "Kategori", "Metode", "Nominal"]}
               rows={payRows.slice(0, 200).map((r) => [
-                new Date(r.date).toLocaleDateString("id-ID"),
+                formatDate(r.date),
                 r.customer_code || "—",
                 r.customer_name || "—",
                 r.invoice_number || "—",
@@ -818,7 +819,7 @@ export function AccountingPage() {
                         ) : null}
                       </div>
                       <span className="shrink-0 text-[var(--muted)]">
-                        {new Date(e.entry_date).toLocaleDateString("id-ID")}
+                        {formatDate(e.entry_date)}
                       </span>
                     </div>
                     <Table
@@ -870,7 +871,7 @@ export function AccountingPage() {
               <Table
                 columns={["Tanggal", "Keterangan", "Referensi", "Debit", "Kredit", "Saldo"]}
                 rows={(ledgerData?.lines ?? []).map((l) => [
-                  new Date(l.entry_date).toLocaleDateString("id-ID"),
+                  formatDate(l.entry_date),
                   l.description,
                   l.reference || "—",
                   l.debit ? formatRp(l.debit) : "—",
@@ -1440,7 +1441,7 @@ export function ResellersPage() {
         rowNumberStart={commPage * commLimit + 1}
         columns={["Tanggal", "Pelanggan", "Jenis", "Penerima", "Nominal", "Status", "Aksi"]}
         rows={filteredCommissions.map((c) => [
-          c.created_at ? new Date(c.created_at).toLocaleString("id-ID") : "—",
+          c.created_at ? formatDateTime(c.created_at) : "—",
           c.customer_code ? `${c.customer_code} · ${c.customer_name || ""}` : c.customer_name || "—",
           commissionBasisLabel(c.basis || ""),
           c.reseller_name ? `Reseller: ${c.reseller_name}` : c.sales_user_name ? `Sales: ${c.sales_user_name}` : "—",

@@ -1342,7 +1342,7 @@ func (s *Store) PostJournalEntry(ctx context.Context, e *JournalEntry) error {
 func (s *Store) RecordPaymentJournal(ctx context.Context, tenantID xid.ID, amount int64, cashAccountID xid.ID, revenueAccountID xid.ID, ref string) error {
 	return s.PostJournalEntry(ctx, &JournalEntry{
 		TenantID:    tenantID,
-		EntryDate:   time.Now().Format("2006-01-02"),
+		EntryDate:   s.TenantNow(ctx, tenantID).Format("2006-01-02"),
 		Reference:   ref,
 		Description: "Pembayaran " + ref,
 		SourceType:  "payment",

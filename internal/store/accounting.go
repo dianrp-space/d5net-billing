@@ -82,7 +82,7 @@ func (s *Store) CreateExpense(ctx context.Context, tenantID xid.ID, amount int64
 		category = "ops"
 	}
 	if date == "" {
-		date = time.Now().Format("2006-01-02")
+		date = s.TenantNow(ctx, tenantID).Format("2006-01-02")
 	}
 	// Simpan beban sekaligus jurnalnya (debit beban, kredit kas) dalam satu
 	// transaksi agar buku besar dan neraca saldo tetap seimbang.

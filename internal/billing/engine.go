@@ -45,6 +45,8 @@ func (e *Engine) CalculateInvoiceAmount(plan *store.Plan, prorateDays, totalDays
 }
 
 func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xid.ID, subscriptionID xid.ID) (*store.Invoice, error) {
+	// Semua wall-clock pakai Timezone tenant (Pengaturan → Umum).
+	now := e.store.TenantNow(ctx, tenantID)
 	sub, err := e.store.GetSubscription(ctx, tenantID, subscriptionID)
 	if err != nil {
 		return nil, err
@@ -63,19 +65,19 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 	if basePrice, berr := e.store.ResolvePlanPrice(ctx, tenantID, plan.ID, cust.ClusterID); berr == nil && basePrice == 0 {
 		// Only advance the clock once it is actually due; on activation the anchor
 		// is still in the future and must stay put.
-		if sub.NextBillAt == nil || !sub.NextBillAt.After(time.Now()) {
+		if sub.NextBillAt == nil || !sub.NextBillAt.After(now) {
 			var nextBill time.Time
 			if sub.NextBillAt != nil {
 				nextBill = e.NextBillDate(*sub.NextBillAt, plan.BillingCycle)
 			} else {
-				nextBill = e.NextBillDate(time.Now(), plan.BillingCycle)
+				nextBill = e.NextBillDate(now, plan.BillingCycle)
 			}
 			_, _ = e.store.Pool.Exec(ctx, `UPDATE subscriptions SET next_bill_at = $3 WHERE tenant_id=$1 AND id=$2`, tenantID, subscriptionID, nextBill)
 		}
 		return nil, nil
 	}
 	var disc *store.PlanDiscount
-	if price, applied, err := e.store.ResolveBilledPlanPrice(ctx, tenantID, plan.ID, cust.ID, cust.ClusterID, time.Now()); err == nil {
+	if price, applied, err := e.store.ResolveBilledPlanPrice(ctx, tenantID, plan.ID, cust.ID, cust.ClusterID, now); err == nil {
 		plan.Price = price
 		disc = applied
 	}
@@ -125,11 +127,10 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 	}
 
 	dueDay := e.store.ResolvePlanDueDay(ctx, tenantID, plan.ID, cust.ClusterID, plan.DueDay)
-	dueDate := NextDueDate(time.Now(), dueDay)
+	dueDate := NextDueDate(now, dueDay)
 	if priorCount == 0 {
 		// Tagihan pertama jatuh tempo hari itu juga agar pelanggan baru
 		// langsung bayar; tagihan rutin berikutnya tetap ikut due day kalender.
-		now := time.Now()
 		dueDate = time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
 	}
 	inv := &store.Invoice{
@@ -179,7 +180,7 @@ func (e *Engine) GenerateInvoiceForSubscription(ctx context.Context, tenantID xi
 	} else if sub.NextBillAt != nil {
 		nextBill = e.NextBillDate(*sub.NextBillAt, plan.BillingCycle)
 	} else {
-		nextBill = e.NextBillDate(time.Now(), plan.BillingCycle)
+		nextBill = e.NextBillDate(now, plan.BillingCycle)
 	}
 	_, _ = e.store.Pool.Exec(ctx, `UPDATE subscriptions SET next_bill_at = $3 WHERE tenant_id=$1 AND id=$2`, tenantID, subscriptionID, nextBill)
 	return inv, nil
@@ -483,7 +484,7 @@ func (e *Engine) QuotePlanChange(ctx context.Context, tenantID, subscriptionID, 
 // router profile updated (see handlers.applyPendingUpgradeIfPaid, called after
 // payment). Downgrade / same-speed changes apply immediately.
 func (e *Engine) ApplyPlanChange(ctx context.Context, tenantID, subscriptionID, newPlanID xid.ID) (*PlanChangeQuote, *store.Invoice, error) {
-	now := time.Now()
+	now := e.store.TenantNow(ctx, tenantID)
 	q, sub, _, newPlan, err := e.QuotePlanChange(ctx, tenantID, subscriptionID, newPlanID, now)
 	if err != nil {
 		return nil, nil, err

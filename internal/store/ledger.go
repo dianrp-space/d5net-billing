@@ -123,8 +123,10 @@ func dateOnly(t time.Time) string {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).Format("2006-01-02")
 }
 
-func normalizeRange(from, to time.Time) (time.Time, time.Time) {
-	now := time.Now()
+func normalizeRange(now, from, to time.Time) (time.Time, time.Time) {
+	if now.IsZero() {
+		now = time.Now()
+	}
 	if from.IsZero() {
 		from = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
 	}
@@ -144,7 +146,7 @@ func (s *Store) accountBalances(ctx context.Context, tenantID xid.ID, from, to t
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, err
 	}
-	start, end := normalizeRange(from, to)
+	start, end := normalizeRange(s.TenantNow(ctx, tenantID), from, to)
 	rows, err := s.Pool.Query(ctx, `
 		SELECT a.id, a.code, a.name, a.type, COALESCE(t.debit,0), COALESCE(t.credit,0)
 		FROM chart_of_accounts a
@@ -204,7 +206,7 @@ func (s *Store) accountOpenings(ctx context.Context, tenantID xid.ID, before str
 }
 
 func (s *Store) TrialBalance(ctx context.Context, tenantID xid.ID, from, to time.Time) (*TrialBalance, error) {
-	start, end := normalizeRange(from, to)
+	start, end := normalizeRange(s.TenantNow(ctx, tenantID), from, to)
 	rows, err := s.accountBalances(ctx, tenantID, start, end)
 	if err != nil {
 		return nil, err
@@ -230,7 +232,7 @@ func (s *Store) TrialBalance(ctx context.Context, tenantID xid.ID, from, to time
 }
 
 func (s *Store) ProfitAndLoss(ctx context.Context, tenantID xid.ID, from, to time.Time) (*PnLReport, error) {
-	start, end := normalizeRange(from, to)
+	start, end := normalizeRange(s.TenantNow(ctx, tenantID), from, to)
 	rows, err := s.accountBalances(ctx, tenantID, start, end)
 	if err != nil {
 		return nil, err
@@ -261,7 +263,7 @@ func (s *Store) ProfitAndLoss(ctx context.Context, tenantID xid.ID, from, to tim
 
 func (s *Store) BalanceSheet(ctx context.Context, tenantID xid.ID, from, to time.Time) (*BalanceSheetReport, error) {
 	// Neraca adalah saldo kumulatif s/d tanggal "to" (bukan pergerakan periode).
-	_, end := normalizeRange(from, to)
+	_, end := normalizeRange(s.TenantNow(ctx, tenantID), from, to)
 	allFrom := time.Date(1800, 1, 1, 0, 0, 0, 0, end.Location())
 	rows, err := s.accountBalances(ctx, tenantID, allFrom, end)
 	if err != nil {
@@ -303,7 +305,7 @@ func (s *Store) GeneralJournal(ctx context.Context, tenantID xid.ID, from, to ti
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, 0, err
 	}
-	start, end := normalizeRange(from, to)
+	start, end := normalizeRange(s.TenantNow(ctx, tenantID), from, to)
 	if limit <= 0 {
 		limit = 50
 	}
@@ -405,7 +407,7 @@ func (s *Store) AccountLedger(ctx context.Context, tenantID xid.ID, accountID xi
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, err
 	}
-	start, end := normalizeRange(from, to)
+	start, end := normalizeRange(s.TenantNow(ctx, tenantID), from, to)
 	var acc AccountLedger
 	if err := s.Pool.QueryRow(ctx, `
 		SELECT id, code, name, type FROM chart_of_accounts WHERE tenant_id=$1 AND id=$2

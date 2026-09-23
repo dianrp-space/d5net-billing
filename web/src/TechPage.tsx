@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiUpload } from "./api";
+import { formatDateTime } from "./tenantTime";
 import { compressImageForUpload } from "./imageCompress";
 import { useAppDialog } from "./confirm";
 import { Badge } from "./components/ui/badge";
@@ -81,12 +82,7 @@ const emptyWO = {
 };
 
 function formatWhen(iso?: string | null) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("id-ID");
-  } catch {
-    return iso;
-  }
+  return formatDateTime(iso);
 }
 
 function statusVariant(s: string): "default" | "danger" | "outline" | "success" {

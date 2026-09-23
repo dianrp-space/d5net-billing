@@ -268,7 +268,7 @@ func (s *Store) FindBestPlanDiscount(ctx context.Context, tenantID, planID, cust
 	}
 	on = strings.TrimSpace(on)
 	if on == "" {
-		on = time.Now().Format("2006-01-02")
+		on = s.TenantNow(ctx, tenantID).Format("2006-01-02")
 	}
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, err
@@ -326,7 +326,7 @@ func (s *Store) ResolveBilledPlanPrice(ctx context.Context, tenantID, planID, cu
 		return 0, nil, err
 	}
 	if at.IsZero() {
-		at = time.Now()
+		at = s.TenantNow(ctx, tenantID)
 	}
 	disc, err := s.FindBestPlanDiscount(ctx, tenantID, planID, customerID, at.Format("2006-01-02"), base)
 	if err != nil {
@@ -339,7 +339,7 @@ func (s *Store) DecoratePortalPlanPrice(ctx context.Context, tenantID, customerI
 	if p == nil || xid.IsNil(customerID) {
 		return
 	}
-	disc, err := s.FindBestPlanDiscount(ctx, tenantID, p.ID, customerID, time.Now().Format("2006-01-02"), p.Price)
+	disc, err := s.FindBestPlanDiscount(ctx, tenantID, p.ID, customerID, s.TenantNow(ctx, tenantID).Format("2006-01-02"), p.Price)
 	if err != nil || disc == nil {
 		return
 	}

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe, UserRound } from "lucide-react";
 import { api, apiUpload } from "./api";
+import { formatDate } from "./tenantTime";
 import { IconPencil, IconTrash, IconUpload } from "./icons";
 import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
@@ -886,7 +887,7 @@ function InvoiceFormPreview({
   const now = new Date();
   const period = `${String(now.getMonth() + 1).padStart(2, "0")}${now.getFullYear()}`;
   const invoiceNo = `INV-D5N-2026090001-${period}A3F9K2`;
-  const fmtDate = (d: Date) => d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+  const fmtDate = (d: Date) => formatDate(d, { day: "2-digit", month: "short", year: "numeric" });
   const issuedAt = fmtDate(new Date(now.getFullYear(), now.getMonth(), 1));
   const dueAt = fmtDate(new Date(now.getFullYear(), now.getMonth(), 8));
 

@@ -188,11 +188,13 @@ func (w *Worker) runTenantJobs(ctx context.Context, t store.Tenant, cfg store.Jo
 		w.processDunning(ctx, t.ID, cfg)
 	}
 	w.processNotifRetention(ctx, t.ID, cfg.NotifLogRetentionDays)
+	// Cek jadwal (hari/jam) memakai Timezone tenant, bukan jam server.
+	tnow := w.store.TenantNow(ctx, t.ID)
 	if cfg.WeeklyReconcileEnabled {
-		w.weeklyReconcile(ctx, t.ID, now, cfg.WeeklyReconcileWeekday, cfg.WeeklyReconcileHour, forceScheduled)
+		w.weeklyReconcile(ctx, t.ID, tnow, cfg.WeeklyReconcileWeekday, cfg.WeeklyReconcileHour, forceScheduled)
 	}
 	if cfg.MonthlyReportEnabled {
-		w.monthlyReportEmail(ctx, t, now, cfg.MonthlyReportDay, cfg.MonthlyReportHour, forceScheduled)
+		w.monthlyReportEmail(ctx, t, tnow, cfg.MonthlyReportDay, cfg.MonthlyReportHour, forceScheduled)
 	}
 	return out
 }
@@ -736,7 +738,7 @@ func (w *Worker) processNotifRetention(ctx context.Context, tenantID xid.ID, ret
 	if retentionDays <= 0 {
 		return
 	}
-	ok, err := w.store.ClaimJob(ctx, tenantID, "notif_retention", time.Now().Format("2006-01-02"))
+	ok, err := w.store.ClaimJob(ctx, tenantID, "notif_retention", w.store.TenantNow(ctx, tenantID).Format("2006-01-02"))
 	if err != nil || !ok {
 		return
 	}

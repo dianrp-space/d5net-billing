@@ -2734,7 +2734,7 @@ func registerSubscriptions(api huma.API, d *Deps) {
 			}
 		}
 
-		now := time.Now()
+		now := d.Store.TenantNow(ctx, tid)
 		start := now
 		if st, ok, perr := parseFlexibleDateTime(input.Body.StartedAt, now.Location()); perr != nil {
 			return nil, perr
@@ -2919,7 +2919,7 @@ func registerSubscriptions(api huma.API, d *Deps) {
 		if err := ensurePlanOfferedForCustomer(ctx, d, tid, input.Body.PlanID, cust); err != nil {
 			return nil, err
 		}
-		q, _, _, _, err := d.Billing.QuotePlanChange(ctx, tid, input.ID, input.Body.PlanID, time.Now())
+		q, _, _, _, err := d.Billing.QuotePlanChange(ctx, tid, input.ID, input.Body.PlanID, d.Store.TenantNow(ctx, tid))
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, httpx.NotFound(err.Error())
@@ -5994,7 +5994,7 @@ func registerPortal(api huma.API, d *Deps) {
 		if err := ensurePortalPlanChoice(ctx, d, ten.ID, cust, sub, input.Body.PlanID); err != nil {
 			return nil, err
 		}
-		q, _, _, _, err := d.Billing.QuotePlanChange(ctx, ten.ID, sub.ID, input.Body.PlanID, time.Now())
+		q, _, _, _, err := d.Billing.QuotePlanChange(ctx, ten.ID, sub.ID, input.Body.PlanID, d.Store.TenantNow(ctx, ten.ID))
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, httpx.NotFound(err.Error())

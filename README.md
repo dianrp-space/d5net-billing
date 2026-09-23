@@ -465,6 +465,21 @@ jam server:
 - **Jam kirim pengingat** (`dunning_time`) — reminder dunning hanya dikirim setelah jam
   ini pada hari yang cocok offset (siklus worker sebelumnya dilewati).
 
+### Zona waktu (Timezone)
+
+Semua yang berhubungan dengan waktu kalender mengikuti **Timezone** di Pengaturan →
+Umum (default `Asia/Jakarta`, pilihan: WIB/WITA/WIT, Singapura, UTC) — bukan jam server
+maupun jam browser:
+
+- Siklus billing, tanggal jatuh tempo, prorata, dan periode `mmyyyy` nomor invoice.
+- Dunning, jam kirim notifikasi, reconcile mingguan, dan laporan bulanan.
+- Periode kode pelanggan, tanggal jurnal akuntansi/beban/wallet, dan semua tampilan
+  tanggal di UI admin + portal pelanggan.
+
+Jam server hanya dipakai untuk hal yang memang absolut/durasi (timestamp teknis,
+interval worker/poller, expiry token & payment gateway yang mengikuti standarnya
+masing-masing).
+
 ### Broadcast
 
 Tab **Broadcast** mengirim pesan massal ke banyak penerima dengan **jeda terstaggered**

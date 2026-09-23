@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { formatDateTime } from "./tenantTime";
 import { useQuery } from "@tanstack/react-query";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import echarts from "./echarts";
@@ -85,12 +86,7 @@ function formatPct(n?: number | null) {
 }
 
 function formatWhen(iso?: string | null) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("id-ID");
-  } catch {
-    return iso;
-  }
+  return formatDateTime(iso);
 }
 
 function entriesSorted(map: Record<string, number> | undefined) {

@@ -4,6 +4,7 @@ import { HeaderSearch } from "./HeaderSearch";
 import { UserMenu } from "./UserMenu";
 import { getSidebarOpen, setSidebarOpen } from "./navPersist";
 import { applyBrandingMeta, DEFAULT_BRAND_LOGO } from "./branding";
+import { setTenantTimeZone } from "./tenantTime";
 import { canAccessPage, canDispatchOps, firstAllowedPage, type MePermissions } from "./permissions";
 import { isAdminPage, pageTitles, type AdminPage } from "./admin/pages";
 import {
@@ -277,10 +278,12 @@ export function AdminApp({
         logo_url?: string | null;
         favicon_url?: string | null;
         name?: string;
+        timezone?: string;
         admin_tagline?: string;
       }>("/api/public/branding"),
     retry: false,
   });
+  setTenantTimeZone(branding.data?.timezone);
   const meQ = useQuery({
     queryKey: ["me"],
     queryFn: () =>

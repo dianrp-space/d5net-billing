@@ -115,7 +115,7 @@ func nullXID(id xid.ID) any {
 // month kosong = bulan berjalan.
 func (s *Store) MonthlyUsage(ctx context.Context, tenantID, customerID xid.ID, month time.Time) (*MonthlyUsage, error) {
 	if month.IsZero() {
-		month = time.Now()
+		month = s.TenantNow(ctx, tenantID)
 	}
 	month = TrafficMonthKey(month)
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
@@ -140,7 +140,7 @@ func (s *Store) MonthlyUsageMany(ctx context.Context, tenantID xid.ID, customerI
 		return []MonthlyUsage{}, nil
 	}
 	if month.IsZero() {
-		month = time.Now()
+		month = s.TenantNow(ctx, tenantID)
 	}
 	month = TrafficMonthKey(month)
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {

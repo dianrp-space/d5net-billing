@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, getToken } from "./api";
+import { formatDateTime } from "./tenantTime";
 import { useAppDialog } from "./confirm";
 import { IconDownload, IconTrash, IconUpload } from "./icons";
 import { toastError, toastSuccess } from "./swal";
@@ -105,7 +106,7 @@ export function BackupRestorePage() {
   const rows = (Array.isArray(list.data) ? list.data : []).map((f) => [
     f.name,
     formatBytes(f.size),
-    f.created_at ? new Date(f.created_at).toLocaleString("id-ID") : "—",
+    f.created_at ? formatDateTime(f.created_at) : "—",
     <div key={f.name} className="flex items-center gap-1">
       <IconButton
         label="Unduh"

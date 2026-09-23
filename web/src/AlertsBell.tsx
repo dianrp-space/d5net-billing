@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { formatDate } from "./tenantTime";
 import { IconBell } from "./icons";
 import { IconButton } from "./ui";
 import type { AdminPage } from "./admin/pages";
@@ -33,7 +34,7 @@ function timeAgoID(iso: string): string {
   if (h < 24) return `${h} jam lalu`;
   const d = Math.floor(h / 24);
   if (d < 7) return `${d} hari lalu`;
-  return new Date(t).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+  return formatDate(new Date(t), { day: "numeric", month: "short", year: "numeric" });
 }
 
 function severityColor(sev: string): string {

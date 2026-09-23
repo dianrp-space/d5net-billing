@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { formatDateTime } from "./tenantTime";
 import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
 import { formatRp, FormDialog } from "./ui";
@@ -269,7 +270,7 @@ export function QrisPayDialog({
             </div>
           )}
           {expires ? (
-            <p className="text-[11px] text-[var(--muted)]">Berlaku sampai {expires.toLocaleString("id-ID")}</p>
+            <p className="text-[11px] text-[var(--muted)]">Berlaku sampai {formatDateTime(expires)}</p>
           ) : null}
           <p className="max-w-xs text-[11px] leading-relaxed text-[var(--muted)]">
             {vaNumber
@@ -297,7 +298,7 @@ export function QrisPayDialog({
           </div>
           {expires ? (
             <p className="text-[11px] text-[var(--muted)]">
-              Berlaku sampai {expires.toLocaleString("id-ID")}
+              Berlaku sampai {formatDateTime(expires)}
             </p>
           ) : null}
           <p className="max-w-xs text-[11px] leading-relaxed text-[var(--muted)]">
@@ -340,7 +341,7 @@ export function QrisPayDialog({
           </div>
           {expires ? (
             <p className="text-[11px] text-[var(--muted)]">
-              Berlaku sampai {expires.toLocaleString("id-ID")}
+              Berlaku sampai {formatDateTime(expires)}
             </p>
           ) : null}
           <p className="text-[11px] text-[var(--muted)]">

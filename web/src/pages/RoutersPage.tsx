@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { formatDateTime } from "../tenantTime";
 import { ListToolbar, matchesQuery } from "../ListToolbar";
 import { IconPencil, IconSearch, IconTrash, IconZap } from "../icons";
 import { useAppDialog } from "../confirm";
@@ -328,7 +329,7 @@ export function RoutersPage() {
             r.username,
             r.use_tls ? "ya" : "tidak",
             <OnlineBadge key="st" online={online} title={detail} />,
-            r.last_seen_at ? new Date(r.last_seen_at).toLocaleString("id-ID") : "—",
+            r.last_seen_at ? formatDateTime(r.last_seen_at) : "—",
             <span key="act" className="flex flex-wrap items-center gap-1.5">
               <IconButton label="Test koneksi" disabled={testingId === r.id} onClick={() => testMut.mutate(r.id)}>
                 <IconZap />

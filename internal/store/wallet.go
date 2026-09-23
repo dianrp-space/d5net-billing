@@ -195,7 +195,7 @@ func insertWalletTxnTx(ctx context.Context, tx pgx.Tx, tenantID, walletID xid.ID
 
 // postWalletJournalTx mencatat jurnal dalam transaksi yang sama (best-effort
 // bila akun tidak tersedia: jurnal dilewati agar saldo tetap konsisten).
-func postWalletJournalTx(ctx context.Context, tx pgx.Tx, tenantID xid.ID, description, reference, sourceType string, sourceID *xid.ID, debitAccount, creditAccount xid.ID, amount int64) error {
+func (s *Store) postWalletJournalTx(ctx context.Context, tx pgx.Tx, tenantID xid.ID, description, reference, sourceType string, sourceID *xid.ID, debitAccount, creditAccount xid.ID, amount int64) error {
 	if amount <= 0 || xid.IsNil(debitAccount) || xid.IsNil(creditAccount) {
 		return nil
 	}
@@ -213,7 +213,7 @@ func postWalletJournalTx(ctx context.Context, tx pgx.Tx, tenantID xid.ID, descri
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO journal_entries (tenant_id, entry_date, reference, description, source_type, source_id)
 		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id
-	`, tenantID, time.Now().Format("2006-01-02"), refArg, description, sourceTypeArg, sourceIDArg).Scan(&entryID); err != nil {
+	`, tenantID, s.TenantNow(ctx, tenantID).Format("2006-01-02"), refArg, description, sourceTypeArg, sourceIDArg).Scan(&entryID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `
@@ -247,7 +247,7 @@ func (s *Store) TopupWallet(ctx context.Context, tenantID, customerID xid.ID, am
 		}
 		cash := lookupAccountTx(ctx, tx, tenantID, "asset", "1110")
 		liability := lookupAccountTx(ctx, tx, tenantID, "liability", "2100")
-		return postWalletJournalTx(ctx, tx, tenantID, "Topup saldo", ref, "wallet_topup", &customerID, cash, liability, amount)
+		return s.postWalletJournalTx(ctx, tx, tenantID, "Topup saldo", ref, "wallet_topup", &customerID, cash, liability, amount)
 	})
 	return newBalance, err
 }
@@ -333,7 +333,7 @@ func (s *Store) PayInvoiceFromWallet(ctx context.Context, tenantID, customerID, 
 
 		liability := lookupAccountTx(ctx, tx, tenantID, "liability", "2100")
 		revenue := lookupAccountTx(ctx, tx, tenantID, "revenue", "4100")
-		if err := postWalletJournalTx(ctx, tx, tenantID, "Pembayaran "+invNum, invNum, "wallet_payment", &invoiceID, liability, revenue, remaining); err != nil {
+		if err := s.postWalletJournalTx(ctx, tx, tenantID, "Pembayaran "+invNum, invNum, "wallet_payment", &invoiceID, liability, revenue, remaining); err != nil {
 			return err
 		}
 		paid = true

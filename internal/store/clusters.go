@@ -240,7 +240,7 @@ func (s *Store) allocClusterCode(ctx context.Context, tenantID, clusterID xid.ID
 			}
 			return err
 		}
-		now := time.Now()
+		now := s.TenantNow(ctx, tenantID)
 		period := sequencePeriod(c.CustomerCodePattern, now)
 		var seq int
 		if err := tx.QueryRow(ctx, `
@@ -264,7 +264,7 @@ func (s *Store) PreviewCustomerCode(ctx context.Context, tenantID, clusterID xid
 	if err != nil {
 		return "", err
 	}
-	now := time.Now()
+	now := s.TenantNow(ctx, tenantID)
 	period := sequencePeriod(c.CustomerCodePattern, now)
 	var last int
 	err = s.withTenant(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, getToken } from "./api";
+import { formatDateTime } from "./tenantTime";
 import { useAppDialog } from "./confirm";
 import { toastError, toastSuccess } from "./swal";
 import { FormDialog, IconButton, Table } from "./ui";
@@ -336,7 +337,7 @@ export function MapODP({
   const saveRoute = useMutation({
     mutationFn: () => {
       const body: Record<string, unknown> = {
-        name: routeName.trim() || `Jalur ${new Date().toLocaleString("id-ID")}`,
+        name: routeName.trim() || `Jalur ${formatDateTime(new Date())}`,
         path: draft,
         color: routeColor || DEFAULT_ROUTE_COLOR,
       };

@@ -181,7 +181,7 @@ func (s *Store) CustomerPaymentReport(ctx context.Context, tenantID xid.ID, f Cu
 	if err := s.SetTenantContext(ctx, tenantID); err != nil {
 		return nil, err
 	}
-	now := time.Now()
+	now := s.TenantNow(ctx, tenantID)
 	from := f.From
 	if from.IsZero() {
 		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())

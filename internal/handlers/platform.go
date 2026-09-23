@@ -38,6 +38,7 @@ func registerPublicBranding(api huma.API, d *Deps) {
 			LogoURL      *string `json:"logo_url,omitempty"`
 			FaviconURL   *string `json:"favicon_url,omitempty"`
 			PrimaryColor string  `json:"primary_color,omitempty"`
+			Timezone     string  `json:"timezone,omitempty"`
 			AdminTagline string  `json:"admin_tagline,omitempty"`
 			PortalTagline string `json:"portal_tagline,omitempty"`
 			Chatwoot     *struct {
@@ -62,6 +63,7 @@ func registerPublicBranding(api huma.API, d *Deps) {
 				LogoURL      *string `json:"logo_url,omitempty"`
 				FaviconURL   *string `json:"favicon_url,omitempty"`
 				PrimaryColor string  `json:"primary_color,omitempty"`
+				Timezone     string  `json:"timezone,omitempty"`
 				AdminTagline string  `json:"admin_tagline,omitempty"`
 				PortalTagline string `json:"portal_tagline,omitempty"`
 				Chatwoot     *struct {
@@ -78,6 +80,7 @@ func registerPublicBranding(api huma.API, d *Deps) {
 		out.Body.LogoURL = view.Effective.LogoURL
 		out.Body.FaviconURL = view.Effective.FaviconURL
 		out.Body.PrimaryColor = gen.PrimaryColor
+		out.Body.Timezone = gen.Timezone
 		out.Body.AdminTagline = gen.AdminTagline
 		out.Body.PortalTagline = gen.PortalTagline
 		if msg, lerr := loadMessagingIntegration(ctx, d, ten.ID); lerr == nil && msg.ChatwootEnabled {

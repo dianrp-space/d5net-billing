@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { formatDateTime } from "./tenantTime";
 import { useConfirm } from "./confirm";
 import { IconRefresh } from "./icons";
 import { toastError, toastSuccess } from "./swal";
@@ -67,12 +68,7 @@ const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const MONTH_DAYS = Array.from({ length: 28 }, (_, i) => i + 1);
 
 function formatWhen(iso?: string) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("id-ID");
-  } catch {
-    return iso;
-  }
+  return formatDateTime(iso);
 }
 
 function secondsToMinutes(sec: number | undefined) {

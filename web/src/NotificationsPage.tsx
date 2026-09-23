@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { formatDateTimeShort } from "./tenantTime";
 import { useConfirm } from "./confirm";
 import { IconRefresh, IconTrash } from "./icons";
 import { toastError, toastSuccess } from "./swal";
@@ -721,9 +722,7 @@ const LOG_STATUS: Record<string, { label: string; tone: string }> = {
 };
 
 function formatDateTime(s?: string | null): string {
-  if (!s) return "—";
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" });
+  return formatDateTimeShort(s);
 }
 
 function NotificationHistoryTab() {

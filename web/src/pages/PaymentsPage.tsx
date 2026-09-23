@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { formatDateTime } from "../tenantTime";
 import { ListToolbar, useDebouncedValue } from "../ListToolbar";
 import { IconTrash, IconUndo } from "../icons";
 import { useAppDialog } from "../confirm";
@@ -43,7 +44,7 @@ const TOPUP_TYPE_LABEL: Record<string, string> = {
 
 function paymentWhen(p: PaymentRow) {
   const raw = p.paid_at || p.created_at;
-  return raw ? new Date(raw).toLocaleString("id-ID") : "—";
+  return formatDateTime(raw);
 }
 
 function customerLabel(p: PaymentRow) {
@@ -248,7 +249,7 @@ export function PaymentsPage() {
           rowNumberStart={page * limit + 1}
           columns={["Tanggal", "Pelanggan", "Jenis", "Keterangan", "Jumlah"]}
           rows={rows.map((t) => [
-            new Date(t.created_at).toLocaleString("id-ID"),
+            formatDateTime(t.created_at),
             topupCustomerLabel(t),
             TOPUP_TYPE_LABEL[t.type] || t.type,
             t.description || t.reference || "—",
