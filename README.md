@@ -455,7 +455,9 @@ ada template aktif, dipakai default bawaan. Variabel `{{customer_name}}`, `{{pla
 
 ### Jam kirim notifikasi
 
-Di menu **Cronjob/Jobs** bisa diatur jam kirim (format `HH:MM`, default `08:00`):
+Di menu **Cronjob/Jobs** bisa diatur jam kirim (format `HH:MM`, default `08:00`).
+Jam selalu mengikuti **Timezone** di Pengaturan → Umum (default `Asia/Jakarta`), bukan
+jam server:
 
 - **Jam kirim notif tagihan terbit** (`invoice_issued_time`) — notif WA tagihan baru
   (`invoice_issued`/`invoice_generated`) yang terbit sebelum jam ini diantrekan sampai jam

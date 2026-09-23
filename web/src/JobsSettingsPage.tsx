@@ -399,7 +399,8 @@ export function JobsSettingsPage() {
                   disabled={!form.billing_enabled}
                 />
                 <p className="mt-1 text-xs text-[var(--muted)]">
-                  Notif WA tagihan baru dikirim jam ini; tagihan yang terbit sebelumnya menunggu sampai jam ini.
+                  Notif WA tagihan baru dikirim jam ini (mengikuti Timezone di Pengaturan → Umum);
+                  tagihan yang terbit sebelumnya menunggu sampai jam ini.
                 </p>
               </JobRow>
               <JobRow
@@ -440,7 +441,8 @@ export function JobsSettingsPage() {
                   disabled={!form.dunning_enabled}
                 />
                 <p className="mt-1 text-xs text-[var(--muted)]">
-                  Reminder hanya dikirim setelah jam ini pada hari yang cocok offset.
+                  Reminder hanya dikirim setelah jam ini (mengikuti Timezone di Pengaturan → Umum) pada hari
+                  yang cocok offset.
                 </p>
                 <Label className="mb-1.5 mt-3 block">Offset hari</Label>
                 <Input

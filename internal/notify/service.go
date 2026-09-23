@@ -700,12 +700,13 @@ func (s *Service) SendInvoiceGenerated(ctx context.Context, tenantID xid.ID, pho
 
 // invoiceIssuedScheduledAt returns today at the tenant's configured
 // tagihan-terbit time when still in the future, else nil (send immediately).
+// Jam memakai Timezone tenant (Pengaturan → Umum), bukan jam server.
 func (s *Service) invoiceIssuedScheduledAt(ctx context.Context, tenantID xid.ID) *time.Time {
 	hhmm := "08:00"
 	if cfg, err := s.store.GetJobScheduleSettings(ctx, tenantID); err == nil {
 		hhmm = store.NormalizeNotifyTime(cfg.InvoiceIssuedTime, hhmm)
 	}
-	return store.ScheduledAtForNotifyTime(time.Now(), hhmm)
+	return store.ScheduledAtForNotifyTime(s.store.TenantNow(ctx, tenantID), hhmm)
 }
 
 func (s *Service) SendInvoiceReminder(ctx context.Context, tenantID xid.ID, phone, customerName, planName, itemName, invoiceNum string, amount int64, dueDate string) error {

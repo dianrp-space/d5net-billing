@@ -684,10 +684,12 @@ func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, cfg store.
 	if len(offsets) == 0 {
 		offsets = store.DefaultJobScheduleSettings().DunningOffsets
 	}
+	// Jam memakai Timezone tenant (Pengaturan → Umum), bukan jam server.
+	now := w.store.TenantNow(ctx, tenantID)
 	// Reminder hanya dikirim setelah jam kirim harian tercapai. Siklus worker
 	// sebelum jam tersebut dilewati; klaim idempoten belum diambil sehingga
 	// reminder tetap terkirim sekali setelah waktunya tiba.
-	if !store.PastNotifyTime(time.Now(), store.NormalizeNotifyTime(cfg.DunningTime, "08:00")) {
+	if !store.PastNotifyTime(now, store.NormalizeNotifyTime(cfg.DunningTime, "08:00")) {
 		return
 	}
 	invoices, err := w.store.ListDunningInvoices(ctx, tenantID)
@@ -704,7 +706,6 @@ func (w *Worker) processDunning(ctx context.Context, tenantID xid.ID, cfg store.
 			}
 		}
 		due := inv.DueDate
-		now := time.Now()
 		dueDay := time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, now.Location())
 		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		days := int(today.Sub(dueDay).Hours() / 24) // negative = before due

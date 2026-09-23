@@ -195,6 +195,31 @@ func (s *Store) UpdateTenantName(ctx context.Context, tenantID xid.ID, name stri
 	return nil
 }
 
+// TenantLocation returns the tenant's configured timezone (Pengaturan → Umum).
+// Falls back to Asia/Jakarta, then server local, when unset or unloadable.
+func (s *Store) TenantLocation(ctx context.Context, tenantID xid.ID) *time.Location {
+	tz := DefaultGeneralSettings().Timezone
+	if g, err := s.GetGeneralSettings(ctx, tenantID); err == nil {
+		if t := strings.TrimSpace(g.Timezone); t != "" {
+			tz = t
+		}
+	}
+	if loc, err := time.LoadLocation(tz); err == nil {
+		return loc
+	}
+	if loc, err := time.LoadLocation(DefaultGeneralSettings().Timezone); err == nil {
+		return loc
+	}
+	return time.Local
+}
+
+// TenantNow returns the current time in the tenant's configured timezone.
+// Pakai ini untuk semua perbandingan jam harian (jadwal notif, dunning, dsb.)
+// agar mengikuti Timezone di Pengaturan → Umum, bukan jam server.
+func (s *Store) TenantNow(ctx context.Context, tenantID xid.ID) time.Time {
+	return time.Now().In(s.TenantLocation(ctx, tenantID))
+}
+
 // EffectiveTaxPercent returns tenant default tax (plans no longer drive tax).
 func (s *Store) EffectiveTaxPercent(ctx context.Context, tenantID xid.ID) (float64, error) {
 	g, err := s.GetGeneralSettings(ctx, tenantID)
