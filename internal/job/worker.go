@@ -338,11 +338,31 @@ func (w *Worker) suspendSubscription(ctx context.Context, tenantID xid.ID, subID
 	if !first {
 		return
 	}
-	_ = w.notify.QueueTenantTelegram(ctx, tenantID, notify.OpsMsg("isolir", who,
+	_ = w.notify.QueueIsolirOpsTelegram(ctx, tenantID, notify.OpsMsg("isolir", who,
 		"User: "+sub.Username,
 		"Paket: "+sub.PlanName,
 		provisionNote,
 	))
+	w.notifyCustomerIsolir(ctx, tenantID, sub)
+}
+
+// notifyCustomerIsolir queues a WhatsApp to the customer the first time a
+// subscription is auto-isolated. Telegram ops is separate and already sent.
+func (w *Worker) notifyCustomerIsolir(ctx context.Context, tenantID xid.ID, sub *store.Subscription) {
+	if w == nil || w.notify == nil || w.store == nil || sub == nil {
+		return
+	}
+	cust, err := w.store.GetCustomer(ctx, tenantID, sub.CustomerID)
+	if err != nil || cust == nil {
+		return
+	}
+	name := strings.TrimSpace(cust.FullName)
+	if name == "" {
+		name = strings.TrimSpace(sub.CustomerName)
+	}
+	if err := w.notify.SendServiceIsolir(ctx, tenantID, cust.Phone, name, sub.PlanName, sub.Username); err != nil {
+		slog.Warn("queue isolir whatsapp", "sub_id", sub.ID, "err", err)
+	}
 }
 
 func (w *Worker) applyIsolirOnRouter(ctx context.Context, tenantID xid.ID, sub *store.Subscription) string {

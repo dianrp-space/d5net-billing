@@ -21,6 +21,11 @@ type JobScheduleSettings struct {
 	// DunningTime is the earliest local time (HH:MM) reminder notifications are
 	// sent on a matching dunning day. Worker cycles before this time skip.
 	DunningTime string `json:"dunning_time,omitempty"`
+	// IsolirNotifyTime is the local time (HH:MM) isolir notifications (WhatsApp
+	// pelanggan + Telegram admin) are sent. Isolir that happens before this time
+	// queues the message for this time today; after it, send immediately.
+	// The isolir action itself is not delayed.
+	IsolirNotifyTime string `json:"isolir_notify_time,omitempty"`
 	// InvoiceIssuedTime is the local time (HH:MM) "tagihan terbit" notifications
 	// are sent. Invoices created before this time queue the notif for this time
 	// today; invoices created after send immediately.
@@ -50,6 +55,7 @@ func DefaultJobScheduleSettings() JobScheduleSettings {
 		DunningEnabled:         true,
 		DunningOffsets:         []int{-7, -3, 0, 1, 3},
 		DunningTime:            "08:00",
+		IsolirNotifyTime:       "08:00",
 		InvoiceIssuedTime:      "08:00",
 		OdpOutageEnabled:       false,
 		WeeklyReconcileEnabled: true,
@@ -87,6 +93,7 @@ func NormalizeJobScheduleSettings(cfg JobScheduleSettings) JobScheduleSettings {
 		cfg.DunningOffsets = def.DunningOffsets
 	}
 	cfg.DunningTime = NormalizeNotifyTime(cfg.DunningTime, def.DunningTime)
+	cfg.IsolirNotifyTime = NormalizeNotifyTime(cfg.IsolirNotifyTime, def.IsolirNotifyTime)
 	cfg.InvoiceIssuedTime = NormalizeNotifyTime(cfg.InvoiceIssuedTime, def.InvoiceIssuedTime)
 	if cfg.WeeklyReconcileWeekday < 0 || cfg.WeeklyReconcileWeekday > 6 {
 		cfg.WeeklyReconcileWeekday = def.WeeklyReconcileWeekday

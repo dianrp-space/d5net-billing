@@ -64,6 +64,10 @@ func (s *Service) QueueTicketTelegram(ctx context.Context, tenantID xid.ID, cust
 // QueueTenantTelegram sends an ops alert to the tenant's configured Telegram chat.
 // No-op (nil) when Telegram is disabled or not configured.
 func (s *Service) QueueTenantTelegram(ctx context.Context, tenantID xid.ID, body string) error {
+	return s.queueTenantTelegram(ctx, tenantID, body, nil)
+}
+
+func (s *Service) queueTenantTelegram(ctx context.Context, tenantID xid.ID, body string, at *time.Time) error {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return nil
@@ -72,7 +76,13 @@ func (s *Service) QueueTenantTelegram(ctx context.Context, tenantID xid.ID, body
 	if chatID == "" {
 		return nil
 	}
-	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "telegram", Recipient: chatID, Body: body, Event: "ops_telegram"})
+	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "telegram", Recipient: chatID, Body: body, Event: "ops_telegram", ScheduledAt: at})
+}
+
+// QueueIsolirOpsTelegram queues the internal isolir alert for the tenant's
+// configured isolir-notify time (Cronjob), not the moment isolir happens.
+func (s *Service) QueueIsolirOpsTelegram(ctx context.Context, tenantID xid.ID, body string) error {
+	return s.queueTenantTelegram(ctx, tenantID, body, s.isolirNotifyScheduledAt(ctx, tenantID))
 }
 
 // QueueTenantTelegramOnce sends at most one ops Telegram for (kind, key) per tenant.

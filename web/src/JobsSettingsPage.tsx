@@ -15,6 +15,7 @@ type JobSchedule = {
   dunning_enabled: boolean;
   dunning_offsets: number[];
   dunning_time?: string;
+  isolir_notify_time?: string;
   invoice_issued_time?: string;
   weekly_reconcile_enabled: boolean;
   weekly_reconcile_weekday: number;
@@ -217,6 +218,7 @@ export function JobsSettingsPage() {
       ...src,
       dunning_offsets: parseOffsets(offsetsText),
       dunning_time: normalizeTimeInput(src.dunning_time),
+      isolir_notify_time: normalizeTimeInput(src.isolir_notify_time),
       invoice_issued_time: normalizeTimeInput(src.invoice_issued_time),
       weekly_reconcile_weekday: Number(src.weekly_reconcile_weekday),
       weekly_reconcile_hour: Number(src.weekly_reconcile_hour),
@@ -406,10 +408,22 @@ export function JobsSettingsPage() {
                 hint={catalogHint(
                   catalog,
                   "isolir",
-                  "Suspend langganan lewat jatuh tempo + masa tenggang isolir, lalu retry resume.",
+                  "Suspend langganan lewat jatuh tempo + masa tenggang. Notifikasi menunggu jam kirim.",
                 )}
               >
-                <Label className="mb-1.5 block">Masa tenggang isolir (hari)</Label>
+                <Label className="mb-1.5 block">Jam kirim notif isolir</Label>
+                <Input
+                  type="time"
+                  value={normalizeTimeInput(form.isolir_notify_time)}
+                  onChange={(e) => patch("isolir_notify_time", e.target.value)}
+                  disabled={!form.isolir_enabled}
+                />
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  WhatsApp ke pelanggan dan alert Telegram dikirim jam ini (Timezone di Pengaturan → Umum).
+                  Isolir yang terjadi lebih awal menunggu sampai jam ini. Layanan tetap diisolir saat jatuh
+                  tempo, tidak menunggu jam kirim.
+                </p>
+                <Label className="mb-1.5 mt-3 block">Masa tenggang isolir (hari)</Label>
                 <Input
                   type="number"
                   min={0}

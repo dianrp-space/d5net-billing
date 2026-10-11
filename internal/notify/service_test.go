@@ -1,6 +1,9 @@
 package notify
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTemplateCatalogHasItemName(t *testing.T) {
 	t.Parallel()
@@ -26,6 +29,36 @@ func TestTemplateCatalogHasItemName(t *testing.T) {
 	}
 	if found != 4 {
 		t.Fatalf("expected 4 events, got %d", found)
+	}
+}
+
+func TestServiceIsolirTemplate(t *testing.T) {
+	t.Parallel()
+	var ev TemplateEvent
+	found := false
+	for _, item := range TemplateCatalog() {
+		if item.Event == "service_isolir" {
+			ev = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("missing service_isolir")
+	}
+	if len(ev.Channels) != 1 || ev.Channels[0] != "whatsapp" {
+		t.Fatalf("channels = %#v", ev.Channels)
+	}
+	body := applyVars(ev.DefaultBody, map[string]string{
+		"customer_name": "Budi",
+		"plan_name":     "Home 20",
+		"username":      "budi01",
+	})
+	if strings.Contains(body, "{{") {
+		t.Fatalf("unrendered body: %s", body)
+	}
+	if !strings.Contains(body, "budi01") || !strings.Contains(body, "diisolir") {
+		t.Fatalf("body = %s", body)
 	}
 }
 

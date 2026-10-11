@@ -36,6 +36,8 @@ const PREVIEW_SAMPLES: Record<string, string> = {
   invoice_number: "INV-D5N-2026090001-092026A3F9K2",
   amount: "150000",
   due_date: "10/09/2026",
+  username: "budi01",
+  balance: "25000",
   message: "(isi pesan broadcast)",
 };
 
@@ -711,6 +713,7 @@ const EVENT_LABELS: Record<string, string> = {
   invoice_issued: "Tagihan baru",
   invoice_reminder: "Pengingat tagihan",
   payment_confirmation: "Konfirmasi bayar",
+  service_isolir: "Layanan diisolir",
   ops_telegram: "Alert ops",
   monthly_report: "Laporan bulanan",
 };

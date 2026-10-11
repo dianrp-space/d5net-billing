@@ -20,6 +20,18 @@ func TestNormalizeJobScheduleCycleInterval(t *testing.T) {
 	}
 }
 
+func TestNormalizeIsolirNotifyTime(t *testing.T) {
+	if got := NormalizeJobScheduleSettings(JobScheduleSettings{}).IsolirNotifyTime; got != "08:00" {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := NormalizeJobScheduleSettings(JobScheduleSettings{IsolirNotifyTime: "7:30"}).IsolirNotifyTime; got != "07:30" {
+		t.Fatalf("7:30 = %q", got)
+	}
+	if got := NormalizeJobScheduleSettings(JobScheduleSettings{IsolirNotifyTime: "25:00"}).IsolirNotifyTime; got != "08:00" {
+		t.Fatalf("invalid = %q", got)
+	}
+}
+
 func TestNormalizeJobSchedulePollerInterval(t *testing.T) {
 	if got := NormalizeJobScheduleSettings(JobScheduleSettings{}).PollerIntervalSeconds; got != 300 {
 		t.Fatalf("zero = %d", got)

@@ -609,6 +609,18 @@ func TemplateCatalog() []TemplateEvent {
 			DefaultBody: "Halo {{customer_name}}, tagihan {{invoice_number}} sebesar Rp {{amount}} belum bisa dibayar otomatis karena saldo Anda Rp {{balance}} kurang. Topup saldo atau bayar via portal pelanggan.",
 		},
 		{
+			Event:       "service_isolir",
+			Label:       "Layanan diisolir",
+			Description: "Dikirim ke WhatsApp pelanggan saat langganan pertama kali diisolir otomatis. Jam kirim diatur di Cronjob.",
+			Channels:    []string{"whatsapp"},
+			Variables: []TemplateVariable{
+				{Name: "customer_name", Desc: "Nama pelanggan"},
+				{Name: "plan_name", Desc: "Nama paket/langganan"},
+				{Name: "username", Desc: "Username layanan (PPPoE)"},
+			},
+			DefaultBody: "Halo {{customer_name}}, layanan {{plan_name}} (user {{username}}) sedang diisolir karena tagihan belum dibayar. Bayar via portal pelanggan agar koneksi dipulihkan.",
+		},
+		{
 			Event:       "broadcast",
 			Label:       "Broadcast manual",
 			Description: "Dipakai untuk pesan massal dari tab Broadcast.",
@@ -771,4 +783,40 @@ func (s *Service) SendWalletInsufficient(ctx context.Context, tenantID xid.ID, p
 		return err
 	}
 	return s.Queue(ctx, Message{TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body, Event: "wallet_insufficient"})
+}
+
+// SendServiceIsolir notifies the customer on WhatsApp the first time a
+// subscription is auto-isolated. Empty phone is a no-op.
+func (s *Service) SendServiceIsolir(ctx context.Context, tenantID xid.ID, phone, customerName, planName, username string) error {
+	if strings.TrimSpace(phone) == "" {
+		return nil
+	}
+	vars := map[string]string{
+		"customer_name": customerName,
+		"plan_name":     notificationItemName(planName, ""),
+		"username":      strings.TrimSpace(username),
+	}
+	_, body, err := s.RenderTemplate(ctx, tenantID, "whatsapp", "service_isolir", vars)
+	if err != nil {
+		return err
+	}
+	return s.Queue(ctx, Message{
+		TenantID: tenantID, Channel: "whatsapp", Recipient: phone, Body: body,
+		Event: "service_isolir", ScheduledAt: s.isolirNotifyScheduledAt(ctx, tenantID),
+	})
+}
+
+// isolirNotifyScheduledAt returns today at the tenant's isolir-notify time when
+// still in the future, else nil (send immediately). Jam memakai Timezone tenant.
+func (s *Service) isolirNotifyScheduledAt(ctx context.Context, tenantID xid.ID) *time.Time {
+	hhmm := "08:00"
+	if s != nil && s.store != nil {
+		if cfg, err := s.store.GetJobScheduleSettings(ctx, tenantID); err == nil {
+			hhmm = store.NormalizeNotifyTime(cfg.IsolirNotifyTime, hhmm)
+		}
+	}
+	if s == nil || s.store == nil {
+		return nil
+	}
+	return store.ScheduledAtForNotifyTime(s.store.TenantNow(ctx, tenantID), hhmm)
 }
