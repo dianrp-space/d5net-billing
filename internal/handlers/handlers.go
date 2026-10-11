@@ -5292,6 +5292,63 @@ func collectPortalPayments(ctx context.Context, d *Deps, tenantID xid.ID, custs 
 	return payments
 }
 
+type portalSessionView struct {
+	Customer      store.Customer       `json:"customer"`
+	Customers     []store.Customer     `json:"customers"`
+	Subscriptions []store.Subscription `json:"subscriptions"`
+	Invoices      []store.Invoice      `json:"invoices"`
+	Payments      []store.Payment      `json:"payments"`
+	WalletBalance int64                `json:"wallet_balance"`
+	TenantSlug    string               `json:"tenant_slug"`
+	TenantName    string               `json:"tenant_name"`
+	PortalToken   string               `json:"portal_token"`
+}
+
+// buildPortalSession is the login payload, also used to refresh a restored
+// portal session so localStorage is not stuck on the snapshot from last login.
+func buildPortalSession(ctx context.Context, d *Deps, ten *store.Tenant, custs []*store.Customer) (portalSessionView, error) {
+	if ten == nil || len(custs) == 0 {
+		return portalSessionView{}, httpx.Unauthorized("invalid credentials")
+	}
+	byID := map[xid.ID]*store.Customer{}
+	customers := make([]store.Customer, 0, len(custs))
+	for _, c := range custs {
+		byID[c.ID] = c
+		customers = append(customers, *c)
+	}
+	var subs []store.Subscription
+	for _, c := range custs {
+		cid := c.ID
+		list, _, _ := d.Store.ListSubscriptions(ctx, ten.ID, "", &cid, 200, 0)
+		subs = append(subs, list...)
+	}
+	if subs == nil {
+		subs = []store.Subscription{}
+	}
+	var balance int64
+	for _, c := range custs {
+		if b, berr := d.Store.GetWallet(ctx, ten.ID, c.ID); berr == nil {
+			balance += b
+		}
+	}
+	view := portalSessionView{
+		Customer:      customers[0],
+		Customers:     customers,
+		Subscriptions: subs,
+		Invoices:      collectPortalInvoices(ctx, d, ten.ID, byID),
+		Payments:      collectPortalPayments(ctx, d, ten.ID, custs),
+		WalletBalance: balance,
+		TenantSlug:    ten.Slug,
+		TenantName:    ten.Name,
+	}
+	if d.Tokens != nil {
+		if tok, terr := d.Tokens.CreatePortalToken(ten.ID, customers[0].Phone); terr == nil {
+			view.PortalToken = tok
+		}
+	}
+	return view, nil
+}
+
 func registerPortal(api huma.API, d *Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "portal-login", Method: http.MethodPost, Path: "/api/portal/login",
@@ -5303,75 +5360,35 @@ func registerPortal(api huma.API, d *Deps) {
 			TenantID   xid.ID `json:"tenant_id,omitempty"`
 			TenantSlug string `json:"tenant_slug,omitempty"`
 		}
-	}) (*struct {
-		Body struct {
-			Customer      store.Customer       `json:"customer"`
-			Customers     []store.Customer     `json:"customers"`
-			Subscriptions []store.Subscription `json:"subscriptions"`
-			Invoices      []store.Invoice      `json:"invoices"`
-			Payments      []store.Payment      `json:"payments"`
-			WalletBalance int64                `json:"wallet_balance"`
-			TenantSlug    string               `json:"tenant_slug"`
-			TenantName    string               `json:"tenant_name"`
-			PortalToken   string               `json:"portal_token"`
-		}
-	}, error) {
+	}) (*struct{ Body portalSessionView }, error) {
 		ten, custs, err := authenticatePortalCustomers(ctx, d, input.Body.TenantSlug, input.Body.TenantID, input.Body.Phone, input.Body.Password)
 		if err != nil {
 			return nil, err
 		}
-		byID := map[xid.ID]*store.Customer{}
-		for _, c := range custs {
-			byID[c.ID] = c
+		body, err := buildPortalSession(ctx, d, ten, custs)
+		if err != nil {
+			return nil, err
 		}
-		customers := make([]store.Customer, 0, len(custs))
-		for _, c := range custs {
-			customers = append(customers, *c)
+		portalCtx := tenant.WithInfo(ctx, tenant.Info{ID: ten.ID, Role: "portal", UserID: body.Customer.ID})
+		auditEvent(portalCtx, d, AuditPortalLogin, "customer", &body.Customer.ID, map[string]any{"phone": body.Customer.Phone})
+		return &struct{ Body portalSessionView }{Body: body}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "portal-session", Method: http.MethodGet, Path: "/api/portal/session",
+		Summary: "Refresh the signed-in portal snapshot", Tags: []string{"Portal"},
+	}, func(ctx context.Context, input *struct {
+		Authorization string `header:"Authorization"`
+	}) (*struct{ Body portalSessionView }, error) {
+		ten, custs, err := authenticatePortalRequest(ctx, d, input.Authorization, "", "", "")
+		if err != nil {
+			return nil, err
 		}
-		var subs []store.Subscription
-		for _, c := range custs {
-			cid := c.ID
-			list, _, _ := d.Store.ListSubscriptions(ctx, ten.ID, "", &cid, 200, 0)
-			subs = append(subs, list...)
+		body, err := buildPortalSession(ctx, d, ten, custs)
+		if err != nil {
+			return nil, err
 		}
-		if subs == nil {
-			subs = []store.Subscription{}
-		}
-		custInvoices := collectPortalInvoices(ctx, d, ten.ID, byID)
-		payments := collectPortalPayments(ctx, d, ten.ID, custs)
-		var balance int64
-		for _, c := range custs {
-			if b, berr := d.Store.GetWallet(ctx, ten.ID, c.ID); berr == nil {
-				balance += b
-			}
-		}
-		out := &struct {
-			Body struct {
-				Customer      store.Customer       `json:"customer"`
-				Customers     []store.Customer     `json:"customers"`
-				Subscriptions []store.Subscription `json:"subscriptions"`
-				Invoices      []store.Invoice      `json:"invoices"`
-				Payments      []store.Payment      `json:"payments"`
-				WalletBalance int64                `json:"wallet_balance"`
-				TenantSlug    string               `json:"tenant_slug"`
-				TenantName    string               `json:"tenant_name"`
-				PortalToken   string               `json:"portal_token"`
-			}
-		}{}
-		out.Body.Customer = customers[0]
-		out.Body.Customers = customers
-		out.Body.Subscriptions = subs
-		out.Body.Invoices = custInvoices
-		out.Body.Payments = payments
-		out.Body.WalletBalance = balance
-		out.Body.TenantSlug = ten.Slug
-		out.Body.TenantName = ten.Name
-		if tok, terr := d.Tokens.CreatePortalToken(ten.ID, customers[0].Phone); terr == nil {
-			out.Body.PortalToken = tok
-		}
-		portalCtx := tenant.WithInfo(ctx, tenant.Info{ID: ten.ID, Role: "portal", UserID: customers[0].ID})
-		auditEvent(portalCtx, d, AuditPortalLogin, "customer", &customers[0].ID, map[string]any{"phone": customers[0].Phone})
-		return out, nil
+		return &struct{ Body portalSessionView }{Body: body}, nil
 	})
 
 	huma.Register(api, huma.Operation{

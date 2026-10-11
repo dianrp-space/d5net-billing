@@ -90,10 +90,15 @@ func (s *TokenService) ParseToken(tokenStr string) (*Claims, error) {
 	return claims, nil
 }
 
+// portalTokenTTL keeps a customer signed in across days. The portal UI
+// restores this token from localStorage; a short access TTL made that
+// snapshot look "logged in" while every API call failed.
+const portalTokenTTL = 30 * 24 * time.Hour
+
 func (s *TokenService) CreatePortalToken(tenantID uuid.UUID, phone string) (string, error) {
 	ttl := s.accessTTL
-	if ttl < 8*time.Hour {
-		ttl = 8 * time.Hour
+	if ttl < portalTokenTTL {
+		ttl = portalTokenTTL
 	}
 	exp := time.Now().Add(ttl)
 	claims := Claims{

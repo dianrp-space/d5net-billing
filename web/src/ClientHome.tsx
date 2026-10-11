@@ -400,12 +400,15 @@ function PortalTicketCard({
 }
 
 export function ClientHome({
-  data,
+  data: initialData,
   onLogout,
 }: {
   data: ClientPortalData;
   onLogout: () => void;
 }) {
+  // Sesi di localStorage adalah snapshot login. Tanpa ini, buka portal lagi
+  // (belum logout) tetap menampilkan data lama sampai login ulang.
+  const [data, setData] = useState(initialData);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -425,6 +428,40 @@ export function ClientHome({
   ];
   const [sidebarOpen, setSidebarOpenState] = useState(() => getSidebarOpen());
   const qc = useQueryClient();
+  const onLogoutRef = useRef(onLogout);
+  onLogoutRef.current = onLogout;
+
+  useEffect(() => {
+    const token = initialData.portal_token?.trim() || "";
+    if (!token) {
+      onLogoutRef.current();
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/portal/session", {
+          headers: { Authorization: `Bearer ${token}` },
+          credentials: "include",
+        });
+        if (cancelled) return;
+        if (res.status === 401) {
+          onLogoutRef.current();
+          return;
+        }
+        if (!res.ok) return;
+        const fresh = (await res.json()) as ClientPortalData;
+        if (cancelled || !fresh?.portal_token) return;
+        setClientSession(fresh);
+        setData(fresh);
+      } catch {
+        // Jaringan gagal: tetap pakai snapshot tersimpan.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialData.portal_token]);
 
   const branding = useQuery({
     queryKey: ["public-branding"],
@@ -584,14 +621,14 @@ export function ClientHome({
   }
 
   const ticketsQ = useQuery({
-    queryKey: ["portal-tickets", data.tenant_slug],
+    queryKey: ["portal-tickets", data.tenant_slug, data.portal_token],
     queryFn: () => api<{ data: PortalTicket[] }>("/api/portal/tickets", { headers: portalHeaders }),
     enabled: Boolean(data.portal_token),
     retry: false,
   });
 
   const subsQ = useQuery({
-    queryKey: ["portal-subscriptions", data.tenant_slug],
+    queryKey: ["portal-subscriptions", data.tenant_slug, data.portal_token],
     queryFn: () => api<{ data: PortalSub[] }>("/api/portal/subscriptions", { headers: portalHeaders }),
     enabled: Boolean(data.portal_token),
     retry: false,
@@ -601,7 +638,7 @@ export function ClientHome({
   const subscriptions = subsQ.isSuccess ? (subsQ.data?.data ?? []) : (data.subscriptions ?? []);
 
   const invoicesQ = useQuery({
-    queryKey: ["portal-invoices", data.tenant_slug],
+    queryKey: ["portal-invoices", data.tenant_slug, data.portal_token],
     queryFn: () =>
       api<{ data: NonNullable<ClientPortalData["invoices"]> }>("/api/portal/invoices", { headers: portalHeaders }),
     enabled: Boolean(data.portal_token),
@@ -612,7 +649,7 @@ export function ClientHome({
   const invoices = invoicesQ.isSuccess ? (invoicesQ.data?.data ?? []) : (data.invoices ?? []);
 
   const paymentsQ = useQuery({
-    queryKey: ["portal-payments", data.tenant_slug],
+    queryKey: ["portal-payments", data.tenant_slug, data.portal_token],
     queryFn: () =>
       api<{ data: NonNullable<ClientPortalData["payments"]> }>("/api/portal/payments", { headers: portalHeaders }),
     enabled: Boolean(data.portal_token),
@@ -629,7 +666,7 @@ export function ClientHome({
     transactions: { id: string; amount: number; type: string; reference?: string; description?: string; created_at: string }[];
   };
   const walletQ = useQuery({
-    queryKey: ["portal-wallet", data.tenant_slug],
+    queryKey: ["portal-wallet", data.tenant_slug, data.portal_token],
     queryFn: () => api<PortalWallet>("/api/portal/wallet", { headers: portalHeaders }),
     enabled: Boolean(data.portal_token),
     retry: false,
@@ -649,7 +686,7 @@ export function ClientHome({
   };
   const [usageMonth, setUsageMonth] = useState(() => currentMonthKey());
   const usageQ = useQuery({
-    queryKey: ["portal-usage", data.tenant_slug, usageMonth],
+    queryKey: ["portal-usage", data.tenant_slug, data.portal_token, usageMonth],
     queryFn: () => api<PortalUsage>(`/api/portal/usage?month=${encodeURIComponent(usageMonth)}`, { headers: portalHeaders }),
     enabled: Boolean(data.portal_token),
     retry: false,
@@ -741,7 +778,7 @@ export function ClientHome({
   }, [data, invoicesQ.data, paymentsQ.data, subsQ.data]);
 
   const plansQ = useQuery({
-    queryKey: ["portal-plans", data.tenant_slug],
+    queryKey: ["portal-plans", data.tenant_slug, data.portal_token],
     queryFn: () => api<{ data: PortalPlan[] }>("/api/portal/plans", { headers: portalHeaders }),
     enabled: Boolean(data.portal_token),
     retry: false,

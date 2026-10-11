@@ -53,3 +53,23 @@ func TestJWT(t *testing.T) {
 		t.Fatal(c)
 	}
 }
+
+func TestPortalTokenOutlivesAccessTTL(t *testing.T) {
+	ts := NewTokenService("secret", 15*time.Minute, 24*time.Hour)
+	tid := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	tok, err := ts.CreatePortalToken(tid, "081234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := ts.ParseToken(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Type != "portal" || c.ExpiresAt == nil {
+		t.Fatal(c)
+	}
+	life := time.Until(c.ExpiresAt.Time)
+	if life < 29*24*time.Hour {
+		t.Fatalf("portal token expires too soon: %s", life)
+	}
+}
